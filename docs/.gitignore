@@ -1,0 +1,17 @@
+# local design/process artifacts, not for GitHub
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.mp4
+*.mov
+*.webm
+* copy.*
+*.tmp
+
+# local planning docs, not for GitHub
+开发需求记录.md
+执行方案索引.md
+浏览器工作台功能与界面规划.md

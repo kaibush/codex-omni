@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install native module build tools
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Lint
+        run: pnpm lint
+
+  docker:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Set lowercase image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+            type=sha,prefix=sha-
+      - name: Set image platforms
+        id: platforms
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=linux/amd64" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set build arguments
+        id: build-args
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=CODEX_OMNI_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ steps.platforms.outputs.value }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ steps.build-args.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: docker
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install native module build tools
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Pack release tarball
+        run: pnpm pack:release
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" \
+              --verify-tag \
+              --generate-notes \
+              --title "${GITHUB_REF_NAME}"
+
+          shopt -s nullglob
+          assets=(release/codex-omni-*.tgz)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "No release tarball found in release/"
+            exit 1
+          fi
+          cp "${assets[0]}" release/codex-omni.tgz
+          gh release upload "${GITHUB_REF_NAME}" \
+            "${assets[@]}" \
+            release/codex-omni.tgz \
+            --clobber

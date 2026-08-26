@@ -1,0 +1,160 @@
+import { describe, expect, it } from "vitest";
+import { createNormalizer } from "./normalizer.js";
+const req = {
+  protocolVersion: 1 as const,
+  requestId: "r",
+  projectId: "p",
+  sessionId: "s",
+  cwd: "/tmp",
+  runtimeKey: "k",
+  codexHome: "/tmp/home",
+  message: "hi",
+  sandbox: "workspace-write" as const,
+  approvalPolicy: "never" as const,
+  networkAccessEnabled: true
+};
+describe("normalizer", () => {
+  it("maps command items", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.completed",
+      item: {
+        id: "x",
+        type: "command_execution",
+        command: "pwd",
+        aggregated_output: "/tmp",
+        exit_code: 0,
+        status: "completed"
+      }
+    });
+    expect(event?.type).toBe("tool.output");
+  });
+
+  it("keeps automatic reconnect attempts non-terminal", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "error",
+      message:
+        "Reconnecting... 4/5 (stream disconnected before completion: stream closed before response.completed)"
+    });
+    expect(event).toMatchObject({
+      type: "run.reconnecting",
+      payload: {
+        status: "running",
+        attempt: 4,
+        maxAttempts: 5,
+        reason: "stream disconnected before completion: stream closed before response.completed"
+      }
+    });
+  });
+
+  it("keeps unrecoverable stream errors terminal", () => {
+    const n = createNormalizer(req);
+    expect(n.map({ type: "error", message: "connection retries exhausted" })[0]).toMatchObject({
+      type: "run.failed",
+      payload: { status: "failed", message: "connection retries exhausted" }
+    });
+  });
+
+  it("keeps a terminal turn failure terminal even when its text mentions reconnecting", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.map({
+        type: "turn.failed",
+        error: { message: "Reconnecting... 5/5 (all retries exhausted)" }
+      })[0]
+    ).toMatchObject({
+      type: "run.failed",
+      payload: { status: "failed", message: "Reconnecting... 5/5 (all retries exhausted)" }
+    });
+  });
+});
+
+it("includes firstResponseAt on the first visible item event", () => {
+  const n = createNormalizer(req);
+  const started = n.initial();
+  const [delta] = n.map({
+    type: "item.updated",
+    item: { id: "m1", type: "agent_message", text: "hello" }
+  });
+  expect(typeof (started.payload as { startedAt?: number }).startedAt).toBe("number");
+  expect(delta).toMatchObject({
+    type: "assistant.delta",
+    payload: {
+      itemId: "m1",
+      delta: "hello"
+    }
+  });
+  expect(typeof (delta?.payload as { firstResponseAt?: number }).firstResponseAt).toBe("number");
+  expect((delta?.payload as { firstResponseAt: number }).firstResponseAt).toBeGreaterThanOrEqual(
+    (started.payload as { startedAt: number }).startedAt
+  );
+});
+
+it("uses an approval request as the first visible response", () => {
+  const n = createNormalizer(req);
+  const approval = n.approvalRequested({
+    approvalId: "approval-1",
+    itemId: "command-1",
+    tool: "command",
+    command: "pnpm test"
+  });
+  const [completed] = n.map({
+    type: "turn.completed",
+    usage: {
+      input_tokens: 1,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 1,
+      reasoning_output_tokens: 0
+    }
+  });
+  const firstResponseAt = (approval.payload as { firstResponseAt: number }).firstResponseAt;
+  expect(typeof firstResponseAt).toBe("number");
+  expect(completed?.payload).toMatchObject({ firstResponseAt });
+});
+
+it("emits incremental assistant and command patches", () => {
+  const n = createNormalizer(req);
+  const [first] = n.map({
+    type: "item.updated",
+    item: { id: "m1", type: "agent_message", text: "hel" }
+  });
+  const [second] = n.map({
+    type: "item.updated",
+    item: { id: "m1", type: "agent_message", text: "hello" }
+  });
+  const [done] = n.map({
+    type: "item.completed",
+    item: { id: "m1", type: "agent_message", text: "hello" }
+  });
+  expect(first?.payload).toMatchObject({ delta: "hel" });
+  expect(second?.payload).toMatchObject({ delta: "lo" });
+  expect((second?.payload as { text?: string }).text).toBeUndefined();
+  expect(done).toMatchObject({
+    type: "assistant.completed",
+    payload: { text: "hello" }
+  });
+  const [toolFirst] = n.map({
+    type: "item.updated",
+    item: {
+      id: "c1",
+      type: "command_execution",
+      command: "pwd",
+      aggregated_output: "/t",
+      status: "in_progress"
+    }
+  });
+  const [toolSecond] = n.map({
+    type: "item.updated",
+    item: {
+      id: "c1",
+      type: "command_execution",
+      command: "pwd",
+      aggregated_output: "/tmp",
+      status: "in_progress"
+    }
+  });
+  expect(toolFirst?.payload).toMatchObject({ outputDelta: "/t" });
+  expect(toolSecond?.payload).toMatchObject({ outputDelta: "mp" });
+});

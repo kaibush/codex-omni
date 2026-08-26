@@ -1,0 +1,22 @@
+node_modules
+dist
+coverage
+.env
+.DS_Store
+data/*.db*
+data/runtime
+apps/web/.vite
+playwright-report
+test-results
+
+.reference
+
+# generated
+*.tsbuildinfo
+apps/server/data/
+
+release/
+
+# local agent instructions, not for GitHub
+AGENTS.md
+agents.md
