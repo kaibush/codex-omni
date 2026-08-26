@@ -6,6 +6,12 @@ import {
 } from "@codex-omni/protocol";
 import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 
+const providerFailurePattern =
+  /\bHTTP\s*[45]\d{2}\b|\b(?:status|status[_ ]?code|code|response|error)\s*[:=]?\s*[45]\d{2}\b|\b[45]\d{2}\s+(?:unauthori[sz]ed|forbidden|bad request|not found|too many requests|internal server error|service unavailable)\b|api\s*key|unauthori[sz]ed|forbidden|invalid\s+(?:api\s*key|model|request|parameter)|model\s+(?:not\s+found|does\s+not\s+exist)|rate\s*limit|quota|insufficient\s+(?:quota|credits)|billing|payment required|authentication failed/i;
+
+const isProviderFailure = (message: string, reason?: string) =>
+  providerFailurePattern.test(message) || (reason ? providerFailurePattern.test(reason) : false);
+
 export function createNormalizer(request: BridgeRequest) {
   let seq = 0;
   const startedAt = Date.now();
@@ -164,13 +170,33 @@ export function createNormalizer(request: BridgeRequest) {
         ];
       if (event.type === "error") {
         const reconnecting = parseReconnectNotice(event.message);
-        if (reconnecting) {
+        const providerFailure = reconnecting
+          ? isProviderFailure(reconnecting.message, reconnecting.reason)
+          : isProviderFailure(event.message);
+        // The SDK reports the final exhausted attempt as a reconnect notice too.
+        // Treat it as terminal so the original stream error is not replaced by
+        // the worker's generic non-zero exit message. Provider failures are
+        // terminal regardless of whether their text contains a retry-looking
+        // prefix.
+        if (reconnecting && !providerFailure && reconnecting.attempt < reconnecting.maxAttempts) {
           return [
             envelope("run.reconnecting", {
               ...reconnecting,
               status: "running",
               startedAt,
               firstResponseAt
+            })
+          ];
+        }
+        if (reconnecting) {
+          return [
+            envelope("run.failed", {
+              message: reconnecting.reason ?? reconnecting.message,
+              reason: reconnecting.reason,
+              status: "failed",
+              startedAt,
+              firstResponseAt,
+              endedAt: Date.now()
             })
           ];
         }

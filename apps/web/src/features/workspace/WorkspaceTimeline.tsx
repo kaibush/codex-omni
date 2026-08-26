@@ -116,11 +116,13 @@ export function WorkspaceTimeline({
   sendNotice: string;
 }) {
   const detail = { isError: detailError, refetch: refetchDetail };
-  const displayEvents = compactTimelineEvents(events);
+  // A project route has no active session. Ignore the previous session's
+  // events during the route transition so they cannot mask the recent list.
+  const displayEvents = sessionId ? compactTimelineEvents(events) : [];
   const latestSession = recentSessions[0];
   return (
     <div
-      className={`chat-pane relative min-h-0 flex-1 overflow-hidden overscroll-none ${workspaceView === "chat" ? "" : "hidden"}`}
+      className={`chat-pane relative min-h-0 min-w-0 flex-1 overflow-hidden overscroll-none ${workspaceView === "chat" ? "" : "hidden"}`}
     >
       {messageHits.length > 1 ? (
         <div className="message-hit-bar">
@@ -200,9 +202,9 @@ export function WorkspaceTimeline({
           const overflow = container.scrollHeight - container.clientHeight;
           if (overflow > 48 && container.scrollTop < 72) void loadOlderMessages();
         }}
-        className="chat-scroll absolute inset-0 overflow-y-auto px-3 sm:px-5 lg:px-8"
+        className="chat-scroll absolute inset-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 sm:px-5 lg:px-8"
       >
-        <div className="chat-content-width mx-auto flex flex-col gap-2.5 py-3 sm:gap-3 sm:py-4">
+        <div className="chat-content-width mx-auto flex min-w-0 flex-col gap-2.5 py-3 sm:gap-3 sm:py-4">
           {hasOlderMessages && (
             <div className="flex justify-center pb-1">
               <Button
@@ -408,7 +410,7 @@ export function WorkspaceTimeline({
               </div>
             </div>
           )}
-          {runState?.status === "running" && (
+          {sessionId && runState?.status === "running" && (
             <RunStatusBubble state={runState} connection={connection} notice={sendNotice} />
           )}
         </div>

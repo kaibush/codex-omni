@@ -2,6 +2,7 @@ import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { Codex } from "@openai/codex-sdk";
 import { bridgeRequestSchema } from "@codex-omni/protocol";
+import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { createNormalizer } from "./normalizer.js";
 import { workerEnvironment } from "./provider-home.js";
 
@@ -66,6 +67,9 @@ try {
     sandboxMode: request.sandbox,
     approvalPolicy: request.approvalPolicy,
     networkAccessEnabled: request.networkAccessEnabled,
+    ...(request.sandbox === "workspace-write"
+      ? { additionalDirectories: gitMetadataWritableRoots(request.cwd) }
+      : {}),
     ...(request.model ? { model: request.model } : {})
   };
   const thread = request.threadId

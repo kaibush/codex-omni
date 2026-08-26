@@ -56,6 +56,50 @@ describe("normalizer", () => {
     });
   });
 
+  it("treats the final reconnect attempt as terminal and preserves its reason", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.map({
+        type: "error",
+        message: "Reconnecting... 5/5 (stream disconnected before completion: socket closed)"
+      })[0]
+    ).toMatchObject({
+      type: "run.failed",
+      payload: {
+        status: "failed",
+        message: "stream disconnected before completion: socket closed",
+        reason: "stream disconnected before completion: socket closed"
+      }
+    });
+  });
+
+  it("does not classify provider authentication failures as reconnecting", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.map({
+        type: "error",
+        message: "Reconnecting... 1/5 (401 Unauthorized: invalid API key)"
+      })[0]
+    ).toMatchObject({
+      type: "run.failed",
+      payload: {
+        status: "failed",
+        message: "401 Unauthorized: invalid API key",
+        reason: "401 Unauthorized: invalid API key"
+      }
+    });
+  });
+
+  it("does not classify provider rate limits as reconnecting", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.map({ type: "error", message: "429 rate limit exceeded; quota exhausted" })[0]
+    ).toMatchObject({
+      type: "run.failed",
+      payload: { status: "failed", message: "429 rate limit exceeded; quota exhausted" }
+    });
+  });
+
   it("keeps a terminal turn failure terminal even when its text mentions reconnecting", () => {
     const n = createNormalizer(req);
     expect(

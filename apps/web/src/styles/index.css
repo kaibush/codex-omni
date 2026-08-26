@@ -236,6 +236,7 @@ input[type="checkbox"] {
   color: var(--primary);
 }
 .chat-scroll {
+  max-width: 100%;
   scrollbar-gutter: stable;
   overflow-anchor: none;
   overscroll-behavior: none;
@@ -244,6 +245,7 @@ input[type="checkbox"] {
 .chat-content-width {
   width: 100%;
   max-width: 46rem;
+  min-width: 0;
 }
 @media (min-width: 1280px) {
   .chat-content-width {
@@ -862,6 +864,7 @@ button.composer-chip:hover,
 .event-card {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   flex-direction: column;
   gap: 0.4rem;
   border: 1px solid var(--border);
@@ -869,6 +872,10 @@ button.composer-chip:hover,
   background: var(--card);
   padding: 0.65rem 0.85rem 0.7rem;
   box-shadow: none;
+}
+.event-card > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .session-row,
 .git-file-row {
@@ -1061,6 +1068,8 @@ button.composer-chip:hover,
 }
 .event-title {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.78rem;
@@ -1091,6 +1100,7 @@ button.composer-chip:hover,
 .message-actions {
   display: inline-flex;
   min-width: 0;
+  max-width: 100%;
   flex: none;
   align-items: center;
   gap: 0.2rem;
@@ -1370,6 +1380,36 @@ button.composer-chip:hover,
   }
 }
 @media (max-width: 767px) {
+  .chat-pane,
+  .chat-scroll {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .event-title {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .message-event-title {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .message-actions {
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    scrollbar-width: none;
+  }
+  .message-actions::-webkit-scrollbar {
+    display: none;
+  }
+  .message-event-title > .provider-pill {
+    max-width: 5rem;
+  }
+  .message-event-title > .event-time {
+    flex: none;
+  }
   .event-card {
     border-radius: 0.8rem;
     padding: 0.55rem 0.75rem 0.6rem;

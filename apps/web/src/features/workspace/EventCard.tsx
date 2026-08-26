@@ -365,14 +365,14 @@ export function EventCard({
   if (item.kind === "user")
     return (
       <article data-message-id={item.id} className={`event-card event-card-user${highlightClass}`}>
-        <header className="event-title min-w-0">
+        <header className="event-title message-event-title min-w-0">
           <User className="size-4" />
           <span>你</span>
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}
-          <span className="message-actions ml-auto">
-            {item.createdAt ? <EventTime value={item.createdAt} /> : null}
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+          <span className="message-actions">
             {onEdit ? (
               <button
                 type="button"
@@ -479,15 +479,15 @@ export function EventCard({
   if (item.kind === "assistant")
     return (
       <article data-message-id={item.id} className={`event-card event-card-bot${highlightClass}`}>
-        <header className="event-title min-w-0">
+        <header className="event-title message-event-title min-w-0">
           <Bot className="size-4" />
           <span>Codex</span>
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}
           {item.streaming && <span className="stream-dot" />}
-          <span className="message-actions ml-auto">
-            {item.createdAt ? <EventTime value={item.createdAt} /> : null}
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+          <span className="message-actions">
             {onQuote ? (
               <button
                 type="button"

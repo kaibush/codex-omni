@@ -425,7 +425,7 @@ export function Workspace() {
     historyLoadingRef.current = false;
     historyExpanded.current = false;
     historyScrollSnapshot.current = null;
-  }, [sessionId]);
+  }, [projectId, sessionId]);
   useEffect(() => {
     const key = sessionId ? `codex-omni:draft:${projectId}:${sessionId}` : "";
     draftSessionKey.current = key;
@@ -924,7 +924,11 @@ export function Workspace() {
   }, [sessionId, projectId, qc, reconnectNonce]);
   const activeProject = projects.data?.find((p) => p.id === projectId);
   const activeSession =
-    detail.data?.session ?? sessions.data?.find((s) => s.id === sessionId) ?? null;
+    (detail.data?.session?.id === sessionId && detail.data.session.projectId === projectId
+      ? detail.data.session
+      : null) ??
+    sessions.data?.find((s) => s.id === sessionId && s.projectId === projectId) ??
+    null;
   const sessionLoading = Boolean(sessionId) && detail.isPending;
   const selectedProvider = providers.data?.find((p) => p.id === providerId) ?? null;
   const loadOlderMessages = useCallback(async () => {
