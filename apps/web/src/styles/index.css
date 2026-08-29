@@ -1228,13 +1228,51 @@ button.composer-chip:hover,
   white-space: pre-wrap;
 }
 .markdown-code-block {
+  display: flow-root;
   max-width: 100%;
   overflow: hidden;
-  margin: 0.6rem 0;
+  margin: 0.85rem 0;
   border: 1px solid color-mix(in oklab, var(--background) 14%, transparent);
   border-radius: 0.75rem;
   background: var(--foreground);
   color: var(--background);
+}
+.markdown-code-inline-block {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.65rem 0;
+  border: 1px solid color-mix(in oklab, var(--background) 14%, transparent);
+  border-radius: 0.65rem;
+  background: var(--foreground);
+  padding: 0.25rem 0.35rem 0.25rem 0.7rem;
+  color: var(--background);
+}
+.markdown-code-inline-block code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.markdown-code-inline-block .copy-button-code {
+  flex: none;
+}
+.dark .markdown-code-inline-block {
+  border-color: var(--border);
+  background: color-mix(in oklab, var(--background) 70%, black);
+  color: var(--foreground);
+}
+.markdown p + .markdown-code-block {
+  margin-top: 1rem;
+}
+.markdown-code-block + p {
+  margin-top: 1rem;
 }
 .dark .markdown-code-block {
   border-color: var(--border);

@@ -178,6 +178,7 @@ function MarkdownCodeBlock({
   const lines = code.split("\n");
   const collapsed = lines.length > 24 && !expanded;
   const shown = collapsed ? lines.slice(0, 24).join("\n") : code;
+  const compactSingleLine = lines.length === 1 && code.length <= 160;
   if (language.toLowerCase() === "mermaid") {
     return (
       <div className="markdown-code-block mermaid-code-block">
@@ -186,6 +187,14 @@ function MarkdownCodeBlock({
           <CopyButton text={code} variant="code" />
         </div>
         <MermaidBlock code={code} />
+      </div>
+    );
+  }
+  if (compactSingleLine) {
+    return (
+      <div className="markdown-code-inline-block">
+        <code>{code}</code>
+        <CopyButton text={code} variant="code" />
       </div>
     );
   }
