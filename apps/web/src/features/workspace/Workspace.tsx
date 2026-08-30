@@ -1796,8 +1796,15 @@ export function Workspace() {
       undefined);
   const runTokenLabel = formatTokens(runTokenCount);
   const saveWorkspaceSettings = async (next: WorkspaceSettings) => {
-    await api("/api/settings", { method: "PUT", body: JSON.stringify(next) });
+    const previous = qc.getQueryData(["settings"]);
     qc.setQueryData(["settings"], next);
+    try {
+      await api("/api/settings", { method: "PUT", body: JSON.stringify(next) });
+    } catch (error) {
+      qc.setQueryData(["settings"], previous);
+      toast.error(error instanceof Error ? error.message : "保存设置失败");
+      throw error;
+    }
   };
   const cancelTurn = () => {
     if (socket.current?.readyState === WebSocket.OPEN) {
@@ -1961,6 +1968,7 @@ export function Workspace() {
               runState={runState}
               connection={connection}
               sendNotice={sendNotice}
+              saveWorkspaceSettings={saveWorkspaceSettings}
             />
             <WorkspaceComposer
               workspaceView={workspaceView}

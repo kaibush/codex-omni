@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyRuntimeNotice,
   cleanCommand,
   collabCardDetails,
   collabToolLabel,
   isCollabTool,
   isPlanTool,
+  isRuntimePlaceholder,
+  isUserInputTool,
+  isViewImageTool,
+  isWriteStdinTool,
   parsePlanItems,
+  parseUserInputQuestions,
   toolCallOutput,
   toolCallRequest,
   toolCallStatusLabel,
-  toolCallTitle
+  toolCallTitle,
+  viewImagePath,
+  writeStdinDetails
 } from "./tool-event";
 
 describe("cleanCommand", () => {
@@ -90,6 +98,11 @@ describe("plan and collab tool detection", () => {
     expect(isCollabTool({ tool: "mcp__codex__spawn_agent" })).toBe(true);
     expect(isCollabTool({ tool: "command" })).toBe(false);
     expect(collabToolLabel({ tool: "spawn_agent" })).toBe("启动子代理");
+    expect(isCollabTool({ tool: "wait", input: { cell_id: "none", yield_time_ms: 1000 } })).toBe(
+      false
+    );
+    expect(isCollabTool({ tool: "wait_agent", receiverThreadIds: ["agent-1"] })).toBe(true);
+    expect(isCollabTool({ tool: "wait", targets: ["agent-1"] })).toBe(true);
   });
 });
 
@@ -120,5 +133,91 @@ describe("collabCardDetails", () => {
       receivers: ["agent-1"],
       result: "Sun Aug 30 05:22:22 UTC 2026"
     });
+    expect(
+      collabCardDetails({
+        tool: "close_agent",
+        input: { target: "agent-1" },
+        output: JSON.stringify({
+          previous_status: { completed: "/root/project/github/kaibush/codex-omni" }
+        })
+      })
+    ).toMatchObject({
+      receivers: ["agent-1"],
+      result: "/root/project/github/kaibush/codex-omni"
+    });
+  });
+});
+
+describe("runtime notices", () => {
+  it("classifies metadata, service tier, heads-up and failures", () => {
+    expect(
+      classifyRuntimeNotice({
+        tool: "runtime_error",
+        message: "Model metadata for `grok-4.6` not found. Defaulting to fallback metadata."
+      })
+    ).toMatchObject({ title: "模型提示", level: "warning" });
+    expect(
+      classifyRuntimeNotice({
+        tool: "runtime_error",
+        message:
+          "Configured service tier `priority` is not advertised as supported for model `grok-4.6`."
+      })
+    ).toMatchObject({ title: "服务层级", level: "warning" });
+    expect(
+      classifyRuntimeNotice({
+        tool: "runtime_error",
+        message:
+          "Heads up: Long threads and multiple compactions can cause the model to be less accurate."
+      })
+    ).toMatchObject({ title: "会话提示", level: "warning" });
+    expect(classifyRuntimeNotice({ tool: "runtime_error", message: "tool failed" })).toMatchObject({
+      title: "运行失败",
+      level: "error"
+    });
+    expect(classifyRuntimeNotice({ tool: "runtime_error", message: "" })).toBeNull();
+    expect(isRuntimePlaceholder({ tool: "runtime_error", message: "" })).toBe(true);
+    expect(
+      classifyRuntimeNotice(
+        { message: "Reconnecting... 2/5 (stream closed before response.completed)" },
+        undefined,
+        "error"
+      )
+    ).toBeNull();
+  });
+});
+
+describe("special tool parsers", () => {
+  it("parses request_user_input questions", () => {
+    const data = {
+      tool: "request_user_input",
+      questions: [
+        {
+          id: "pop3_plan",
+          header: "POP3方案",
+          question: "你要用哪种方案支持 POP3？",
+          options: [{ label: "VPS 邮件服务", description: "部署完整邮件栈" }]
+        }
+      ]
+    };
+    expect(isUserInputTool(data)).toBe(true);
+    expect(parseUserInputQuestions(data)).toMatchObject([
+      { id: "pop3_plan", header: "POP3方案", options: [{ label: "VPS 邮件服务" }] }
+    ]);
+  });
+
+  it("reads view_image paths and write_stdin details", () => {
+    expect(isViewImageTool({ tool: "view_image", path: "/tmp/gamepad.png" })).toBe(true);
+    expect(viewImagePath({ tool: "view_image", path: "/tmp/gamepad.png" })).toBe(
+      "/tmp/gamepad.png"
+    );
+    expect(
+      writeStdinDetails({
+        tool: "write_stdin",
+        session_id: 79822,
+        chars: "yes\n",
+        yield_time_ms: 15000
+      })
+    ).toMatchObject({ sessionId: "79822", text: "yes\n", yieldTimeMs: 15000 });
+    expect(isWriteStdinTool({ tool: "write_stdin" })).toBe(true);
   });
 });

@@ -22,7 +22,6 @@ const COLLAB_TOOL_NAMES = new Set([
   "collab",
   "spawn_agent",
   "wait_agent",
-  "wait",
   "send_input",
   "close_agent",
   "resume_agent",
@@ -69,12 +68,29 @@ function isPlanLikeItem(type: string, tool: string) {
   );
 }
 
-function isCollabLikeItem(type: string, tool: string) {
-  const normalizedTool = compactType(tool.split("__").at(-1) ?? tool);
+function hasCollabTargets(record: Record<string, unknown>) {
+  const nested = asRecord(record.input) ?? asRecord(record.arguments) ?? {};
+  const keys = [
+    "targets",
+    "target",
+    "receiver_thread_ids",
+    "receiverThreadIds",
+    "receiver_thread_id",
+    "receiverThreadId",
+    "agent_id",
+    "agentId"
+  ];
+  return keys.some((key) => asIdList(record[key]).length > 0 || asIdList(nested[key]).length > 0);
+}
+
+function isCollabLikeItem(type: string, tool: string, record: Record<string, unknown>) {
+  const rawTool = tool.split("__").at(-1) ?? tool;
+  const normalizedTool = compactType(rawTool);
+  if (COLLAB_ITEM_TYPES.has(type) || type.toLowerCase().includes("collab")) return true;
+  if (normalizedTool === "wait") return hasCollabTargets(record);
   return (
-    COLLAB_ITEM_TYPES.has(type) ||
-    type.toLowerCase().includes("collab") ||
     COLLAB_TOOL_NAMES.has(tool) ||
+    COLLAB_TOOL_NAMES.has(rawTool) ||
     COLLAB_TOOL_NAMES.has(normalizedTool)
   );
 }
@@ -100,7 +116,7 @@ function mapUnknownItem(
       })
     ];
   }
-  const collab = isCollabLikeItem(type, tool);
+  const collab = isCollabLikeItem(type, tool, record);
   const payload = {
     itemId: String(record.id ?? ""),
     tool: collab ? tool || "collab" : tool || type,
@@ -112,7 +128,11 @@ function mapUnknownItem(
         record.receiver_thread_id ??
         record.receiverThreadId ??
         record.new_thread_id ??
-        record.newThreadId
+        record.newThreadId ??
+        record.targets ??
+        record.target ??
+        record.agent_id ??
+        record.agentId
     ),
     agentStatus: record.agent_status ?? record.agentStatus ?? record.agents_states,
     status,

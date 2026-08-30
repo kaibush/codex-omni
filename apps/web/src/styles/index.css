@@ -958,6 +958,38 @@ button.composer-chip:hover,
   white-space: pre-wrap;
   word-break: break-word;
 }
+.notice-card {
+  border-color: color-mix(in oklab, var(--border) 70%, transparent);
+  background: color-mix(in oklab, var(--muted) 55%, var(--card));
+}
+.notice-card.is-error {
+  border-color: rgb(254 202 202);
+  background: rgb(254 242 242 / 0.6);
+}
+.dark .notice-card.is-error {
+  border-color: rgb(127 29 29 / 0.5);
+  background: rgb(127 29 29 / 0.2);
+}
+.notice-card-body {
+  margin: 0.35rem 0 0;
+  padding: 0 0.2rem 0.15rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted-foreground);
+}
+.notice-card-body.is-error {
+  color: var(--foreground);
+}
+.notice-image {
+  display: block;
+  max-width: 100%;
+  max-height: 16rem;
+  border-radius: 0.5rem;
+  object-fit: contain;
+  background: var(--muted);
+}
 .tool-shell {
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1486,6 +1518,9 @@ button.composer-chip:hover,
     max-width: 100%;
     overflow-x: hidden;
   }
+  .chat-pane:has(.timeline-view-toggle) .chat-content-width {
+    padding-top: 3rem;
+  }
   .event-title {
     flex-wrap: nowrap;
     white-space: nowrap;
@@ -1730,6 +1765,35 @@ button.composer-chip:hover,
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.timeline-view-toggle {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 30;
+  display: inline-flex;
+  height: 2rem;
+  align-items: center;
+  gap: 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card);
+  padding: 0.15rem;
+}
+.timeline-view-toggle button {
+  height: 1.7rem;
+  border-radius: 0.4rem;
+  padding: 0 0.65rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.timeline-view-toggle button:hover:not(.is-active) {
+  color: var(--foreground);
+}
+.timeline-view-toggle button.is-active {
+  background: var(--muted);
+  color: var(--foreground);
+}
 .timeline-outline-toggle {
   display: none;
   position: absolute;
@@ -1764,6 +1828,9 @@ button.composer-chip:hover,
   gap: 0.15rem;
 }
 @media (min-width: 768px) {
+  .timeline-view-toggle {
+    right: 3.25rem;
+  }
   .timeline-outline-toggle {
     display: inline-flex;
   }
@@ -1811,6 +1878,11 @@ button.composer-chip:hover,
   background: #38bdf8;
   border-color: #38bdf8;
   color: #082f49;
+}
+.timeline-outline-index.kind-reasoning {
+  background: #94a3b8;
+  border-color: #94a3b8;
+  color: #0f172a;
 }
 .timeline-outline-index.kind-file {
   background: #a855f7;

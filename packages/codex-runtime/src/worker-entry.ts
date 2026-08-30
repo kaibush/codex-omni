@@ -7,6 +7,15 @@ import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { createNormalizer } from "./normalizer.js";
 import { workerEnvironment } from "./provider-home.js";
 
+function numericUsage(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "number" && Number.isFinite(entry)) result[key] = entry;
+  }
+  return result;
+}
+
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const line = await new Promise<string>((resolve, reject) => {
   rl.once("line", resolve);
@@ -56,7 +65,7 @@ const requestApproval = (item: { id: string; command: string }) => {
 };
 send(normalizer.initial());
 const collabTailer = createCollabRolloutTailer(request.codexHome);
-if (request.threadId) collabTailer.setThreadId(request.threadId);
+if (request.threadId) collabTailer.setThreadId(request.threadId, { fromEnd: true });
 const flushCollab = () => {
   for (const event of collabTailer.flush()) send(normalizer.toolEvent(event));
 };
@@ -97,9 +106,21 @@ try {
       const allowed = await requestApproval(event.item);
       if (!allowed) throw new Error("Command denied by user");
     }
-    if (event.type === "thread.started") collabTailer.setThreadId(event.thread_id);
+    if (event.type === "thread.started")
+      collabTailer.setThreadId(event.thread_id, { fromEnd: Boolean(request.threadId) });
+    if (event.type === "turn.completed") flushCollab();
     for (const mapped of normalizer.map(event)) {
-      send(mapped);
+      if (mapped.type === "turn.completed") {
+        const latest = collabTailer.latestTokenUsage();
+        if (!latest) send(mapped);
+        else {
+          const payload = { ...((mapped.payload ?? {}) as Record<string, unknown>) };
+          payload.usage = { ...numericUsage(payload.usage), ...numericUsage(latest) };
+          send({ ...mapped, payload });
+        }
+      } else {
+        send(mapped);
+      }
       if (mapped.type === "run.failed") terminalFailure = true;
     }
     flushCollab();

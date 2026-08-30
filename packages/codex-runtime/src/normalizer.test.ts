@@ -112,6 +112,62 @@ describe("normalizer", () => {
     });
   });
 
+  it("does not treat wait without targets as collab", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.started",
+      item: {
+        id: "pty-wait",
+        type: "unknown",
+        tool: "wait",
+        input: { cell_id: "cell-1", yield_time_ms: 250 }
+      } as never
+    });
+    expect(event).toMatchObject({
+      type: "tool.started",
+      payload: { itemId: "pty-wait", tool: "wait" }
+    });
+    expect((event?.payload as { tool?: string }).tool).not.toBe("collab");
+  });
+
+  it("still treats wait_agent as collab", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.started",
+      item: {
+        id: "wait-agent-1",
+        type: "unknown",
+        tool: "wait_agent",
+        targets: ["agent-1"]
+      } as never
+    });
+    expect(event).toMatchObject({
+      type: "tool.started",
+      payload: {
+        itemId: "wait-agent-1",
+        tool: "wait_agent",
+        receiverThreadIds: ["agent-1"]
+      }
+    });
+  });
+
+  it("maps view_image unknown items to tool view_image", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.started",
+      item: {
+        id: "img-1",
+        type: "unknown",
+        name: "view_image",
+        path: "/tmp/shot.png"
+      } as never
+    });
+    expect(event).toMatchObject({
+      type: "tool.started",
+      payload: { itemId: "img-1", tool: "view_image" }
+    });
+  });
+
   it("skips empty error placeholders used for unsupported exec items", () => {
     const n = createNormalizer(req);
     expect(

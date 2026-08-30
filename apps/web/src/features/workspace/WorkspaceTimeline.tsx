@@ -18,7 +18,12 @@ import type { ConnectionState, RunState } from "./workspace-model";
 import type { ComposerAttachment } from "./composer-attachments";
 import { snippetFileName } from "./markdown-refs";
 import type { WorkspaceSettings } from "./SettingsDialog";
-import { compactTimelineEvents } from "@/lib/timeline";
+import {
+  displayTimelineEvents,
+  isTimelineView,
+  TIMELINE_VIEW_OPTIONS,
+  type TimelineView
+} from "@/lib/timeline";
 
 export function WorkspaceTimeline({
   workspaceView,
@@ -65,7 +70,8 @@ export function WorkspaceTimeline({
   onOpenSession,
   runState,
   connection,
-  sendNotice
+  sendNotice,
+  saveWorkspaceSettings
 }: {
   workspaceView: "chat" | "files" | "git" | "terminal";
   messageHits: Array<{ projectId: string; sessionId: string; messageId: string }>;
@@ -114,11 +120,19 @@ export function WorkspaceTimeline({
   runState: RunState | null;
   connection: ConnectionState;
   sendNotice: string;
+  saveWorkspaceSettings: (settings: WorkspaceSettings) => Promise<void>;
 }) {
   const detail = { isError: detailError, refetch: refetchDetail };
+  const timelineView: TimelineView = isTimelineView(workspaceSettings.timelineView)
+    ? workspaceSettings.timelineView
+    : "folded";
   // A project route has no active session. Ignore the previous session's
   // events during the route transition so they cannot mask the recent list.
-  const displayEvents = sessionId ? compactTimelineEvents(events) : [];
+  const displayEvents = sessionId ? displayTimelineEvents(events, timelineView) : [];
+  const showReasoning = timelineView !== "folded" || workspaceSettings.showReasoning;
+  const outlineEvents = showReasoning
+    ? displayEvents
+    : displayEvents.filter((item) => item.kind !== "reasoning");
   const latestSession = recentSessions[0];
   return (
     <div
@@ -154,8 +168,27 @@ export function WorkspaceTimeline({
           </button>
         </div>
       ) : null}
+      {sessionId ? (
+        <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
+          {TIMELINE_VIEW_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={timelineView === option.value ? "is-active" : undefined}
+              aria-pressed={timelineView === option.value}
+              title={option.hint}
+              onClick={() => {
+                if (option.value === timelineView) return;
+                void saveWorkspaceSettings({ ...workspaceSettings, timelineView: option.value });
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <TimelineOutline
-        items={displayEvents}
+        items={outlineEvents}
         activeId={highlightMessageId}
         onJump={(id) => setHighlightMessageId(id)}
       />
@@ -236,13 +269,26 @@ export function WorkspaceTimeline({
           ) : displayEvents.length ? (
             displayEvents.map((item) => (
               <EventCard
-                key={item.id}
+                key={`${timelineView}:${item.id}`}
                 item={item}
                 highlighted={highlightMessageId === item.id}
-                defaultOpen={workspaceSettings.expandToolCalls && item.streaming !== false}
-                hidden={item.kind === "reasoning" && !workspaceSettings.showReasoning}
+                defaultOpen={
+                  timelineView === "expanded" ||
+                  (item.kind !== "reasoning" &&
+                    workspaceSettings.expandToolCalls &&
+                    item.streaming !== false)
+                }
+                hidden={item.kind === "reasoning" && !showReasoning}
                 showProviderLabel={workspaceSettings.showProviderLabels}
                 providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
+                projectId={activeSession?.projectId}
+                onReply={(text) => void submitMessage(text)}
+                onOpenThread={(threadId) => {
+                  const match = recentSessions.find((session) => session.threadId === threadId);
+                  if (!match) return false;
+                  onOpenSession(match.id);
+                  return true;
+                }}
                 onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
                 onEdit={
                   item.kind === "user"

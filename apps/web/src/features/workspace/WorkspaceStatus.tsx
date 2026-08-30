@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleAlert,
   Clock3,
+  Gauge,
   LoaderCircle,
   Lock,
   Pencil,
@@ -24,6 +25,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { parseContextUsage } from "@/lib/context-usage";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import { taskStatusLabel, type TaskStatus } from "@/lib/task-state";
 import type { WorkspaceSettings } from "@/features/workspace/SettingsDialog";
@@ -187,6 +189,7 @@ export function RunSummary({ state }: { state: RunState }) {
   const usage = state.usage ?? {};
   const inputTokens = usage.input_tokens ?? usage.inputTokens;
   const outputTokens = usage.output_tokens ?? usage.outputTokens;
+  const contextUsage = parseContextUsage(state.usage);
   const appearance = runStatusAppearance(state.status);
   const StatusIcon = appearance.icon;
   const inputLabel = inputTokens != null ? formatTokens(Number(inputTokens)) : null;
@@ -223,6 +226,19 @@ export function RunSummary({ state }: { state: RunState }) {
         >
           <ArrowUpFromLine className="size-3.5" />
           {outputLabel}
+        </span>
+      ) : null}
+      {contextUsage ? (
+        <span
+          className={
+            contextUsage.percent >= 80
+              ? "composer-summary-item text-amber-600"
+              : "composer-summary-item"
+          }
+          title={contextUsage.title}
+        >
+          <Gauge className="size-3.5" />
+          {contextUsage.label}
         </span>
       ) : null}
     </div>

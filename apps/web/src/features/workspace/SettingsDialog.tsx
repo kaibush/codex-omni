@@ -5,6 +5,7 @@ import { LogOut, Plus, Save, Settings as SettingsIcon, Trash2 } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import type { TimelineView } from "@/lib/timeline";
 import type { PromptTemplate, Provider } from "@/types";
 
 export type WorkspaceSettings = {
@@ -13,6 +14,7 @@ export type WorkspaceSettings = {
   networkAccessEnabled: boolean;
   showReasoning: boolean;
   expandToolCalls: boolean;
+  timelineView: TimelineView;
   sendWithEnter: boolean;
   showProviderLabels: boolean;
   executionMode: "plan" | "execute";
@@ -25,6 +27,7 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   networkAccessEnabled: true,
   showReasoning: false,
   expandToolCalls: true,
+  timelineView: "folded",
   sendWithEnter: true,
   showProviderLabels: true,
   executionMode: "execute",
@@ -121,9 +124,7 @@ export function SettingsDialog({
         <DialogTitle className="flex items-center gap-2">
           <SettingsIcon /> 工作区设置
         </DialogTitle>
-        <DialogDescription>
-          这些设置会保存到当前工作台，并作用于后续 Codex 对话。
-        </DialogDescription>
+        <DialogDescription>这些设置会保存到当前工作台，并作用于后续 Codex 对话。</DialogDescription>
         <div className="mt-5 space-y-5">
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -307,6 +308,23 @@ export function SettingsDialog({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               对话显示
             </h3>
+            <label className="field-label mt-2">
+              时间线
+              <select
+                className="field"
+                value={draft.timelineView}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    timelineView: event.target.value as WorkspaceSettings["timelineView"]
+                  })
+                }
+              >
+                <option value="folded">折叠 · 合并思考和连续执行</option>
+                <option value="flat">平铺 · 列出全部原始 Think 和工具</option>
+                <option value="expanded">展开 · 列出并打开全部原始事件</option>
+              </select>
+            </label>
             <div className="mt-2 divide-y rounded-xl border bg-card">
               {(
                 [

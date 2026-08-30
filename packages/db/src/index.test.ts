@@ -156,6 +156,15 @@ describe("Store", () => {
       itemId: "request-2:tool-1"
     });
     expect(db.listMessages(session.id)).toHaveLength(2);
+    db.upsertEventMessage({
+      sessionId: session.id,
+      role: "tool",
+      content: "spawned",
+      eventType: "tool.output",
+      itemId: "jsonl:call-spawn",
+      createdAt: 1_788_070_945_680
+    });
+    expect(db.getMessageByItemId(session.id, "jsonl:call-spawn")?.createdAt).toBe(1_788_070_945_680);
   });
 
   it("pages backward through messages without gaps when timestamps match", () => {

@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { ListTree } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { collabToolLabel, isCollabTool, isPlanTool } from "@/lib/tool-event";
+import {
+  classifyRuntimeNotice,
+  collabToolLabel,
+  isCollabTool,
+  isPlanTool,
+  isUserInputTool,
+  isViewImageTool,
+  isWriteStdinTool
+} from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 
 const STORAGE_KEY = "codex-omni:timeline-outline";
@@ -13,10 +21,20 @@ function outlineTitle(item: TimelineItem) {
     return `Codex：${(item.text ?? "").split("\n")[0]?.slice(0, 24) || "回复"}`;
   if (item.kind === "file") return "文件：变更";
   if (item.kind === "approval") return "审批：待确认";
-  if (item.kind === "error") return "错误：运行失败";
+  if (item.kind === "reasoning") {
+    return `思考：${(item.text ?? "").split("\n")[0]?.slice(0, 24) || "Thinking"}`;
+  }
+  if (item.kind === "error") {
+    return `错误：${classifyRuntimeNotice(item.data, item.text, item.kind)?.title ?? "运行失败"}`;
+  }
   if (item.kind === "tool") {
+    const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
+    if (notice) return notice.title;
     if (isPlanTool(item.data)) return "计划";
     if (isCollabTool(item.data)) return collabToolLabel(item.data);
+    if (isUserInputTool(item.data)) return "需要你选择";
+    if (isViewImageTool(item.data)) return "查看图片";
+    if (isWriteStdinTool(item.data)) return "向命令输入";
     return `命令：${String(item.data?.command ?? "工具调用").slice(0, 24)}`;
   }
   if (item.kind === "activity") {
@@ -53,7 +71,9 @@ export function TimelineOutline({
   onJump: (id: string) => void;
 }) {
   const entries = items.filter((item) =>
-    ["user", "assistant", "activity", "tool", "file", "approval", "error"].includes(item.kind)
+    ["user", "assistant", "activity", "tool", "file", "approval", "error", "reasoning"].includes(
+      item.kind
+    )
   );
   const [open, setOpen] = useState(defaultOpen);
   if (entries.length < 3) return null;

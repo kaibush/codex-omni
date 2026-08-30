@@ -14,11 +14,15 @@ import {
   Check,
   ChevronRight,
   CircleAlert,
+  CircleHelp,
   Copy,
   Download,
   FileCode2,
   FilePlus,
   GitFork,
+  Image,
+  Info,
+  Keyboard,
   Link2,
   ListChecks,
   LoaderCircle,
@@ -45,15 +49,24 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { useTheme } from "@/context/theme-provider";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import {
+  classifyRuntimeNotice,
   collabCardDetails,
   collabToolLabel,
   isCollabTool,
   isCommandTool,
+  isCompactionTool,
   isPlanTool,
+  isRuntimePlaceholder,
+  isUserInputTool,
+  isViewImageTool,
+  isWriteStdinTool,
   parsePlanItems,
+  parseUserInputQuestions,
   toolCallOutput,
   toolCallRequest,
-  toolCallTitle
+  toolCallTitle,
+  viewImagePath,
+  writeStdinDetails
 } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 import { GitDiffView } from "./GitDiffView";
@@ -366,16 +379,33 @@ function PlanCard({ data }: { data: unknown }) {
   );
 }
 
-function CollabCard({ data }: { data: unknown }) {
+function CollabCard({
+  data,
+  onOpenThread
+}: {
+  data: unknown;
+  onOpenThread?: ((threadId: string) => boolean | void) | undefined;
+}) {
   const details = collabCardDetails(data);
   if (!details.prompt && !details.receivers.length && !details.result) return null;
   return (
     <div className="plan-card">
-      {details.nickname ? (
-        <p className="text-xs text-muted-foreground">{details.nickname}</p>
-      ) : null}
       {details.receivers.length ? (
-        <p className="text-xs text-muted-foreground">目标 {details.receivers.join("、")}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {details.receivers.map((threadId) => (
+            <button
+              key={threadId}
+              type="button"
+              className="h-8 max-w-full truncate rounded-lg border border-border bg-card px-2.5 font-mono text-xs text-muted-foreground"
+              title={onOpenThread ? "打开子代理线程" : "复制线程 ID"}
+              onClick={() => {
+                if (!onOpenThread?.(threadId)) void copyTextToClipboard(threadId);
+              }}
+            >
+              {threadId}
+            </button>
+          ))}
+        </div>
       ) : null}
       {details.prompt ? <p className="plan-card-prompt">{details.prompt}</p> : null}
       {details.result && details.result !== details.prompt ? (
@@ -385,6 +415,88 @@ function CollabCard({ data }: { data: unknown }) {
   );
 }
 
+function projectImageSrc(projectId: string | undefined, path: string) {
+  if (!projectId || !path || path.startsWith("/")) return "";
+  return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(path)}&inline=1`;
+}
+
+function ViewImageCard({
+  path,
+  projectId,
+  onOpenFile
+}: {
+  path: string;
+  projectId?: string | undefined;
+  onOpenFile?: ((path: string, line: number | null) => void) | undefined;
+}) {
+  const [failed, setFailed] = useState(false);
+  const src = projectImageSrc(projectId, path);
+  const name = path.split("/").filter(Boolean).at(-1) || path;
+  return (
+    <div className="plan-card">
+      {src && !failed ? (
+        <img src={src} alt={name} className="notice-image" onError={() => setFailed(true)} />
+      ) : null}
+      <p className="plan-card-prompt font-mono text-xs text-muted-foreground">{path}</p>
+      {onOpenFile ? (
+        <button
+          type="button"
+          className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs"
+          onClick={() => onOpenFile(path, null)}
+        >
+          在文件中打开
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function UserInputCard({
+  data,
+  onReply
+}: {
+  data: unknown;
+  onReply?: ((text: string) => void) | undefined;
+}) {
+  const questions = parseUserInputQuestions(data);
+  if (!questions.length) return <p className="plan-card-empty">暂无选项。</p>;
+  return (
+    <div className="plan-card">
+      {questions.map((question) => (
+        <section key={question.id || question.question} className="space-y-2">
+          {question.header ? (
+            <p className="text-xs font-medium text-muted-foreground">{question.header}</p>
+          ) : null}
+          <p className="plan-card-prompt">{question.question}</p>
+          <div className="flex flex-col gap-1.5">
+            {question.options.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className="h-auto min-h-8 rounded-lg border border-border bg-card px-3 py-1.5 text-left text-xs"
+                onClick={() => {
+                  const answer = option.label;
+                  if (onReply) onReply(answer);
+                  else void copyTextToClipboard(answer);
+                }}
+              >
+                <span className="font-medium">{option.label}</span>
+                {option.description ? (
+                  <span className="mt-0.5 block text-muted-foreground">{option.description}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function NoticeCard({ message, level }: { message: string; level: "info" | "warning" | "error" }) {
+  return <p className={`notice-card-body${level === "error" ? " is-error" : ""}`}>{message}</p>;
+}
+
 export function EventCard({
   item,
   providerName,
@@ -392,9 +504,12 @@ export function EventCard({
   hidden = false,
   showProviderLabel = true,
   highlighted = false,
+  projectId,
   onApproval,
   onFork,
   onOpenFile,
+  onOpenThread,
+  onReply,
   onEdit,
   onRetry,
   onQuote,
@@ -411,9 +526,12 @@ export function EventCard({
   hidden?: boolean;
   showProviderLabel?: boolean;
   highlighted?: boolean | undefined;
+  projectId?: string | undefined;
   onApproval?: (requestId: string, decision: "accept" | "acceptForSession" | "decline") => void;
   onFork?: (() => void) | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
+  onOpenThread?: ((threadId: string) => boolean | void) | undefined;
+  onReply?: ((text: string) => void) | undefined;
   onEdit?: (() => void) | undefined;
   onRetry?: (() => void) | undefined;
   onQuote?: (() => void) | undefined;
@@ -424,12 +542,25 @@ export function EventCard({
   onSaveNote?: (() => void) | undefined;
   onSummarize?: (() => void) | undefined;
 }) {
+  const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
   const [open, setOpen] = useState(() => {
-    if (item.kind === "reasoning") return false;
-    if (item.kind === "tool" && (isPlanTool(item.data) || isCollabTool(item.data))) return true;
+    if (item.kind === "reasoning") return defaultOpen;
+    if (isRuntimePlaceholder(item.data, item.text)) return false;
+    if (notice && notice.level !== "error") return false;
+    if (item.kind === "tool" && isWriteStdinTool(item.data))
+      return Boolean(writeStdinDetails(item.data).text);
+    if (
+      item.kind === "tool" &&
+      (isPlanTool(item.data) ||
+        isCollabTool(item.data) ||
+        isUserInputTool(item.data) ||
+        isViewImageTool(item.data))
+    )
+      return true;
     return defaultOpen;
   });
   if (hidden) return null;
+  if (isRuntimePlaceholder(item.data, item.text)) return null;
   const highlightClass = highlighted ? " is-highlighted" : "";
   if (item.kind === "user")
     return (
@@ -732,6 +863,129 @@ export function EventCard({
     );
   }
   const isTool = item.kind === "tool";
+  if (notice) {
+    const failed = notice.level === "error";
+    const Icon = failed ? CircleAlert : Info;
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact notice-card${failed ? " is-error" : ""}${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className={`icon-muted${failed ? " text-red-500" : ""}`}>
+            <Icon />
+          </span>
+          <span className="min-w-0 truncate">{notice.title}</span>
+          {!open ? (
+            <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+              {notice.message}
+            </span>
+          ) : null}
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+        </button>
+        {open ? <NoticeCard message={notice.message} level={notice.level} /> : null}
+      </article>
+    );
+  }
+  if (isTool && isUserInputTool(item.data)) {
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <CircleHelp />
+          </span>
+          <span className="min-w-0 truncate">需要你选择</span>
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+        </button>
+        {open ? <UserInputCard data={item.data} onReply={onReply} /> : null}
+      </article>
+    );
+  }
+  if (isTool && isViewImageTool(item.data)) {
+    const path = viewImagePath(item.data);
+    const name = path.split("/").filter(Boolean).at(-1) || path || "图片";
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <Image />
+          </span>
+          <span className="min-w-0 truncate">查看图片</span>
+          <span className="min-w-0 truncate font-mono text-[13px] font-normal text-muted-foreground">
+            {name}
+          </span>
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+        </button>
+        {open ? <ViewImageCard path={path} projectId={projectId} onOpenFile={onOpenFile} /> : null}
+      </article>
+    );
+  }
+  if (isTool && isWriteStdinTool(item.data)) {
+    const details = writeStdinDetails(item.data);
+    const status = typeof item.data?.status === "string" ? item.data.status : "";
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <Keyboard />
+          </span>
+          <span className="min-w-0 truncate">向命令输入</span>
+          {details.sessionId ? (
+            <span className="font-mono text-[13px] font-normal text-muted-foreground">
+              #{details.sessionId}
+            </span>
+          ) : null}
+          {status === "in_progress" ? (
+            <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+          ) : item.createdAt ? (
+            <EventTime value={item.createdAt} className="ml-auto" />
+          ) : null}
+        </button>
+        {open ? (
+          <div className="plan-card">
+            {details.text ? (
+              <pre className="plan-card-prompt">{details.text}</pre>
+            ) : (
+              <p className="plan-card-empty">等待命令输出</p>
+            )}
+          </div>
+        ) : null}
+      </article>
+    );
+  }
+  if (isTool && isCompactionTool(item.data)) {
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact notice-card${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <Info />
+          </span>
+          <span className="min-w-0 truncate">上下文压缩</span>
+          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
+        </button>
+        {open ? (
+          <NoticeCard message="上下文已压缩。长会话会降低准确性，建议新开对话。" level="warning" />
+        ) : null}
+      </article>
+    );
+  }
   if (isTool && isPlanTool(item.data)) {
     const status = typeof item.data?.status === "string" ? item.data.status : "";
     const items = parsePlanItems(item.data);
@@ -764,6 +1018,10 @@ export function EventCard({
   }
   if (isTool && isCollabTool(item.data)) {
     const status = typeof item.data?.status === "string" ? item.data.status : "";
+    const details = collabCardDetails(item.data);
+    const title = details.nickname
+      ? `${collabToolLabel(item.data)} · ${details.nickname}`
+      : collabToolLabel(item.data);
     return (
       <article
         data-message-id={item.id}
@@ -774,14 +1032,14 @@ export function EventCard({
           <span className="icon-muted">
             <Bot />
           </span>
-          <span className="min-w-0 truncate">{collabToolLabel(item.data)}</span>
+          <span className="min-w-0 truncate">{title}</span>
           {status === "in_progress" ? (
             <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
           ) : item.createdAt ? (
             <EventTime value={item.createdAt} className="ml-auto" />
           ) : null}
         </button>
-        {open ? <CollabCard data={item.data} /> : null}
+        {open ? <CollabCard data={item.data} onOpenThread={onOpenThread} /> : null}
       </article>
     );
   }
@@ -809,7 +1067,7 @@ export function EventCard({
       : item.kind === "file"
         ? "File changes"
         : item.kind === "error"
-          ? "Runtime error"
+          ? "运行失败"
           : item.kind === "system"
             ? "Provider continuation"
             : commandTool

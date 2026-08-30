@@ -50,6 +50,8 @@ vi.mock("@codex-omni/codex-runtime", () => ({
   },
   materializeProviderHome: vi.fn(async () => "/tmp/provider-home"),
   resolveProviderHome: vi.fn(async () => "/tmp/provider-home"),
+  extractRolloutToolEvents: vi.fn(() => []),
+  findRolloutFile: vi.fn(() => ""),
   runtimeKey: vi.fn(() => "runtime-key"),
   terminateRecordedWorker: vi.fn(() => true)
 }));

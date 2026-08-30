@@ -23,6 +23,7 @@ import {
   type RunCommand
 } from "@codex-omni/protocol";
 import { captureGitCheckpoint } from "./project-git.js";
+import { backfillSessionRolloutTools, rolloutToolPayload } from "./session-rollout.js";
 import { applyPlanMode, applyProjectRules } from "./workspace-loop.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
@@ -730,6 +731,14 @@ export class RunManager {
           onRuntimeEvent,
           (runtime) => this.updateRuntime(requestId, runtime)
         );
+        const latest = this.store.getSession(session.id);
+        this.publishRolloutBackfill({
+          sessionId: session.id,
+          projectId: project.id,
+          providerId: provider.id,
+          threadId: latest?.threadId ?? session.threadId,
+          codexHome
+        });
       }
       const current = this.store.getSession(session.id);
       if (current?.status === "running") {
@@ -793,6 +802,42 @@ export class RunManager {
       ]
     });
     emit("turn.completed", { endedAt: Date.now() });
+  }
+
+  private publishRolloutBackfill(input: {
+    sessionId: string;
+    projectId: string;
+    providerId: string;
+    threadId: string | null | undefined;
+    codexHome: string;
+  }) {
+    try {
+      const changes = backfillSessionRolloutTools({
+        store: this.store,
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        providerId: input.providerId,
+        codexHome: input.codexHome
+      });
+      for (const change of changes) {
+        const separator = change.itemId.indexOf(":");
+        if (separator <= 0) continue;
+        this.broadcast(input.sessionId, {
+          protocolVersion: 1,
+          requestId: change.itemId.slice(0, separator),
+          projectId: input.projectId,
+          sessionId: input.sessionId,
+          seq: 0,
+          type: "tool.output",
+          payload: {
+            ...rolloutToolPayload(change.event),
+            itemId: change.itemId.slice(separator + 1)
+          }
+        });
+      }
+    } catch {
+      // Rollout recovery is best-effort and must not fail the turn.
+    }
   }
 
   private async captureTurnCheckpoint(

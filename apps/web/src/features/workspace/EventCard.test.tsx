@@ -173,12 +173,14 @@ describe("EventCard copy controls", () => {
           data: {
             tool: "spawn_agent",
             prompt: "Explore the repo",
+            nickname: "Pascal",
             receiverThreadIds: ["agent-a"]
           }
         }}
       />
     );
     expect(html).toContain("启动子代理");
+    expect(html).toContain("Pascal");
     expect(html).toContain("Explore the repo");
     expect(html).toContain("agent-a");
   });
@@ -202,5 +204,153 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("等待子代理");
     expect(html).toContain("Sun Aug 30 05:22:22 UTC 2026");
     expect(html).not.toContain("runtime_error");
+  });
+  it("renders model metadata notices instead of runtime error dumps", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "notice-1",
+          kind: "tool",
+          data: {
+            tool: "runtime_error",
+            message:
+              "Model metadata for `grok-4.6` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+          }
+        }}
+      />
+    );
+    expect(html).toContain("模型提示");
+    expect(html).toContain("grok-4.6");
+    expect(html).not.toContain("Runtime error");
+    expect(html).not.toContain("&quot;tool&quot;: &quot;runtime_error&quot;");
+  });
+
+  it("renders service tier and compaction heads-up as warnings", () => {
+    const tier = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "notice-2",
+          kind: "tool",
+          data: {
+            tool: "runtime_error",
+            message:
+              "Configured service tier `priority` is not advertised as supported for model `grok-4.6` and will be omitted from requests."
+          }
+        }}
+      />
+    );
+    expect(tier).toContain("服务层级");
+    expect(tier).not.toContain("Runtime error");
+    const compact = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "notice-3",
+          kind: "tool",
+          data: {
+            tool: "runtime_error",
+            message:
+              "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted."
+          }
+        }}
+      />
+    );
+    expect(compact).toContain("会话提示");
+  });
+
+  it("renders real failures as 运行失败", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "fail-1",
+          kind: "error",
+          text: "Codex 运行失败"
+        }}
+      />
+    );
+    expect(html).toContain("运行失败");
+    expect(html).toContain("Codex 运行失败");
+    expect(html).not.toContain("Runtime error");
+  });
+
+  it("hides empty runtime_error placeholders", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{ id: "empty-1", kind: "tool", data: { tool: "runtime_error", message: "" } }}
+      />
+    );
+    expect(html).toBe("");
+  });
+
+  it("renders request_user_input as a choice card", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "ask-1",
+          kind: "tool",
+          data: {
+            tool: "request_user_input",
+            questions: [
+              {
+                id: "pop3_plan",
+                header: "POP3方案",
+                question: "你要用哪种方案支持 POP3？",
+                options: [
+                  { label: "VPS 邮件服务", description: "部署完整邮件栈" },
+                  { label: "outlookEmail 客户端" }
+                ]
+              }
+            ]
+          }
+        }}
+      />
+    );
+    expect(html).toContain("需要你选择");
+    expect(html).toContain("POP3方案");
+    expect(html).toContain("VPS 邮件服务");
+    expect(html).not.toContain("runtime_error");
+  });
+
+  it("renders view_image with the file name", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "img-1",
+          kind: "tool",
+          data: { tool: "view_image", path: "/tmp/gamepad-preview/gamepad.png" }
+        }}
+      />
+    );
+    expect(html).toContain("查看图片");
+    expect(html).toContain("gamepad.png");
+  });
+
+  it("renders write_stdin as a command input card", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "stdin-1",
+          kind: "tool",
+          data: { tool: "write_stdin", session_id: 79822, chars: "yes\n" }
+        }}
+      />
+    );
+    expect(html).toContain("向命令输入");
+    expect(html).toContain("79822");
+  });
+
+  it("keeps thinking collapsed unless defaultOpen", () => {
+    const closed = renderToStaticMarkup(
+      <EventCard
+        item={{ id: "r1", kind: "reasoning", text: "secret-thought" }}
+        defaultOpen={false}
+      />
+    );
+    expect(closed).toContain("Thinking");
+    expect(closed).not.toContain("secret-thought");
+
+    const opened = renderToStaticMarkup(
+      <EventCard item={{ id: "r1", kind: "reasoning", text: "secret-thought" }} defaultOpen />
+    );
+    expect(opened).toContain("secret-thought");
   });
 });

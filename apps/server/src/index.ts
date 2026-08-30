@@ -47,6 +47,7 @@ import { nextRunAt, startScheduledJobs } from "./scheduled-jobs.js";
 import { RunManager } from "./run-manager.js";
 import { TerminalManager, terminalHostLabel } from "./terminal-manager.js";
 import { compactMessageForClient } from "./session-history.js";
+import { backfillSessionRolloutTools } from "./session-rollout.js";
 import { searchWorkspace } from "./workspace-search.js";
 import { collectHostInfo } from "./host-info.js";
 import { UpdateCheckService } from "./update-check.js";
@@ -288,6 +289,7 @@ const defaultSettings = {
   networkAccessEnabled: true,
   showReasoning: false,
   expandToolCalls: true,
+  timelineView: "folded" as const,
   sendWithEnter: true,
   showProviderLabels: true,
   executionMode: "execute" as const,
@@ -518,6 +520,7 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       networkAccessEnabled: z.boolean(),
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
+      timelineView: z.enum(["folded", "flat", "expanded"]).optional(),
       sendWithEnter: z.boolean(),
       showProviderLabels: z.boolean(),
       executionMode: z.enum(["plan", "execute"]).optional(),
@@ -933,6 +936,21 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   const session = store.getSession(id);
   if (!session) return reply.code(404).send({ error: "Session not found" });
+  const project = store.getProject(session.projectId);
+  const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
+  if (provider && session.threadId) {
+    try {
+      backfillSessionRolloutTools({
+        store,
+        sessionId: session.id,
+        threadId: session.threadId,
+        providerId: session.providerId,
+        codexHome: await providerHome(provider)
+      });
+    } catch {
+      // Rollout files are optional; keep the session readable if Codex home is missing.
+    }
+  }
   const query = z
     .object({
       limit: z.coerce.number().int().min(1).max(200).default(50),

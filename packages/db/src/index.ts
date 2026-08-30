@@ -991,12 +991,17 @@ export class Store {
     eventType: string;
     itemId: string;
     dataJson?: string | null;
+    createdAt?: number;
   }) {
     const now = Date.now();
+    const createdAt =
+      typeof input.createdAt === "number" && Number.isFinite(input.createdAt)
+        ? input.createdAt
+        : now;
     this.db
       .prepare(
         `INSERT INTO messages(id,session_id,role,content,provider_id,event_type,item_id,data_json,created_at,updated_at)
-         VALUES(@id,@sessionId,@role,@content,@providerId,@eventType,@itemId,@dataJson,@now,@now)
+         VALUES(@id,@sessionId,@role,@content,@providerId,@eventType,@itemId,@dataJson,@createdAt,@now)
          ON CONFLICT(session_id,item_id) DO UPDATE SET role=@role,content=@content,provider_id=@providerId,event_type=@eventType,data_json=@dataJson,updated_at=@now`
       )
       .run({
@@ -1008,6 +1013,7 @@ export class Store {
         eventType: input.eventType,
         itemId: input.itemId,
         dataJson: input.dataJson ?? null,
+        createdAt,
         now
       });
   }

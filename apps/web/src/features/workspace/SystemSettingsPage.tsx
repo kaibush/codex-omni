@@ -243,24 +243,27 @@ export function SystemSettingsPage() {
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
             {active.id === "system-info" ? (
               <>
-                <SettingsCard
-                  title="当前版本"
-                  description="后续检查更新时会对照这个版本号。"
-                >
+                <SettingsCard title="当前版本" description="后续检查更新时会对照这个版本号。">
                   <SettingsFormGrid>
                     <SettingsInfoRow label="应用" value="Codex Omni" />
                     <SettingsInfoRow
                       label="版本"
                       value={runtimeQuery.data?.host.app.version || "未读取"}
                     />
-                    <SettingsInfoRow label="Node.js" value={runtimeQuery.data?.host.node || "未读取"} />
+                    <SettingsInfoRow
+                      label="Node.js"
+                      value={runtimeQuery.data?.host.node || "未读取"}
+                    />
                     <SettingsInfoRow
                       label="主机名"
                       value={runtimeQuery.data?.host.hostname || "未读取"}
                     />
                   </SettingsFormGrid>
                 </SettingsCard>
-                <SettingsCard title="主机资源" description="当前这台电脑的 CPU、内存和存储，每 30 秒自动刷新。">
+                <SettingsCard
+                  title="主机资源"
+                  description="当前这台电脑的 CPU、内存和存储，每 30 秒自动刷新。"
+                >
                   <SettingsFormGrid>
                     <SettingsUsageBar
                       label="CPU"
@@ -482,9 +485,20 @@ export function SystemSettingsPage() {
                     label="主题"
                     value={theme === "system" ? "跟随系统" : theme === "dark" ? "深色" : "浅色"}
                   />
+                  <SettingsSelect
+                    label="时间线"
+                    hint="折叠合并思考和执行；平铺列出全部原始事件；展开则同时打开卡片。"
+                    value={draft.timelineView}
+                    onValueChange={(value) => setDraft({ ...draft, timelineView: value })}
+                    options={[
+                      { value: "folded", label: "折叠 · 合并思考和连续执行" },
+                      { value: "flat", label: "平铺 · 列出全部原始 Think 和工具" },
+                      { value: "expanded", label: "展开 · 列出并打开全部原始事件" }
+                    ]}
+                  />
                   <SettingsSwitchField
                     label="显示 reasoning 事件"
-                    description="在时间线中展示模型思考过程。"
+                    description="折叠模式下是否展示思考卡片。平铺和展开会始终显示。"
                     checked={draft.showReasoning}
                     onCheckedChange={(checked) => setDraft({ ...draft, showReasoning: checked })}
                   />

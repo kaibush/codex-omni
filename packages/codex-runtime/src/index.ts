@@ -245,3 +245,5 @@ export {
   runtimeKey
 } from "./provider-home.js";
 export { createNormalizer } from "./normalizer.js";
+export { extractRolloutToolEvents, findRolloutFile } from "./collab-rollout.js";
+export type { CollabRolloutEvent } from "./collab-rollout.js";

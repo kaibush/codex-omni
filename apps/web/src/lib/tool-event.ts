@@ -37,7 +37,6 @@ const COLLAB_TOOLS = new Set([
   "collab",
   "spawnagent",
   "waitagent",
-  "wait",
   "sendinput",
   "closeagent",
   "resumeagent",
@@ -99,7 +98,8 @@ export function parsePlanItems(data: unknown): PlanItem[] {
 
 export function isCollabTool(data: unknown) {
   const normalized = compactToolName(String(asRecord(data)?.tool ?? ""));
-  return COLLAB_TOOLS.has(normalized) || normalized.startsWith("collab");
+  if (COLLAB_TOOLS.has(normalized) || normalized.startsWith("collab")) return true;
+  return normalized === "wait" && hasCollabWaitTargets(data);
 }
 
 export function collabToolLabel(data: unknown) {
@@ -148,38 +148,289 @@ function parseJsonRecord(value: unknown): Record<string, unknown> | null {
   }
 }
 
+function hasCollabWaitTargets(data: unknown) {
+  const record = asRecord(data);
+  if (!record) return false;
+  const nested = parseJsonRecord(record.input);
+  for (const source of [record, nested]) {
+    if (!source) continue;
+    const ids = uniqueIds([
+      ...asIdList(source.targets),
+      ...asIdList(source.target),
+      ...asIdList(source.receiverThreadIds),
+      ...asIdList(source.receiver_thread_ids),
+      ...asIdList(source.receiverThreadId),
+      ...asIdList(source.receiver_thread_id),
+      ...asIdList(source.agent_id),
+      ...asIdList(source.agentId),
+      ...asIdList(source.agent_ids),
+      ...asIdList(source.agentIds)
+    ]);
+    if (ids.length) return true;
+  }
+  return false;
+}
+
+function statusTexts(value: unknown): string[] {
+  const record = asRecord(value);
+  if (!record) return [];
+  const completed = asText(record.completed);
+  if (completed) return [completed];
+  const parts: string[] = [];
+  for (const entry of Object.values(record)) {
+    const nested = asRecord(entry);
+    const text = nested ? asText(nested.completed) : "";
+    if (text) parts.push(text);
+  }
+  return parts;
+}
+
 export function collabCardDetails(data: unknown) {
   const record = asRecord(data) ?? {};
-  const nested = asRecord(record.input) ?? {};
+  const nested = asRecord(record.input) ?? parseJsonRecord(record.input) ?? {};
   const output = asText(record.output);
-  const parsed = parseJsonRecord(output) ?? parseJsonRecord(record.agentStatus);
+  const parsed =
+    parseJsonRecord(output) ?? asRecord(record.agentStatus) ?? parseJsonRecord(record.agentStatus);
   const prompt =
     asText(record.prompt) ||
     asText(record.message) ||
     asText(nested.message) ||
     asText(nested.prompt);
   const nickname = asText(record.nickname) || asText(parsed?.nickname);
+  const statusRecord = asRecord(parsed?.status);
   const receivers = uniqueIds([
     ...asIdList(record.receiverThreadIds),
     ...asIdList(record.receiver_thread_ids),
     ...asIdList(nested.targets),
     ...asIdList(nested.target),
-    ...asIdList(parsed?.agent_id)
+    ...asIdList(parsed?.agent_id),
+    ...asIdList(statusRecord ? Object.keys(statusRecord) : [])
   ]);
-  let result = output;
-  const status = asRecord(parsed?.status);
-  if (status) {
-    const parts = Object.values(status)
-      .map((value) => {
-        const row = asRecord(value);
-        return asText(row?.completed) || asText(value);
-      })
-      .filter(Boolean);
-    if (parts.length) result = parts.join("\n");
-  } else if (nickname && asText(parsed?.agent_id)) {
-    result = `已启动 ${nickname}`;
-  }
+  const statusParts = uniqueIds(
+    [
+      ...statusTexts(parsed?.status),
+      ...statusTexts(parsed?.previous_status),
+      ...statusTexts(record.agentStatus)
+    ].filter((part) => part !== nickname)
+  );
+  let result = "";
+  if (statusParts.length) result = statusParts.join("\n");
+  else if (nickname && asText(parsed?.agent_id)) result = `已启动 ${nickname}`;
+  else if (output && !parsed) result = output;
   return { prompt, nickname, receivers, result };
+}
+
+export type RuntimeNoticeLevel = "info" | "warning" | "error";
+export type RuntimeNotice = {
+  level: RuntimeNoticeLevel;
+  title: string;
+  message: string;
+};
+
+const RECONNECT_NOTICE = /^Reconnecting(?:\.{3}|…)?\s*\d+\s*\/\s*\d+/i;
+const COMPACTION_DEFAULT_MESSAGE = "上下文已压缩。长会话会降低准确性，建议新开对话。";
+
+function toolName(data: unknown) {
+  return compactToolName(String(asRecord(data)?.tool ?? ""));
+}
+
+function nestedRecord(data: unknown) {
+  const record = asRecord(data);
+  return record ? parseJsonRecord(record.input) : null;
+}
+
+function firstString(values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function isReconnectNoticeMessage(message: string) {
+  return RECONNECT_NOTICE.test(message.trim());
+}
+
+export function runtimeNoticeMessage(data: unknown, text?: string): string {
+  const record = asRecord(data);
+  return firstString([record?.message, record?.output, text]);
+}
+
+export function isRuntimePlaceholder(data: unknown, text?: string): boolean {
+  if (toolName(data) !== "runtimeerror") return false;
+  const message = runtimeNoticeMessage(data, text);
+  if (isReconnectNoticeMessage(message)) return false;
+  return !message;
+}
+
+export function isCompactionTool(data: unknown): boolean {
+  if (toolName(data) === "contextcompacted") return true;
+  return (
+    toolName(data) === "runtimeerror" && /heads up: long threads/i.test(runtimeNoticeMessage(data))
+  );
+}
+
+export function classifyRuntimeNotice(
+  data: unknown,
+  text?: string,
+  kind?: string
+): RuntimeNotice | null {
+  const message = runtimeNoticeMessage(data, text);
+  if (isReconnectNoticeMessage(message)) return null;
+  if (isRuntimePlaceholder(data, text)) return null;
+  const tool = toolName(data);
+  const runtimeError = tool === "runtimeerror" || kind === "error";
+  if (runtimeError && message) {
+    if (/model metadata/i.test(message)) {
+      return { level: "warning", title: "模型提示", message };
+    }
+    if (/service tier/i.test(message)) {
+      return { level: "warning", title: "服务层级", message };
+    }
+    if (/heads up: long threads/i.test(message) || /compaction/i.test(message)) {
+      return { level: "warning", title: "会话提示", message };
+    }
+  }
+  if (tool === "contextcompacted" || isCompactionTool(data)) {
+    return {
+      level: "warning",
+      title: "上下文压缩",
+      message: message || COMPACTION_DEFAULT_MESSAGE
+    };
+  }
+  if (runtimeError && message) {
+    return { level: "error", title: "运行失败", message };
+  }
+  return null;
+}
+
+export function isRuntimeNotice(data: unknown, text?: string, kind?: string): boolean {
+  return classifyRuntimeNotice(data, text, kind) !== null;
+}
+
+export function isUserInputTool(data: unknown): boolean {
+  return toolName(data) === "requestuserinput";
+}
+
+export type UserInputOption = { label: string; description?: string };
+export type UserInputQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  options: UserInputOption[];
+};
+
+function questionsSource(data: unknown): unknown[] {
+  const record = asRecord(data);
+  if (!record) return [];
+  if (Array.isArray(record.questions)) return record.questions;
+  const nested = nestedRecord(data);
+  if (Array.isArray(nested?.questions)) return nested.questions;
+  const output = parseJsonRecord(record.output);
+  if (Array.isArray(output?.questions)) return output.questions;
+  return [];
+}
+
+function parseUserInputOption(value: unknown): UserInputOption | null {
+  const row = asRecord(value);
+  if (row) {
+    const label = String(row.label ?? "").trim();
+    if (!label) return null;
+    const description = String(row.description ?? "").trim();
+    return description ? { label, description } : { label };
+  }
+  if (typeof value === "string" && value.trim()) return { label: value.trim() };
+  return null;
+}
+
+export function parseUserInputQuestions(data: unknown): UserInputQuestion[] {
+  return questionsSource(data).flatMap((item, index) => {
+    const row = asRecord(item);
+    if (!row) return [];
+    const options = Array.isArray(row.options)
+      ? row.options
+          .map(parseUserInputOption)
+          .filter((option): option is UserInputOption => option !== null)
+      : [];
+    return [
+      {
+        id: String(row.id ?? "").trim() || `question-${index + 1}`,
+        header: String(row.header ?? "").trim(),
+        question: String(row.question ?? "").trim(),
+        options
+      }
+    ];
+  });
+}
+
+export function isViewImageTool(data: unknown): boolean {
+  return toolName(data) === "viewimage";
+}
+
+export function viewImagePath(data: unknown): string {
+  const record = asRecord(data);
+  const nested = nestedRecord(data);
+  return firstString([record?.path, nested?.path]);
+}
+
+export function isWriteStdinTool(data: unknown): boolean {
+  return toolName(data) === "writestdin";
+}
+
+function asSessionId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") return value.trim();
+  return "";
+}
+
+function asStdinText(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asOptionalNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
+}
+
+function firstField(data: unknown, keys: string[]) {
+  const record = asRecord(data);
+  const nested = nestedRecord(data);
+  for (const source of [record, nested]) {
+    if (!source) continue;
+    for (const key of keys) {
+      if (source[key] != null && source[key] !== "") return source[key];
+    }
+  }
+  return undefined;
+}
+
+export function writeStdinDetails(data: unknown): {
+  sessionId: string;
+  text: string;
+  yieldTimeMs?: number;
+} {
+  const record = asRecord(data);
+  const nested = nestedRecord(data);
+  const sessionId = asSessionId(firstField(data, ["session_id", "sessionId"]));
+  const text =
+    asStdinText(firstField(data, ["chars", "text"])) || (nested ? "" : asStdinText(record?.input));
+  const yieldTimeMs = asOptionalNumber(firstField(data, ["yield_time_ms", "yieldTimeMs"]));
+  return yieldTimeMs == null ? { sessionId, text } : { sessionId, text, yieldTimeMs };
+}
+
+export function isStandaloneTimelineTool(data: unknown, text?: string, kind?: string): boolean {
+  return (
+    isPlanTool(data) ||
+    isCollabTool(data) ||
+    isUserInputTool(data) ||
+    isViewImageTool(data) ||
+    isWriteStdinTool(data) ||
+    isCompactionTool(data) ||
+    isRuntimePlaceholder(data, text) ||
+    isRuntimeNotice(data, text, kind)
+  );
 }
 
 export function toolCallRequest(data: unknown) {
