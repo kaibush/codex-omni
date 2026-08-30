@@ -895,6 +895,69 @@ button.composer-chip:hover,
   flex-direction: column;
   gap: 0.55rem;
 }
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card);
+  padding: 0.55rem 0.7rem;
+}
+.plan-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-card-item {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding: 0.28rem 0.15rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.plan-card-item svg {
+  flex: none;
+  margin-top: 0.15rem;
+}
+.plan-card-text {
+  min-width: 0;
+  word-break: break-word;
+}
+.plan-card-item.is-completed .plan-card-text {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+.plan-card-item.is-in_progress .plan-card-text {
+  font-weight: 600;
+}
+.plan-card-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: none;
+  margin-top: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+}
+.plan-card-empty,
+.plan-card-prompt {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.plan-card-prompt {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .tool-shell {
   overflow: hidden;
   border: 1px solid var(--border);

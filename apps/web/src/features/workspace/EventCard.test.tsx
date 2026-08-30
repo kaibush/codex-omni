@@ -9,7 +9,7 @@ describe("EventCard copy controls", () => {
         item={{
           id: "assistant-1",
           kind: "assistant",
-          text: "示例：\n```ts\nconst answer = 42;\n```"
+          text: "示例：\n```ts\nconst answer = 42;\nconst next = answer + 1;\n```"
         }}
       />
     );
@@ -21,12 +21,14 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("answer");
     expect(html).toContain("42");
     expect(html).toContain('aria-label="下载代码"');
-    expect(html).toContain("1 行");
+    expect(html).toContain("2 行");
   });
 
   it("renders fenced code in user bubbles with its own copy control", () => {
     const html = renderToStaticMarkup(
-      <EventCard item={{ id: "user-1", kind: "user", text: "```sh\npnpm test\n```" }} />
+      <EventCard
+        item={{ id: "user-1", kind: "user", text: "```sh\npnpm test\npnpm typecheck\n```" }}
+      />
     );
 
     expect(html).toContain('aria-label="复制整条消息"');
@@ -47,7 +49,7 @@ describe("EventCard copy controls", () => {
         item={{
           id: "user-3",
           kind: "user",
-          text: "see src/app.ts:12\n```ts\nconst answer = 42;\n```"
+          text: "see src/app.ts:12\n```ts\nconst answer = 42;\nconst next = answer + 1;\n```"
         }}
         onEdit={() => undefined}
         onRetry={() => undefined}
@@ -135,5 +137,49 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("执行过程");
     expect(html).toContain("1 个工具");
     expect(html).toContain("1 个文件变更");
+  });
+
+  it("renders plan cards as a checklist instead of raw json", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "plan-1",
+          kind: "tool",
+          data: {
+            tool: "update_plan",
+            items: [
+              { text: "检查仓库", completed: true },
+              { text: "补齐测试", status: "in_progress" }
+            ]
+          }
+        }}
+        defaultOpen={false}
+      />
+    );
+    expect(html).toContain("计划");
+    expect(html).toContain("检查仓库");
+    expect(html).toContain("补齐测试");
+    expect(html).toContain("1/2");
+    expect(html).not.toContain("&quot;tool&quot;: &quot;update_plan&quot;");
+    expect(html).not.toContain('"completed": true');
+  });
+
+  it("renders collab cards with the agent prompt", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "collab-1",
+          kind: "tool",
+          data: {
+            tool: "spawn_agent",
+            prompt: "Explore the repo",
+            receiverThreadIds: ["agent-a"]
+          }
+        }}
+      />
+    );
+    expect(html).toContain("启动子代理");
+    expect(html).toContain("Explore the repo");
+    expect(html).toContain("agent-a");
   });
 });

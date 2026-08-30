@@ -12,6 +12,116 @@ const providerFailurePattern =
 const isProviderFailure = (message: string, reason?: string) =>
   providerFailurePattern.test(message) || (reason ? providerFailurePattern.test(reason) : false);
 
+const COLLAB_ITEM_TYPES = new Set([
+  "collab_tool_call",
+  "collabToolCall",
+  "collab_agent_tool_call",
+  "collabAgentToolCall"
+]);
+const COLLAB_TOOL_NAMES = new Set([
+  "collab",
+  "spawn_agent",
+  "wait_agent",
+  "wait",
+  "send_input",
+  "close_agent",
+  "resume_agent",
+  "handoff"
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function compactType(value: string) {
+  return value.toLowerCase().replace(/[_-]/g, "");
+}
+
+function asIdList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function asPrompt(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function planItemsFrom(record: Record<string, unknown>) {
+  if (Array.isArray(record.items)) return record.items;
+  if (Array.isArray(record.steps)) return record.steps;
+  if (Array.isArray(record.plan)) return record.plan;
+  return [];
+}
+
+function isPlanLikeItem(type: string, tool: string) {
+  const normalized = compactType(type);
+  const normalizedTool = compactType(tool);
+  return (
+    normalized === "todolist" ||
+    normalized === "plan" ||
+    normalized === "planimplementation" ||
+    normalized === "updateplan" ||
+    normalizedTool === "todolist" ||
+    normalizedTool === "updateplan"
+  );
+}
+
+function isCollabLikeItem(type: string, tool: string) {
+  const normalizedTool = compactType(tool.split("__").at(-1) ?? tool);
+  return (
+    COLLAB_ITEM_TYPES.has(type) ||
+    type.toLowerCase().includes("collab") ||
+    COLLAB_TOOL_NAMES.has(tool) ||
+    COLLAB_TOOL_NAMES.has(normalizedTool)
+  );
+}
+
+function mapUnknownItem(
+  phase: "started" | "updated" | "completed",
+  item: unknown,
+  envelope: (type: BridgeEvent["type"], payload: unknown) => BridgeEvent
+): BridgeEvent[] {
+  const record = asRecord(item) ?? {};
+  const type = String(record.type ?? "unknown");
+  const tool = String(record.tool ?? record.name ?? "");
+  const status =
+    String(record.status ?? "") || (phase === "completed" ? "completed" : "in_progress");
+  if (isPlanLikeItem(type, tool)) {
+    return [
+      envelope(phase === "started" ? "tool.started" : "tool.output", {
+        itemId: String(record.id ?? ""),
+        tool: "update_plan",
+        items: planItemsFrom(record),
+        status,
+        phase
+      })
+    ];
+  }
+  const collab = isCollabLikeItem(type, tool);
+  const payload = {
+    itemId: String(record.id ?? ""),
+    tool: collab ? tool || "collab" : tool || type,
+    prompt: asPrompt(record.prompt) || asPrompt(record.message) || asPrompt(record.input),
+    senderThreadId: record.sender_thread_id ?? record.senderThreadId,
+    receiverThreadIds: asIdList(
+      record.receiver_thread_ids ??
+        record.receiverThreadIds ??
+        record.receiver_thread_id ??
+        record.receiverThreadId ??
+        record.new_thread_id ??
+        record.newThreadId
+    ),
+    agentStatus: record.agent_status ?? record.agentStatus ?? record.agents_states,
+    status,
+    phase,
+    input: record.arguments ?? record.input ?? record
+  };
+  return [envelope(phase === "started" ? "tool.started" : "tool.output", payload)];
+}
+
 export function createNormalizer(request: BridgeRequest) {
   let seq = 0;
   const startedAt = Date.now();
@@ -110,16 +220,24 @@ export function createNormalizer(request: BridgeRequest) {
       ];
     if (item.type === "todo_list")
       return [
-        envelope("tool.output", { itemId: item.id, tool: "update_plan", items: item.items, phase })
+        envelope(phase === "started" ? "tool.started" : "tool.output", {
+          itemId: item.id,
+          tool: "update_plan",
+          items: item.items,
+          status: phase === "completed" ? "completed" : "in_progress",
+          phase
+        })
       ];
-    return [
-      envelope("tool.output", {
-        itemId: item.id,
-        tool: "runtime_error",
-        message: item.message,
-        phase
-      })
-    ];
+    if (item.type === "error")
+      return [
+        envelope("tool.output", {
+          itemId: item.id,
+          tool: "runtime_error",
+          message: item.message,
+          phase
+        })
+      ];
+    return mapUnknownItem(phase, item, envelope);
   };
   const timedItemEvent = (
     phase: "started" | "updated" | "completed",

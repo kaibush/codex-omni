@@ -59,7 +59,10 @@ try {
     ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
     ...(request.apiKey ? { apiKey: request.apiKey } : {}),
     env: workerEnvironment(request),
-    config: { model_supports_reasoning_summaries: true }
+    config: {
+      model_supports_reasoning_summaries: true,
+      features: { multi_agent: true }
+    }
   });
   const options = {
     workingDirectory: request.cwd,

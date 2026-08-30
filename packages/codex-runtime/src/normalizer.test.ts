@@ -30,6 +30,88 @@ describe("normalizer", () => {
     expect(event?.type).toBe("tool.output");
   });
 
+  it("maps todo_list items to update_plan", () => {
+    const n = createNormalizer(req);
+    const [started] = n.map({
+      type: "item.started",
+      item: {
+        id: "plan-1",
+        type: "todo_list",
+        items: [
+          { text: "检查仓库", completed: false },
+          { text: "补齐测试", completed: true }
+        ]
+      }
+    });
+    expect(started).toMatchObject({
+      type: "tool.started",
+      payload: {
+        itemId: "plan-1",
+        tool: "update_plan",
+        status: "in_progress",
+        items: [
+          { text: "检查仓库", completed: false },
+          { text: "补齐测试", completed: true }
+        ]
+      }
+    });
+  });
+
+  it("maps collab tool calls instead of runtime_error", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.started",
+      item: {
+        id: "collab-1",
+        type: "collabToolCall",
+        tool: "spawn_agent",
+        prompt: "Explore the repo",
+        receiver_thread_ids: ["agent-a"]
+      } as never
+    });
+    expect(event).toMatchObject({
+      type: "tool.started",
+      payload: {
+        itemId: "collab-1",
+        tool: "spawn_agent",
+        prompt: "Explore the repo",
+        receiverThreadIds: ["agent-a"]
+      }
+    });
+  });
+
+  it("maps camelCase plan items to update_plan", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.started",
+      item: {
+        id: "plan-2",
+        type: "plan",
+        steps: [{ step: "Inspect codebase", status: "in_progress" }]
+      } as never
+    });
+    expect(event).toMatchObject({
+      type: "tool.started",
+      payload: {
+        itemId: "plan-2",
+        tool: "update_plan",
+        items: [{ step: "Inspect codebase", status: "in_progress" }]
+      }
+    });
+  });
+
+  it("keeps thread error items as runtime_error", () => {
+    const n = createNormalizer(req);
+    const [event] = n.map({
+      type: "item.completed",
+      item: { id: "err-1", type: "error", message: "tool failed" }
+    });
+    expect(event).toMatchObject({
+      type: "tool.output",
+      payload: { itemId: "err-1", tool: "runtime_error", message: "tool failed" }
+    });
+  });
+
   it("keeps automatic reconnect attempts non-terminal", () => {
     const n = createNormalizer(req);
     const [event] = n.map({

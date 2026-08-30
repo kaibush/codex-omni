@@ -1,6 +1,9 @@
+import { isCollabTool, isPlanTool } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 
-const isActivityItem = (item: TimelineItem) => item.kind === "tool" || item.kind === "file";
+const isActivityItem = (item: TimelineItem) =>
+  item.kind === "file" ||
+  (item.kind === "tool" && !isPlanTool(item.data) && !isCollabTool(item.data));
 
 /** Collapse noisy streamed event runs without changing the persisted timeline. */
 export function compactTimelineEvents(items: TimelineItem[]): TimelineItem[] {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ListTree } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { collabToolLabel, isCollabTool, isPlanTool } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 
 const STORAGE_KEY = "codex-omni:timeline-outline";
@@ -13,7 +14,11 @@ function outlineTitle(item: TimelineItem) {
   if (item.kind === "file") return "文件：变更";
   if (item.kind === "approval") return "审批：待确认";
   if (item.kind === "error") return "错误：运行失败";
-  if (item.kind === "tool") return `命令：${String(item.data?.command ?? "工具调用").slice(0, 24)}`;
+  if (item.kind === "tool") {
+    if (isPlanTool(item.data)) return "计划";
+    if (isCollabTool(item.data)) return collabToolLabel(item.data);
+    return `命令：${String(item.data?.command ?? "工具调用").slice(0, 24)}`;
+  }
   if (item.kind === "activity") {
     const grouped = Array.isArray(item.data?.items) ? item.data.items : [];
     return `执行：${grouped.length} 项操作`;

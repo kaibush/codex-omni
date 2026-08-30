@@ -30,6 +30,89 @@ export function isCommandTool(data: unknown) {
   return record?.tool === "command" || typeof record?.command === "string";
 }
 
+export type PlanItemStatus = "pending" | "in_progress" | "completed";
+export type PlanItem = { text: string; status: PlanItemStatus };
+
+const COLLAB_TOOLS = new Set([
+  "collab",
+  "spawnagent",
+  "waitagent",
+  "wait",
+  "sendinput",
+  "closeagent",
+  "resumeagent",
+  "handoff"
+]);
+
+function compactToolName(tool: string) {
+  const last = tool.split("__").at(-1) ?? tool;
+  return last.toLowerCase().replace(/[_-]/g, "");
+}
+
+function planSource(data: unknown): unknown[] {
+  const record = asRecord(data);
+  const nested = asRecord(record?.input);
+  const candidates = [record?.items, record?.steps, nested?.items, nested?.steps, nested?.plan];
+  return candidates.find(Array.isArray) ?? [];
+}
+
+export function isPlanTool(data: unknown) {
+  const record = asRecord(data);
+  const tool = compactToolName(String(record?.tool ?? ""));
+  return (
+    tool === "updateplan" ||
+    tool === "todolist" ||
+    tool === "plan" ||
+    tool === "proposedplan" ||
+    tool === "planimplementation"
+  );
+}
+
+export function parsePlanItems(data: unknown): PlanItem[] {
+  return planSource(data).map((item, index) => {
+    const row = asRecord(item);
+    const text =
+      String(row?.text ?? row?.content ?? row?.title ?? row?.step ?? "").trim() ||
+      `步骤 ${index + 1}`;
+    const statusRaw = String(row?.status ?? "")
+      .toLowerCase()
+      .replaceAll("_", "-");
+    if (
+      statusRaw === "completed" ||
+      statusRaw === "complete" ||
+      statusRaw === "done" ||
+      row?.completed === true
+    ) {
+      return { text, status: "completed" as const };
+    }
+    if (
+      statusRaw === "in-progress" ||
+      statusRaw === "doing" ||
+      statusRaw === "running" ||
+      statusRaw === "inprogress"
+    ) {
+      return { text, status: "in_progress" as const };
+    }
+    return { text, status: "pending" as const };
+  });
+}
+
+export function isCollabTool(data: unknown) {
+  const normalized = compactToolName(String(asRecord(data)?.tool ?? ""));
+  return COLLAB_TOOLS.has(normalized) || normalized.startsWith("collab");
+}
+
+export function collabToolLabel(data: unknown) {
+  const tool = compactToolName(String(asRecord(data)?.tool ?? "collab"));
+  if (tool === "spawnagent") return "启动子代理";
+  if (tool === "waitagent" || tool === "wait") return "等待子代理";
+  if (tool === "sendinput") return "向子代理发送";
+  if (tool === "closeagent") return "关闭子代理";
+  if (tool === "resumeagent") return "恢复子代理";
+  if (tool === "handoff") return "交接子代理";
+  return tool.startsWith("collab") ? "子代理协作" : `子代理 · ${tool}`;
+}
+
 export function toolCallRequest(data: unknown) {
   const record = asRecord(data);
   if (!record) return "";
@@ -68,7 +151,8 @@ export function toolCallTitle(data: unknown) {
   if (tool === "web_search") {
     return (typeof record?.query === "string" && record.query.trim()) || "Web search";
   }
-  if (tool === "update_plan") return "Update plan";
+  if (tool === "update_plan") return "计划";
+  if (isCollabTool(record)) return collabToolLabel(record);
   if (tool.startsWith("mcp__")) return tool.slice(5).replaceAll("__", " / ");
   return tool || "Tool call";
 }

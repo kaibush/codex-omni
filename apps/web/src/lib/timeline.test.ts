@@ -78,4 +78,18 @@ describe("compactTimelineEvents", () => {
     expect(result[0]?.text).toContain("先检查");
     expect(result[0]?.text).toContain("再修改");
   });
+
+  it("keeps plan and collab tools out of activity groups", () => {
+    const result = compactTimelineEvents([
+      item("plan-1", 1, { kind: "tool", data: { tool: "update_plan", items: [] } }),
+      item("tool-1", 2, { kind: "tool", data: { command: "pnpm test" } }),
+      item("file-1", 3, { kind: "file", data: { changes: [] } }),
+      item("collab-1", 4, { kind: "tool", data: { tool: "spawn_agent", prompt: "go" } })
+    ]);
+    expect(result.map((entry) => entry.id)).toEqual([
+      "plan-1",
+      "activity-group-tool-1",
+      "collab-1"
+    ]);
+  });
 });

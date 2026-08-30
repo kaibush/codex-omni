@@ -20,6 +20,7 @@ import {
   FilePlus,
   GitFork,
   Link2,
+  ListChecks,
   LoaderCircle,
   Pencil,
   Quote,
@@ -43,7 +44,16 @@ import "katex/dist/katex.min.css";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { useTheme } from "@/context/theme-provider";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
-import { isCommandTool, toolCallOutput, toolCallRequest, toolCallTitle } from "@/lib/tool-event";
+import {
+  collabToolLabel,
+  isCollabTool,
+  isCommandTool,
+  isPlanTool,
+  parsePlanItems,
+  toolCallOutput,
+  toolCallRequest,
+  toolCallTitle
+} from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
@@ -329,6 +339,72 @@ function ToolSection({
   );
 }
 
+function asText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asIdList(value: unknown) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function PlanCard({ data }: { data: unknown }) {
+  const items = parsePlanItems(data);
+  return (
+    <div className="plan-card">
+      {items.length ? (
+        <ul className="plan-card-list">
+          {items.map((item, index) => (
+            <li key={`${item.text}-${index}`} className={`plan-card-item is-${item.status}`}>
+              {item.status === "completed" ? (
+                <Check className="size-3.5" />
+              ) : item.status === "in_progress" ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <span className="plan-card-dot" />
+              )}
+              <span className="plan-card-text">{item.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="plan-card-empty">暂无计划步骤。</p>
+      )}
+    </div>
+  );
+}
+
+function CollabCard({ data }: { data: unknown }) {
+  const record = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const nested =
+    record.input && typeof record.input === "object" && !Array.isArray(record.input)
+      ? (record.input as Record<string, unknown>)
+      : {};
+  const prompt =
+    asText(record.prompt) ||
+    asText(record.message) ||
+    asText(record.input) ||
+    asText(nested.prompt);
+  const receivers = asIdList(
+    record.receiverThreadIds ??
+      record.receiver_thread_ids ??
+      record.receiverThreadId ??
+      record.newThreadId ??
+      nested.receiverThreadIds ??
+      nested.receiver_thread_ids
+  );
+  if (!prompt && !receivers.length) return null;
+  return (
+    <div className="plan-card">
+      {receivers.length ? (
+        <p className="text-xs text-muted-foreground">目标 {receivers.join("、")}</p>
+      ) : null}
+      {prompt ? <p className="plan-card-prompt">{prompt}</p> : null}
+    </div>
+  );
+}
+
 export function EventCard({
   item,
   providerName,
@@ -368,7 +444,11 @@ export function EventCard({
   onSaveNote?: (() => void) | undefined;
   onSummarize?: (() => void) | undefined;
 }) {
-  const [open, setOpen] = useState(defaultOpen && item.kind !== "reasoning");
+  const [open, setOpen] = useState(() => {
+    if (item.kind === "reasoning") return false;
+    if (item.kind === "tool" && (isPlanTool(item.data) || isCollabTool(item.data))) return true;
+    return defaultOpen;
+  });
   if (hidden) return null;
   const highlightClass = highlighted ? " is-highlighted" : "";
   if (item.kind === "user")
@@ -672,6 +752,59 @@ export function EventCard({
     );
   }
   const isTool = item.kind === "tool";
+  if (isTool && isPlanTool(item.data)) {
+    const status = typeof item.data?.status === "string" ? item.data.status : "";
+    const items = parsePlanItems(item.data);
+    const completed = items.filter((entry) => entry.status === "completed").length;
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <ListChecks />
+          </span>
+          <span className="min-w-0 truncate">计划</span>
+          {items.length ? (
+            <span className="text-xs font-normal text-muted-foreground">
+              {completed}/{items.length}
+            </span>
+          ) : null}
+          {status === "in_progress" ? (
+            <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+          ) : item.createdAt ? (
+            <EventTime value={item.createdAt} className="ml-auto" />
+          ) : null}
+        </button>
+        {open ? <PlanCard data={item.data} /> : null}
+      </article>
+    );
+  }
+  if (isTool && isCollabTool(item.data)) {
+    const status = typeof item.data?.status === "string" ? item.data.status : "";
+    return (
+      <article
+        data-message-id={item.id}
+        className={`event-card event-card-bot compact${highlightClass}`}
+      >
+        <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
+          <CollapseIcon open={open} />
+          <span className="icon-muted">
+            <Bot />
+          </span>
+          <span className="min-w-0 truncate">{collabToolLabel(item.data)}</span>
+          {status === "in_progress" ? (
+            <LoaderCircle className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+          ) : item.createdAt ? (
+            <EventTime value={item.createdAt} className="ml-auto" />
+          ) : null}
+        </button>
+        {open ? <CollabCard data={item.data} /> : null}
+      </article>
+    );
+  }
   const commandTool = isTool && isCommandTool(item.data);
   const request = isTool ? toolCallRequest(item.data) : "";
   const output = isTool ? toolCallOutput(item.data, item.text) : "";
