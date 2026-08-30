@@ -112,6 +112,22 @@ describe("normalizer", () => {
     });
   });
 
+  it("skips empty error placeholders used for unsupported exec items", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.map({
+        type: "item.started",
+        item: { id: "item_6", type: "error", message: "" }
+      })
+    ).toEqual([]);
+    expect(
+      n.map({
+        type: "item.completed",
+        item: { id: "item_6", type: "error" } as never
+      })
+    ).toEqual([]);
+  });
+
   it("keeps automatic reconnect attempts non-terminal", () => {
     const n = createNormalizer(req);
     const [event] = n.map({

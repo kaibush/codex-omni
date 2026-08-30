@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanCommand,
+  collabCardDetails,
   collabToolLabel,
   isCollabTool,
   isPlanTool,
@@ -89,5 +90,35 @@ describe("plan and collab tool detection", () => {
     expect(isCollabTool({ tool: "mcp__codex__spawn_agent" })).toBe(true);
     expect(isCollabTool({ tool: "command" })).toBe(false);
     expect(collabToolLabel({ tool: "spawn_agent" })).toBe("启动子代理");
+  });
+});
+
+describe("collabCardDetails", () => {
+  it("extracts spawn nickname and wait results", () => {
+    expect(
+      collabCardDetails({
+        tool: "spawn_agent",
+        prompt: "Query the current date",
+        output: JSON.stringify({ agent_id: "agent-1", nickname: "Ramanujan" })
+      })
+    ).toMatchObject({
+      prompt: "Query the current date",
+      nickname: "Ramanujan",
+      receivers: ["agent-1"],
+      result: "已启动 Ramanujan"
+    });
+    expect(
+      collabCardDetails({
+        tool: "wait_agent",
+        receiverThreadIds: ["agent-1"],
+        output: JSON.stringify({
+          status: { "agent-1": { completed: "Sun Aug 30 05:22:22 UTC 2026" } },
+          timed_out: false
+        })
+      })
+    ).toMatchObject({
+      receivers: ["agent-1"],
+      result: "Sun Aug 30 05:22:22 UTC 2026"
+    });
   });
 });

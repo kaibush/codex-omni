@@ -2,6 +2,7 @@ import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { Codex } from "@openai/codex-sdk";
 import { bridgeRequestSchema } from "@codex-omni/protocol";
+import { createCollabRolloutTailer } from "./collab-rollout.js";
 import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { createNormalizer } from "./normalizer.js";
 import { workerEnvironment } from "./provider-home.js";
@@ -54,6 +55,13 @@ const requestApproval = (item: { id: string; command: string }) => {
   });
 };
 send(normalizer.initial());
+const collabTailer = createCollabRolloutTailer(request.codexHome);
+if (request.threadId) collabTailer.setThreadId(request.threadId);
+const flushCollab = () => {
+  for (const event of collabTailer.flush()) send(normalizer.toolEvent(event));
+};
+const collabTimer = setInterval(flushCollab, 250);
+collabTimer.unref();
 try {
   const codex = new Codex({
     ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
@@ -89,15 +97,20 @@ try {
       const allowed = await requestApproval(event.item);
       if (!allowed) throw new Error("Command denied by user");
     }
+    if (event.type === "thread.started") collabTailer.setThreadId(event.thread_id);
     for (const mapped of normalizer.map(event)) {
       send(mapped);
       if (mapped.type === "run.failed") terminalFailure = true;
     }
+    flushCollab();
   }
+  flushCollab();
   if (terminalFailure) process.exitCode = 1;
 } catch (error) {
   send(normalizer.failure(error));
   process.exitCode = 1;
 } finally {
+  clearInterval(collabTimer);
+  flushCollab();
   rl.close();
 }

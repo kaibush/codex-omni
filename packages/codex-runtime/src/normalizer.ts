@@ -228,15 +228,20 @@ export function createNormalizer(request: BridgeRequest) {
           phase
         })
       ];
-    if (item.type === "error")
+    if (item.type === "error") {
+      const message = String(asRecord(item)?.message ?? "").trim();
+      // Exec JSON cannot represent collab/sub-agent items, so the CLI emits
+      // empty error placeholders. Those are recovered from the session JSONL.
+      if (!message) return [];
       return [
         envelope("tool.output", {
           itemId: item.id,
           tool: "runtime_error",
-          message: item.message,
+          message,
           phase
         })
       ];
+    }
     return mapUnknownItem(phase, item, envelope);
   };
   const timedItemEvent = (
@@ -329,6 +334,17 @@ export function createNormalizer(request: BridgeRequest) {
         ];
       }
       return timedItemEvent(event.type.slice(5) as "started" | "updated" | "completed", event.item);
+    },
+    toolEvent: (payload: Record<string, unknown>) => {
+      firstResponseAt ??= Date.now();
+      const phase = payload.phase === "started" ? "started" : "completed";
+      return envelope(phase === "started" ? "tool.started" : "tool.output", {
+        ...payload,
+        phase,
+        status: payload.status ?? (phase === "started" ? "in_progress" : "completed"),
+        startedAt,
+        firstResponseAt
+      });
     },
     approvalRequested: (payload: {
       approvalId: string;

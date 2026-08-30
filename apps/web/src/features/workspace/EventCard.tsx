@@ -45,6 +45,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { useTheme } from "@/context/theme-provider";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import {
+  collabCardDetails,
   collabToolLabel,
   isCollabTool,
   isCommandTool,
@@ -339,16 +340,6 @@ function ToolSection({
   );
 }
 
-function asText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function asIdList(value: unknown) {
-  if (Array.isArray(value)) return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
-  if (typeof value === "string" && value.trim()) return [value.trim()];
-  return [];
-}
-
 function PlanCard({ data }: { data: unknown }) {
   const items = parsePlanItems(data);
   return (
@@ -376,31 +367,20 @@ function PlanCard({ data }: { data: unknown }) {
 }
 
 function CollabCard({ data }: { data: unknown }) {
-  const record = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-  const nested =
-    record.input && typeof record.input === "object" && !Array.isArray(record.input)
-      ? (record.input as Record<string, unknown>)
-      : {};
-  const prompt =
-    asText(record.prompt) ||
-    asText(record.message) ||
-    asText(record.input) ||
-    asText(nested.prompt);
-  const receivers = asIdList(
-    record.receiverThreadIds ??
-      record.receiver_thread_ids ??
-      record.receiverThreadId ??
-      record.newThreadId ??
-      nested.receiverThreadIds ??
-      nested.receiver_thread_ids
-  );
-  if (!prompt && !receivers.length) return null;
+  const details = collabCardDetails(data);
+  if (!details.prompt && !details.receivers.length && !details.result) return null;
   return (
     <div className="plan-card">
-      {receivers.length ? (
-        <p className="text-xs text-muted-foreground">目标 {receivers.join("、")}</p>
+      {details.nickname ? (
+        <p className="text-xs text-muted-foreground">{details.nickname}</p>
       ) : null}
-      {prompt ? <p className="plan-card-prompt">{prompt}</p> : null}
+      {details.receivers.length ? (
+        <p className="text-xs text-muted-foreground">目标 {details.receivers.join("、")}</p>
+      ) : null}
+      {details.prompt ? <p className="plan-card-prompt">{details.prompt}</p> : null}
+      {details.result && details.result !== details.prompt ? (
+        <p className="plan-card-prompt">{details.result}</p>
+      ) : null}
     </div>
   );
 }

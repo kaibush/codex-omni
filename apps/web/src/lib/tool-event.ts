@@ -113,6 +113,75 @@ export function collabToolLabel(data: unknown) {
   return tool.startsWith("collab") ? "子代理协作" : `子代理 · ${tool}`;
 }
 
+function asText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asIdList(value: unknown) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function uniqueIds(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function collabCardDetails(data: unknown) {
+  const record = asRecord(data) ?? {};
+  const nested = asRecord(record.input) ?? {};
+  const output = asText(record.output);
+  const parsed = parseJsonRecord(output) ?? parseJsonRecord(record.agentStatus);
+  const prompt =
+    asText(record.prompt) ||
+    asText(record.message) ||
+    asText(nested.message) ||
+    asText(nested.prompt);
+  const nickname = asText(record.nickname) || asText(parsed?.nickname);
+  const receivers = uniqueIds([
+    ...asIdList(record.receiverThreadIds),
+    ...asIdList(record.receiver_thread_ids),
+    ...asIdList(nested.targets),
+    ...asIdList(nested.target),
+    ...asIdList(parsed?.agent_id)
+  ]);
+  let result = output;
+  const status = asRecord(parsed?.status);
+  if (status) {
+    const parts = Object.values(status)
+      .map((value) => {
+        const row = asRecord(value);
+        return asText(row?.completed) || asText(value);
+      })
+      .filter(Boolean);
+    if (parts.length) result = parts.join("\n");
+  } else if (nickname && asText(parsed?.agent_id)) {
+    result = `已启动 ${nickname}`;
+  }
+  return { prompt, nickname, receivers, result };
+}
+
 export function toolCallRequest(data: unknown) {
   const record = asRecord(data);
   if (!record) return "";

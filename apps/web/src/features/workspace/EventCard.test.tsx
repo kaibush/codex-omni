@@ -182,4 +182,25 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("Explore the repo");
     expect(html).toContain("agent-a");
   });
+
+  it("renders wait_agent results instead of runtime errors", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "collab-2",
+          kind: "tool",
+          data: {
+            tool: "wait_agent",
+            receiverThreadIds: ["agent-1"],
+            output: JSON.stringify({
+              status: { "agent-1": { completed: "Sun Aug 30 05:22:22 UTC 2026" } }
+            })
+          }
+        }}
+      />
+    );
+    expect(html).toContain("等待子代理");
+    expect(html).toContain("Sun Aug 30 05:22:22 UTC 2026");
+    expect(html).not.toContain("runtime_error");
+  });
 });
