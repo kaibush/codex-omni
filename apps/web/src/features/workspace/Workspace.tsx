@@ -1936,6 +1936,7 @@ export function Workspace() {
               hasOlderMessages={hasOlderMessages}
               historyLoading={historyLoading}
               activeSession={activeSession ?? undefined}
+              projectPath={activeProject?.realPath}
               sessionLoading={sessionLoading}
               detailError={detail.isError}
               refetchDetail={() => void detail.refetch()}

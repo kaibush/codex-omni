@@ -84,6 +84,7 @@ import {
   suggestedCopyPath,
   tabFromMedia,
   tabFromPreview,
+  toProjectRelativePath,
   treeFilterPaths,
   unifiedDiff,
   visibleFileEntries,
@@ -255,14 +256,24 @@ function FilePreviewPane({
   theme: "light" | "dark";
   projectId: string;
 }) {
+  const [mediaError, setMediaError] = useState(false);
+  useEffect(() => {
+    setMediaError(false);
+  }, [tab.path, tab.previewKind, projectId]);
+
   if (tab.previewKind === "image") {
     return (
-      <div className="grid h-full place-items-center overflow-auto p-4">
-        <img
-          src={mediaUrl(projectId, tab.path)}
-          alt={tab.path}
-          className="max-h-full max-w-full rounded-lg border bg-muted object-contain"
-        />
+      <div className="flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-auto p-4">
+        {mediaError ? (
+          <p className="text-sm text-muted-foreground">图片无法显示</p>
+        ) : (
+          <img
+            src={mediaUrl(projectId, tab.path)}
+            alt={tab.path}
+            className="max-h-full max-w-full rounded-lg border bg-muted object-contain"
+            onError={() => setMediaError(true)}
+          />
+        )}
       </div>
     );
   }
@@ -271,20 +282,20 @@ function FilePreviewPane({
       <iframe
         title={tab.path}
         src={mediaUrl(projectId, tab.path)}
-        className="h-full w-full border-0 bg-muted"
+        className="h-full min-h-0 w-full flex-1 border-0 bg-muted"
       />
     );
   }
   if (tab.previewKind === "audio") {
     return (
-      <div className="grid h-full place-items-center p-6">
+      <div className="flex h-full min-h-0 w-full flex-1 items-center justify-center p-6">
         <audio controls src={mediaUrl(projectId, tab.path)} className="w-full max-w-xl" />
       </div>
     );
   }
   if (tab.previewKind === "video") {
     return (
-      <div className="grid h-full place-items-center overflow-auto p-4">
+      <div className="flex h-full min-h-0 w-full flex-1 items-center justify-center overflow-auto p-4">
         <video
           controls
           src={mediaUrl(projectId, tab.path)}
@@ -605,22 +616,37 @@ function FilesWorkspace({
   };
 
   const openPath = async (targetPath: string, line: number | null = null) => {
-    const existing = tabsRef.current.find((tab) => tab.path === targetPath);
-    if (existing) {
-      setActivePath(targetPath);
-      setSelectedPath(targetPath);
+    const relativePath = toProjectRelativePath(targetPath, project.realPath);
+    if (!relativePath) {
+      setError("该文件不在当前项目目录内，无法打开。");
       setMobilePane("editor");
-      if (line) updateTab(targetPath, { line, mode: "edit" });
       return;
     }
-    if (openingPath) return;
+    const existing = tabsRef.current.find((tab) => tab.path === relativePath);
+    if (existing) {
+      setActivePath(relativePath);
+      setSelectedPath(relativePath);
+      setMobilePane("editor");
+      if (isMediaPreview(existing.previewKind)) {
+        updateTab(relativePath, { mode: "preview", ...(line ? { line } : {}) });
+      } else if (line) {
+        updateTab(relativePath, { line, mode: "edit" });
+      }
+      return;
+    }
+    if (openingPath === relativePath) {
+      setActivePath(relativePath);
+      setSelectedPath(relativePath);
+      setMobilePane("editor");
+      return;
+    }
     try {
-      setOpeningPath(targetPath);
+      setOpeningPath(relativePath);
       setError("");
       const meta = await api<FileMeta>(
-        `/api/projects/${project.id}/file/meta?path=${encodeURIComponent(targetPath)}`
+        `/api/projects/${project.id}/file/meta?path=${encodeURIComponent(relativePath)}`
       );
-      const kind = previewKindFor(targetPath, meta.text);
+      const kind = previewKindFor(relativePath, meta.text);
       const tab = isMediaPreview(kind)
         ? tabFromMedia({
             path: meta.path,
@@ -631,7 +657,7 @@ function FilesWorkspace({
           })
         : tabFromPreview(
             await api<FilePreview>(
-              `/api/projects/${project.id}/file?path=${encodeURIComponent(targetPath)}`
+              `/api/projects/${project.id}/file?path=${encodeURIComponent(relativePath)}`
             ),
             line
           );
@@ -642,6 +668,7 @@ function FilesWorkspace({
       setMobilePane("editor");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+      setMobilePane("editor");
     } finally {
       setOpeningPath(null);
     }
@@ -649,8 +676,13 @@ function FilesWorkspace({
 
   useEffect(() => {
     if (!openRequest?.path) return;
-    void openPath(openRequest.path, openRequest.line);
-    onOpened?.();
+    let cancelled = false;
+    void openPath(openRequest.path, openRequest.line).finally(() => {
+      if (!cancelled) onOpened?.();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [openRequest]);
 
   useEffect(() => {
@@ -1637,7 +1669,7 @@ function FilesWorkspace({
                   </div>
                 )}
               {(activeTab.mode === "preview" || activeTab.split) && (
-                <div className="min-h-0 min-w-0 overflow-auto border-t border-border md:border-l md:border-t-0">
+                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto border-t border-border md:border-l md:border-t-0">
                   <FilePreviewPane tab={activeTab} theme={resolvedTheme} projectId={project.id} />
                 </div>
               )}
@@ -1807,7 +1839,7 @@ export function ProjectFilesPanel({
   onCommandHandled?: (() => void) | undefined;
 }) {
   const [openRequest, setOpenRequest] = useState<{ path: string; line: number | null } | null>(
-    null
+    openFileRequest ?? null
   );
   useEffect(() => {
     if (!openFileRequest?.path) return;

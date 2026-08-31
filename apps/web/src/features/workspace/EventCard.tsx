@@ -73,6 +73,7 @@ import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
 import { VirtualLog } from "./VirtualLog";
 import { fileChangeEntries } from "./file-change";
+import { toProjectRelativePath } from "./file-workspace";
 import {
   downloadTextFile,
   linkFileRefs,
@@ -415,23 +416,32 @@ function CollabCard({
   );
 }
 
-function projectImageSrc(projectId: string | undefined, path: string) {
-  if (!projectId || !path || path.startsWith("/")) return "";
-  return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(path)}&inline=1`;
+function projectImageSrc(
+  projectId: string | undefined,
+  path: string,
+  projectPath?: string | undefined
+) {
+  if (!projectId || !path) return "";
+  const relative = toProjectRelativePath(path, projectPath);
+  if (!relative) return "";
+  return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(relative)}&inline=1`;
 }
 
 function ViewImageCard({
   path,
   projectId,
+  projectPath,
   onOpenFile
 }: {
   path: string;
   projectId?: string | undefined;
+  projectPath?: string | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
 }) {
   const [failed, setFailed] = useState(false);
-  const src = projectImageSrc(projectId, path);
+  const src = projectImageSrc(projectId, path, projectPath);
   const name = path.split("/").filter(Boolean).at(-1) || path;
+  const openPath = toProjectRelativePath(path, projectPath) ?? path;
   return (
     <div className="plan-card">
       {src && !failed ? (
@@ -442,7 +452,7 @@ function ViewImageCard({
         <button
           type="button"
           className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs"
-          onClick={() => onOpenFile(path, null)}
+          onClick={() => onOpenFile(openPath, null)}
         >
           在文件中打开
         </button>
@@ -505,6 +515,7 @@ export function EventCard({
   showProviderLabel = true,
   highlighted = false,
   projectId,
+  projectPath,
   onApproval,
   onFork,
   onOpenFile,
@@ -527,6 +538,7 @@ export function EventCard({
   showProviderLabel?: boolean;
   highlighted?: boolean | undefined;
   projectId?: string | undefined;
+  projectPath?: string | undefined;
   onApproval?: (requestId: string, decision: "accept" | "acceptForSession" | "decline") => void;
   onFork?: (() => void) | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
@@ -925,7 +937,14 @@ export function EventCard({
           </span>
           {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
         </button>
-        {open ? <ViewImageCard path={path} projectId={projectId} onOpenFile={onOpenFile} /> : null}
+        {open ? (
+          <ViewImageCard
+            path={path}
+            projectId={projectId}
+            projectPath={projectPath}
+            onOpenFile={onOpenFile}
+          />
+        ) : null}
       </article>
     );
   }

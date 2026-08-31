@@ -99,6 +99,27 @@ export function joinProjectPath(directory: string, name: string) {
   return parent ? `${parent}/${base}` : base;
 }
 
+function toPosixPath(value: string) {
+  return value.replace(/\\/g, "/");
+}
+
+export function toProjectRelativePath(inputPath: string, projectRealPath?: string | null) {
+  const raw = toPosixPath(inputPath).trim();
+  if (!raw) return null;
+  const isAbsolute = raw.startsWith("/") || /^[A-Za-z]:\//.test(raw);
+  if (!isAbsolute) {
+    const relative = raw.replace(/^\.\//, "").replace(/\/+$/, "");
+    return relative || null;
+  }
+  const root = toPosixPath(projectRealPath ?? "").replace(/\/+$/, "");
+  if (!root) return null;
+  if (raw === root) return null;
+  const prefix = `${root}/`;
+  if (!raw.startsWith(prefix)) return null;
+  const relative = raw.slice(prefix.length).replace(/\/+$/, "");
+  return relative || null;
+}
+
 export function parentProjectPath(relativePath: string) {
   const parts = relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
   parts.pop();

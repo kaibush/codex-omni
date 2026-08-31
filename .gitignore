@@ -20,3 +20,6 @@ release/
 # local agent instructions, not for GitHub
 AGENTS.md
 agents.md
+
+# local chat/terminal uploads, not for GitHub
+.codex-uploads/

@@ -78,6 +78,7 @@ export function WorkspaceTimeline({
   hasOlderMessages,
   historyLoading,
   activeSession,
+  projectPath,
   sessionLoading,
   detailError,
   refetchDetail,
@@ -127,6 +128,7 @@ export function WorkspaceTimeline({
   hasOlderMessages: boolean;
   historyLoading: boolean;
   activeSession: Session | undefined;
+  projectPath?: string | undefined;
   sessionLoading: boolean;
   detailError: boolean;
   refetchDetail: () => void;
@@ -331,6 +333,7 @@ export function WorkspaceTimeline({
                 showProviderLabel={workspaceSettings.showProviderLabels}
                 providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
                 projectId={activeSession?.projectId}
+                projectPath={projectPath}
                 onReply={(text) => void submitMessage(text)}
                 onOpenThread={(threadId) => {
                   const match = recentSessions.find((session) => session.threadId === threadId);

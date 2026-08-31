@@ -1345,10 +1345,16 @@ button.composer-chip:hover,
   padding: 0.25rem 0.35rem 0.25rem 0.7rem;
   color: var(--background);
 }
-.markdown-code-inline-block code {
+.markdown-code-inline-block code,
+.markdown .markdown-code-inline-block code,
+.event-card-user .markdown .markdown-code-inline-block code {
   min-width: 0;
   flex: 1;
   overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 0.78rem;
   line-height: 1.5;

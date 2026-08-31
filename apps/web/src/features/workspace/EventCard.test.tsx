@@ -24,6 +24,23 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("2 行");
   });
 
+  it("renders short single-line commands as compact copyable blocks", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "assistant-cmd",
+          kind: "assistant",
+          text: "请你在自己的终端执行：\n```bash\nkill 1942793 1942794\n```"
+        }}
+      />
+    );
+
+    expect(html).toContain("markdown-code-inline-block");
+    expect(html).toContain("kill 1942793 1942794");
+    expect(html).toContain('aria-label="复制代码"');
+    expect(html).not.toContain("markdown-code-language");
+  });
+
   it("renders fenced code in user bubbles with its own copy control", () => {
     const html = renderToStaticMarkup(
       <EventCard
@@ -352,5 +369,58 @@ describe("EventCard copy controls", () => {
       <EventCard item={{ id: "r1", kind: "reasoning", text: "secret-thought" }} defaultOpen />
     );
     expect(opened).toContain("secret-thought");
+  });
+
+  it("renders view_image open-in-files and project-relative preview urls", () => {
+    const relative = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "img-open-1",
+          kind: "tool",
+          data: { tool: "view_image", path: ".codex-uploads/foo.png" }
+        }}
+        projectId="proj-1"
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(relative).toContain("查看图片");
+    expect(relative).toContain("在文件中打开");
+    expect(relative).toContain(
+      `/api/projects/proj-1/files/download?path=${encodeURIComponent(".codex-uploads/foo.png")}&amp;inline=1`
+    );
+
+    const inside = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "img-open-2",
+          kind: "tool",
+          data: { tool: "view_image", path: "/workspace/app/.codex-uploads/foo.png" }
+        }}
+        projectId="proj-1"
+        projectPath="/workspace/app"
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(inside).toContain("在文件中打开");
+    expect(inside).toContain(
+      `/api/projects/proj-1/files/download?path=${encodeURIComponent(".codex-uploads/foo.png")}&amp;inline=1`
+    );
+
+    const outside = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "img-open-3",
+          kind: "tool",
+          data: { tool: "view_image", path: "/tmp/gamepad.png" }
+        }}
+        projectId="proj-1"
+        projectPath="/workspace/app"
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(outside).toContain("查看图片");
+    expect(outside).toContain("在文件中打开");
+    expect(outside).toContain("/tmp/gamepad.png");
+    expect(outside).not.toContain("files/download?path=tmp");
   });
 });

@@ -5,6 +5,7 @@ import {
   parentProjectPath,
   previewKindFor,
   suggestedCopyPath,
+  toProjectRelativePath,
   treeFilterPaths,
   unifiedDiff,
   visibleFileEntries
@@ -64,10 +65,26 @@ describe("file workspace helpers", () => {
 
   it("classifies media and markdown preview kinds", () => {
     expect(previewKindFor("shot.png")).toBe("image");
+    expect(previewKindFor(".codex-uploads/foo.png")).toBe("image");
+    expect(previewKindFor("/tmp/gamepad.png")).toBe("image");
     expect(previewKindFor("spec.pdf")).toBe("pdf");
     expect(previewKindFor("note.md")).toBe("markdown");
     expect(previewKindFor("app.ts", true)).toBe("text");
     expect(previewKindFor("blob.bin")).toBe("binary");
+  });
+
+  it("converts project-absolute paths and rejects files outside the project", () => {
+    expect(toProjectRelativePath(".codex-uploads/foo.png", "/repo/app")).toBe(
+      ".codex-uploads/foo.png"
+    );
+    expect(toProjectRelativePath("./docs/shot.png", "/repo/app")).toBe("docs/shot.png");
+    expect(toProjectRelativePath("/repo/app/.codex-uploads/foo.png", "/repo/app")).toBe(
+      ".codex-uploads/foo.png"
+    );
+    expect(toProjectRelativePath("/tmp/gamepad.png", "/repo/app")).toBeNull();
+    expect(toProjectRelativePath("/repo/app-extra/x.png", "/repo/app")).toBeNull();
+    expect(toProjectRelativePath("/repo/app", "/repo/app")).toBeNull();
+    expect(toProjectRelativePath("/tmp/gamepad.png")).toBeNull();
   });
 
   it("builds a unified diff for inserted and deleted lines", () => {
