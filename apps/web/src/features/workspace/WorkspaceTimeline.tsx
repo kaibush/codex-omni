@@ -1,4 +1,12 @@
-import type { Dispatch, SetStateAction, RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+  type RefObject
+} from "react";
 import {
   CircleAlert,
   Clock3,
@@ -24,6 +32,37 @@ import {
   TIMELINE_VIEW_OPTIONS,
   type TimelineView
 } from "@/lib/timeline";
+
+function useAutoHide(timeoutMs = 1800) {
+  const [visible, setVisible] = useState(true);
+  const pinnedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = () => {
+    if (!timerRef.current) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
+  const reveal = useCallback(() => {
+    setVisible(true);
+    clearTimer();
+    if (pinnedRef.current) return;
+    timerRef.current = setTimeout(() => setVisible(false), timeoutMs);
+  }, [timeoutMs]);
+  const pin = useCallback(() => {
+    pinnedRef.current = true;
+    clearTimer();
+    setVisible(true);
+  }, []);
+  const unpin = useCallback(() => {
+    pinnedRef.current = false;
+    reveal();
+  }, [reveal]);
+  useEffect(() => {
+    reveal();
+    return clearTimer;
+  }, [reveal]);
+  return { visible, reveal, pin, unpin };
+}
 
 export function WorkspaceTimeline({
   workspaceView,
@@ -134,6 +173,7 @@ export function WorkspaceTimeline({
     ? displayEvents
     : displayEvents.filter((item) => item.kind !== "reasoning");
   const latestSession = recentSessions[0];
+  const viewToggle = useAutoHide();
   return (
     <div
       className={`chat-pane relative min-h-0 min-w-0 flex-1 overflow-hidden overscroll-none ${workspaceView === "chat" ? "" : "hidden"}`}
@@ -205,7 +245,10 @@ export function WorkspaceTimeline({
           // prevents a same-frame message/run update from snapping the first
           // upward wheel tick back to the bottom.
           if (event.deltaY < 0) stickToBottom.current = false;
+          viewToggle.reveal();
         }}
+        onPointerMove={viewToggle.reveal}
+        onPointerDown={viewToggle.reveal}
         onScroll={() => {
           const container = chatScroll.current;
           if (!container) return;
@@ -220,7 +263,11 @@ export function WorkspaceTimeline({
       >
         <div className="chat-content-width mx-auto flex min-w-0 flex-col gap-2.5 py-3 sm:gap-3 sm:py-4">
           {sessionId ? (
-            <div className="timeline-view-float">
+            <div
+              className={`timeline-view-float${viewToggle.visible ? " is-visible" : ""}`}
+              onPointerEnter={viewToggle.pin}
+              onPointerLeave={viewToggle.unpin}
+            >
               <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
                 {TIMELINE_VIEW_OPTIONS.map((option) => (
                   <button

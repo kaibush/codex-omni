@@ -1773,9 +1773,25 @@ button.composer-chip:hover,
   justify-content: flex-end;
   margin-bottom: -2.5rem;
   pointer-events: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
-.timeline-view-float .timeline-view-toggle {
+.timeline-view-float.is-visible,
+.timeline-view-float:focus-within {
+  opacity: 1;
+  transform: none;
+}
+.timeline-view-float.is-visible .timeline-view-toggle,
+.timeline-view-float:focus-within .timeline-view-toggle {
   pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .timeline-view-float {
+    transition: none;
+  }
 }
 .timeline-view-toggle {
   display: inline-flex;
