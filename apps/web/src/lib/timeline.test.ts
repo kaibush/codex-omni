@@ -63,6 +63,34 @@ describe("mergeSessionTimeline", () => {
       }).map((entry) => entry.id)
     ).toEqual(["m3", "stream", "error"]);
   });
+
+  it("keeps view_image input.path when history overwrites a live tool card", () => {
+    const merged = mergeSessionTimeline({
+      historical: [
+        item("tool-r1-img", 30, {
+          kind: "tool",
+          data: { tool: "view_image", phase: "completed", output: "" }
+        })
+      ],
+      current: [
+        item("tool-r1-img", 30, {
+          kind: "tool",
+          data: {
+            tool: "view_image",
+            phase: "started",
+            input: { path: "/repo/.codex-uploads/shot.png" }
+          }
+        })
+      ],
+      historyExpanded: false
+    });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.data).toMatchObject({
+      path: "/repo/.codex-uploads/shot.png",
+      input: { path: "/repo/.codex-uploads/shot.png" },
+      phase: "completed"
+    });
+  });
 });
 
 describe("compactTimelineEvents", () => {

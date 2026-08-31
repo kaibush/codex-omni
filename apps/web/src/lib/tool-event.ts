@@ -366,10 +366,27 @@ export function isViewImageTool(data: unknown): boolean {
   return toolName(data) === "viewimage";
 }
 
+export function mergeToolEventData(base: unknown, extra: unknown) {
+  const previous = asRecord(base) ?? {};
+  const next = asRecord(extra) ?? {};
+  const input = {
+    ...(parseJsonRecord(previous.input) ?? {}),
+    ...(parseJsonRecord(next.input) ?? {})
+  };
+  const path = firstString([next.path, previous.path, input.path]);
+  return {
+    ...previous,
+    ...next,
+    ...(Object.keys(input).length ? { input } : {}),
+    ...(path ? { path } : {})
+  };
+}
+
 export function viewImagePath(data: unknown): string {
   const record = asRecord(data);
   const nested = nestedRecord(data);
-  return firstString([record?.path, nested?.path]);
+  const args = record ? parseJsonRecord(record.arguments) : null;
+  return firstString([record?.path, nested?.path, args?.path, record?.file, nested?.file]);
 }
 
 export function isWriteStdinTool(data: unknown): boolean {

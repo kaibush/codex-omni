@@ -16,6 +16,7 @@ import {
   toolCallRequest,
   toolCallStatusLabel,
   toolCallTitle,
+  mergeToolEventData,
   viewImagePath,
   writeStdinDetails
 } from "./tool-event";
@@ -210,6 +211,19 @@ describe("special tool parsers", () => {
     expect(viewImagePath({ tool: "view_image", path: "/tmp/gamepad.png" })).toBe(
       "/tmp/gamepad.png"
     );
+    expect(
+      viewImagePath({ tool: "view_image", input: { path: "/repo/.codex-uploads/shot.png" } })
+    ).toBe("/repo/.codex-uploads/shot.png");
+    expect(
+      mergeToolEventData(
+        { tool: "view_image", input: { path: "/repo/.codex-uploads/shot.png" } },
+        { tool: "view_image", phase: "completed", output: "" }
+      )
+    ).toMatchObject({
+      path: "/repo/.codex-uploads/shot.png",
+      input: { path: "/repo/.codex-uploads/shot.png" },
+      phase: "completed"
+    });
     expect(
       writeStdinDetails({
         tool: "write_stdin",

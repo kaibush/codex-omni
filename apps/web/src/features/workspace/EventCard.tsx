@@ -451,8 +451,11 @@ function ViewImageCard({
       {onOpenFile ? (
         <button
           type="button"
-          className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs"
-          onClick={() => onOpenFile(openPath, null)}
+          className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs disabled:opacity-50"
+          disabled={!openPath.trim()}
+          onClick={() => {
+            if (openPath.trim()) onOpenFile(openPath, null);
+          }}
         >
           在文件中打开
         </button>

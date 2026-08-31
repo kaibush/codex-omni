@@ -24,6 +24,7 @@ import {
 } from "@codex-omni/protocol";
 import { captureGitCheckpoint } from "./project-git.js";
 import { backfillSessionRolloutTools, rolloutToolPayload } from "./session-rollout.js";
+import { mergeToolPayload } from "./tool-payload.js";
 import { applyPlanMode, applyProjectRules } from "./workspace-loop.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
@@ -362,7 +363,7 @@ export class RunManager {
                 : null;
     if (!role) return;
     const active = this.activeRuns.get(sessionId);
-    const data =
+    let data: Record<string, any> =
       compact.type === "turn.completed" || compact.type === "run.failed"
         ? {
             ...payload,
@@ -371,6 +372,15 @@ export class RunManager {
             runId: compact.requestId
           }
         : payload;
+    if (compact.type === "tool.started" || compact.type === "tool.output") {
+      let existingData: unknown = {};
+      try {
+        existingData = existing?.dataJson ? JSON.parse(existing.dataJson) : {};
+      } catch {
+        existingData = {};
+      }
+      data = mergeToolPayload(existingData, data);
+    }
     const folded =
       compact.type === "reasoning.delta"
         ? applyTextPatch(existing?.content ?? "", payload)

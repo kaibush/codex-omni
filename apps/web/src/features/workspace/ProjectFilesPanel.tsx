@@ -616,7 +616,14 @@ function FilesWorkspace({
   };
 
   const openPath = async (targetPath: string, line: number | null = null) => {
-    const relativePath = toProjectRelativePath(targetPath, project.realPath);
+    if (!targetPath.trim()) {
+      setError("无法打开：文件路径为空。");
+      setMobilePane("editor");
+      return;
+    }
+    const relativePath =
+      toProjectRelativePath(targetPath, project.realPath) ??
+      toProjectRelativePath(targetPath, project.displayPath);
     if (!relativePath) {
       setError("该文件不在当前项目目录内，无法打开。");
       setMobilePane("editor");

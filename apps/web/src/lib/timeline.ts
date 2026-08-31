@@ -1,4 +1,4 @@
-import { isRuntimePlaceholder, isStandaloneTimelineTool } from "@/lib/tool-event";
+import { isRuntimePlaceholder, isStandaloneTimelineTool, mergeToolEventData } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 
 export const TIMELINE_VIEWS = ["folded", "flat", "expanded"] as const;
@@ -125,7 +125,21 @@ export function mergeSessionTimeline(input: {
   current: TimelineItem[];
   historyExpanded: boolean;
 }): TimelineItem[] {
-  const historicalIds = new Set(input.historical.map((item) => item.id));
+  const liveById = new Map(input.current.map((item) => [item.id, item]));
+  const historical = input.historical.map((item) => {
+    const live = liveById.get(item.id);
+    if (!live) return item;
+    const merged: TimelineItem = {
+      ...item,
+      data: mergeToolEventData(live.data, item.data)
+    };
+    const text = live.text || item.text;
+    if (text) merged.text = text;
+    if (live.streaming != null) merged.streaming = live.streaming;
+    else if (item.streaming != null) merged.streaming = item.streaming;
+    return merged;
+  });
+  const historicalIds = new Set(historical.map((item) => item.id));
   const extras = input.current.filter((item) => !historicalIds.has(item.id));
   let firstHistoricalIndex = -1;
   let lastHistoricalIndex = -1;
@@ -134,8 +148,8 @@ export function mergeSessionTimeline(input: {
     if (firstHistoricalIndex < 0) firstHistoricalIndex = index;
     lastHistoricalIndex = index;
   });
-  const oldestCreatedAt = input.historical[0]?.createdAt ?? 0;
-  const newestCreatedAt = input.historical.at(-1)?.createdAt ?? 0;
+  const oldestCreatedAt = historical[0]?.createdAt ?? 0;
+  const newestCreatedAt = historical.at(-1)?.createdAt ?? 0;
   const older = input.historyExpanded
     ? firstHistoricalIndex >= 0
       ? input.current.slice(0, firstHistoricalIndex).filter((item) => !historicalIds.has(item.id))
@@ -157,5 +171,5 @@ export function mergeSessionTimeline(input: {
     if (item.kind === "error") return true;
     return (item.createdAt ?? 0) > newestCreatedAt;
   });
-  return [...older, ...input.historical, ...inFlight];
+  return [...older, ...historical, ...inFlight];
 }
