@@ -1518,8 +1518,8 @@ button.composer-chip:hover,
     max-width: 100%;
     overflow-x: hidden;
   }
-  .chat-pane:has(.timeline-view-toggle) .chat-content-width {
-    padding-top: 3rem;
+  .chat-pane:has(.timeline-view-float) .chat-content-width {
+    padding-top: 0.25rem;
   }
   .event-title {
     flex-wrap: nowrap;
@@ -1765,19 +1765,29 @@ button.composer-chip:hover,
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.timeline-view-float {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -2.5rem;
+  pointer-events: none;
+}
+.timeline-view-float .timeline-view-toggle {
+  pointer-events: auto;
+}
 .timeline-view-toggle {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 30;
   display: inline-flex;
   height: 2rem;
   align-items: center;
   gap: 0.15rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: var(--card);
+  background: color-mix(in oklab, var(--card) 92%, transparent);
   padding: 0.15rem;
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 10%, transparent);
+  backdrop-filter: blur(16px);
 }
 .timeline-view-toggle button {
   height: 1.7rem;
@@ -1828,13 +1838,14 @@ button.composer-chip:hover,
   gap: 0.15rem;
 }
 @media (min-width: 768px) {
-  .timeline-view-toggle {
-    right: 3.25rem;
-  }
   .timeline-outline-toggle {
     display: inline-flex;
   }
+  .chat-pane:has(.timeline-outline.is-open) .timeline-view-float {
+    display: none;
+  }
 }
+
 .timeline-outline button {
   display: flex;
   min-width: 0;

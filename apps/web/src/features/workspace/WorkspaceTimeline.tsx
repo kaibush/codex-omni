@@ -168,25 +168,6 @@ export function WorkspaceTimeline({
           </button>
         </div>
       ) : null}
-      {sessionId ? (
-        <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
-          {TIMELINE_VIEW_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={timelineView === option.value ? "is-active" : undefined}
-              aria-pressed={timelineView === option.value}
-              title={option.hint}
-              onClick={() => {
-                if (option.value === timelineView) return;
-                void saveWorkspaceSettings({ ...workspaceSettings, timelineView: option.value });
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <TimelineOutline
         items={outlineEvents}
         activeId={highlightMessageId}
@@ -238,6 +219,27 @@ export function WorkspaceTimeline({
         className="chat-scroll absolute inset-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 sm:px-5 lg:px-8"
       >
         <div className="chat-content-width mx-auto flex min-w-0 flex-col gap-2.5 py-3 sm:gap-3 sm:py-4">
+          {sessionId ? (
+            <div className="timeline-view-float">
+              <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
+                {TIMELINE_VIEW_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={timelineView === option.value ? "is-active" : undefined}
+                    aria-pressed={timelineView === option.value}
+                    title={option.hint}
+                    onClick={() => {
+                      if (option.value === timelineView) return;
+                      void saveWorkspaceSettings({ ...workspaceSettings, timelineView: option.value });
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {hasOlderMessages && (
             <div className="flex justify-center pb-1">
               <Button
