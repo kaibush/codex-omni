@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import type { Session, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
+import { VirtualTimeline } from "./VirtualTimeline";
 import { TimelineOutline } from "./TimelineOutline";
 import { RunStatusBubble } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
@@ -169,13 +171,80 @@ export function WorkspaceTimeline({
     : "folded";
   // A project route has no active session. Ignore the previous session's
   // events during the route transition so they cannot mask the recent list.
-  const displayEvents = sessionId ? displayTimelineEvents(events, timelineView) : [];
+  const displayEvents = useMemo(
+    () => (sessionId ? displayTimelineEvents(events, timelineView) : []),
+    [events, sessionId, timelineView]
+  );
   const showReasoning = timelineView !== "folded" || workspaceSettings.showReasoning;
-  const outlineEvents = showReasoning
-    ? displayEvents
-    : displayEvents.filter((item) => item.kind !== "reasoning");
+  const timelineItems = useMemo(
+    () =>
+      showReasoning ? displayEvents : displayEvents.filter((item) => item.kind !== "reasoning"),
+    [displayEvents, showReasoning]
+  );
+  const outlineEvents = timelineItems;
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
+  const onOpenFile = useCallback(
+    (path: string, line: number | null) => {
+      setWorkspaceView("files");
+      setOpenFileRequest({ path, line });
+    },
+    [setOpenFileRequest, setWorkspaceView]
+  );
+  const onCreateFile = useCallback(
+    (content: string, language: string) => {
+      setCreateFile({ content, language });
+      setCreateFilePath(snippetFileName(language));
+    },
+    [setCreateFile, setCreateFilePath]
+  );
+  const onReply = useCallback((text: string) => void submitMessage(text), [submitMessage]);
+  const onOpenThread = useCallback(
+    (threadId: string) => {
+      const match = recentSessions.find((session) => session.threadId === threadId);
+      if (!match) return false;
+      onOpenSession(match.id);
+      return true;
+    },
+    [onOpenSession, recentSessions]
+  );
+  const onApproval = useCallback(
+    (requestId: string, decision: "accept" | "acceptForSession" | "decline") => {
+      if (socket.current?.readyState !== WebSocket.OPEN) {
+        setSendNotice("连接已断开，恢复连接后再提交确认");
+        return;
+      }
+      socket.current.send(
+        JSON.stringify({
+          type: "approval.respond",
+          sessionId,
+          requestId,
+          decision
+        })
+      );
+      setEvents((current) =>
+        current.map((event) =>
+          event.id === `approval-${requestId}`
+            ? {
+                ...event,
+                kind: "approval" as const,
+                text:
+                  decision === "decline"
+                    ? "已拒绝该命令"
+                    : decision === "acceptForSession"
+                      ? "已允许本会话后续命令"
+                      : "已允许本次命令",
+                data: {
+                  ...event.data,
+                  status: decision === "decline" ? "declined" : "accepted"
+                }
+              }
+            : event
+        )
+      );
+    },
+    [sessionId, setEvents, setSendNotice, socket]
+  );
   return (
     <div
       className={`chat-pane relative min-h-0 min-w-0 flex-1 overflow-hidden overscroll-none ${workspaceView === "chat" ? "" : "hidden"}`}
@@ -317,109 +386,71 @@ export function WorkspaceTimeline({
           )}
           {sessionLoading ? (
             <div className="min-h-[45dvh] sm:min-h-[55vh]" />
-          ) : displayEvents.length ? (
-            displayEvents.map((item) => (
-              <EventCard
-                key={`${timelineView}:${item.id}`}
-                item={item}
-                highlighted={highlightMessageId === item.id}
-                defaultOpen={
-                  timelineView === "expanded" ||
-                  (item.kind !== "reasoning" &&
-                    workspaceSettings.expandToolCalls &&
-                    item.streaming !== false)
-                }
-                hidden={item.kind === "reasoning" && !showReasoning}
-                showProviderLabel={workspaceSettings.showProviderLabels}
-                providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
-                projectId={activeSession?.projectId}
-                projectPath={projectPath}
-                onReply={(text) => void submitMessage(text)}
-                onOpenThread={(threadId) => {
-                  const match = recentSessions.find((session) => session.threadId === threadId);
-                  if (!match) return false;
-                  onOpenSession(match.id);
-                  return true;
-                }}
-                onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
-                onEdit={
-                  item.kind === "user"
-                    ? () => {
-                        setInput(item.text ?? "");
-                        setAttachments([]);
-                        requestAnimationFrame(() => inputRef.current?.focus());
-                      }
-                    : undefined
-                }
-                onRetry={
-                  item.kind === "user" ? () => void submitMessage(item.text ?? "") : undefined
-                }
-                onQuote={
-                  item.kind === "user" || item.kind === "assistant"
-                    ? () => quoteToInput(item.text ?? "")
-                    : undefined
-                }
-                onCopyLink={() => void copyMessageLink(item.id)}
-                starred={item.messageId ? starredIds.includes(item.messageId) : false}
-                onStar={
-                  item.messageId && (item.kind === "user" || item.kind === "assistant")
-                    ? () => onStarMessage(item.messageId!)
-                    : undefined
-                }
-                onSaveNote={
-                  item.kind === "user" || item.kind === "assistant"
-                    ? () => onSaveNote(item.text ?? "")
-                    : undefined
-                }
-                onSummarize={
-                  item.kind === "user" || item.kind === "assistant"
-                    ? () => onSummarize(item.text ?? "")
-                    : undefined
-                }
-                onCreateFile={(content, language) => {
-                  setCreateFile({ content, language });
-                  setCreateFilePath(snippetFileName(language));
-                }}
-                onOpenFile={(path, line) => {
-                  setWorkspaceView("files");
-                  setOpenFileRequest({ path, line });
-                }}
-                onApproval={(requestId, decision) => {
-                  if (socket.current?.readyState !== WebSocket.OPEN) {
-                    setSendNotice("连接已断开，恢复连接后再提交确认");
-                    return;
+          ) : timelineItems.length ? (
+            <VirtualTimeline
+              key={timelineView}
+              items={timelineItems}
+              scrollRef={chatScroll}
+              stickToBottom={stickToBottom}
+              scrollToId={highlightMessageId || undefined}
+              renderItem={(item) => (
+                <EventCard
+                  item={item}
+                  highlighted={highlightMessageId === item.id}
+                  defaultOpen={
+                    timelineView === "expanded" ||
+                    (item.kind !== "reasoning" &&
+                      workspaceSettings.expandToolCalls &&
+                      item.streaming !== false)
                   }
-                  socket.current.send(
-                    JSON.stringify({
-                      type: "approval.respond",
-                      sessionId,
-                      requestId,
-                      decision
-                    })
-                  );
-                  setEvents((current) =>
-                    current.map((event) =>
-                      event.id === `approval-${requestId}`
-                        ? {
-                            ...event,
-                            kind: "approval",
-                            text:
-                              decision === "decline"
-                                ? "已拒绝该命令"
-                                : decision === "acceptForSession"
-                                  ? "已允许本会话后续命令"
-                                  : "已允许本次命令",
-                            data: {
-                              ...event.data,
-                              status: decision === "decline" ? "declined" : "accepted"
-                            }
-                          }
-                        : event
-                    )
-                  );
-                }}
-              />
-            ))
+                  hidden={item.kind === "reasoning" && !showReasoning}
+                  showProviderLabel={workspaceSettings.showProviderLabels}
+                  providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
+                  projectId={activeSession?.projectId}
+                  projectPath={projectPath}
+                  onReply={onReply}
+                  onOpenThread={onOpenThread}
+                  onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
+                  onEdit={
+                    item.kind === "user"
+                      ? () => {
+                          setInput(item.text ?? "");
+                          setAttachments([]);
+                          requestAnimationFrame(() => inputRef.current?.focus());
+                        }
+                      : undefined
+                  }
+                  onRetry={
+                    item.kind === "user" ? () => void submitMessage(item.text ?? "") : undefined
+                  }
+                  onQuote={
+                    item.kind === "user" || item.kind === "assistant"
+                      ? () => quoteToInput(item.text ?? "")
+                      : undefined
+                  }
+                  onCopyLink={() => void copyMessageLink(item.id)}
+                  starred={item.messageId ? starredIds.includes(item.messageId) : false}
+                  onStar={
+                    item.messageId && (item.kind === "user" || item.kind === "assistant")
+                      ? () => onStarMessage(item.messageId!)
+                      : undefined
+                  }
+                  onSaveNote={
+                    item.kind === "user" || item.kind === "assistant"
+                      ? () => onSaveNote(item.text ?? "")
+                      : undefined
+                  }
+                  onSummarize={
+                    item.kind === "user" || item.kind === "assistant"
+                      ? () => onSummarize(item.text ?? "")
+                      : undefined
+                  }
+                  onCreateFile={onCreateFile}
+                  onOpenFile={onOpenFile}
+                  onApproval={onApproval}
+                />
+              )}
+            />
           ) : !activeSession ? (
             <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-1 py-8 sm:py-12">
               <div className="text-center">

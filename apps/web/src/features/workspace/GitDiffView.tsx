@@ -187,7 +187,7 @@ export function GitDiffView({
             <DiffView
               data={data}
               diffViewTheme={resolvedTheme}
-              diffViewHighlight
+              diffViewHighlight={diff.length < 32_000 && hunks < 80}
               diffViewWrap={isMobile}
               diffViewFontSize={isMobile ? 11 : 12}
               diffViewMode={mode === "split" ? DiffModeEnum.SplitGitHub : DiffModeEnum.Unified}

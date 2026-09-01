@@ -24,6 +24,23 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("2 行");
   });
 
+  it("skips fenced-code highlighting while assistant text is still streaming", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "assistant-stream",
+          kind: "assistant",
+          streaming: true,
+          text: "示例：\n```ts\nconst answer = 42;\nconst next = answer + 1;\n```"
+        }}
+      />
+    );
+    expect(html).toContain("answer");
+    expect(html).toContain("markdown-stream-pre");
+    expect(html).not.toContain("markdown-code-block");
+    expect(html).not.toContain("markdown-code-language");
+  });
+
   it("renders short single-line commands as compact copyable blocks", () => {
     const html = renderToStaticMarkup(
       <EventCard

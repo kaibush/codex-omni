@@ -1,6 +1,7 @@
 import {
   Children,
   isValidElement,
+  memo,
   useMemo,
   useEffect,
   useRef,
@@ -283,18 +284,26 @@ function MarkdownCodeBlock({
   );
 }
 
-function MarkdownContent({
+function hasMarkdownMath(text: string) {
+  return /\$\$[\s\S]+?\$\$|\$[^$\n]+\$|\\\[|\\\(/.test(text);
+}
+
+const MarkdownContent = memo(function MarkdownContent({
   text,
+  streaming = false,
   onOpenFile,
   onCreateFile
 }: {
   text: string;
+  streaming?: boolean | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
   onCreateFile?: ((content: string, language: string) => void) | undefined;
 }) {
   const components = useMemo<Components>(
     () => ({
-      pre: (props) => <MarkdownCodeBlock {...props} onCreateFile={onCreateFile} />,
+      pre: streaming
+        ? ({ children }) => <pre className="markdown-stream-pre">{children}</pre>
+        : (props) => <MarkdownCodeBlock {...props} onCreateFile={onCreateFile} />,
       a: ({ href, children }) => {
         const file = parseCodexFileHref(href);
         if (file && onOpenFile) {
@@ -311,19 +320,21 @@ function MarkdownContent({
         return <a href={href}>{children}</a>;
       }
     }),
-    [onCreateFile, onOpenFile]
+    [onCreateFile, onOpenFile, streaming]
   );
+  const enableMath = !streaming && hasMarkdownMath(text);
+  const source = streaming && text.length > 24_000 ? text.slice(text.length - 24_000) : text;
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      remarkPlugins={enableMath ? [remarkGfm, remarkMath] : [remarkGfm]}
+      rehypePlugins={enableMath ? [rehypeKatex] : []}
       urlTransform={(url) => url}
       components={components}
     >
-      {linkFileRefs(text)}
+      {linkFileRefs(source)}
     </ReactMarkdown>
   );
-}
+});
 
 function ToolSection({
   icon: Icon,
@@ -345,7 +356,7 @@ function ToolSection({
         </span>
         <CopyButton text={text} />
       </header>
-      {variant === "output" ? (
+      {variant === "output" || text.length > 4000 || text.split("\n").length >= 80 ? (
         <VirtualLog text={text} label={label} />
       ) : (
         <pre className="tool-shell-body">{text}</pre>
@@ -510,30 +521,7 @@ function NoticeCard({ message, level }: { message: string; level: "info" | "warn
   return <p className={`notice-card-body${level === "error" ? " is-error" : ""}`}>{message}</p>;
 }
 
-export function EventCard({
-  item,
-  providerName,
-  defaultOpen = true,
-  hidden = false,
-  showProviderLabel = true,
-  highlighted = false,
-  projectId,
-  projectPath,
-  onApproval,
-  onFork,
-  onOpenFile,
-  onOpenThread,
-  onReply,
-  onEdit,
-  onRetry,
-  onQuote,
-  onCopyLink,
-  onCreateFile,
-  starred,
-  onStar,
-  onSaveNote,
-  onSummarize
-}: {
+type EventCardProps = {
   item: TimelineItem;
   providerName?: string | undefined;
   defaultOpen?: boolean;
@@ -556,7 +544,70 @@ export function EventCard({
   onStar?: (() => void) | undefined;
   onSaveNote?: (() => void) | undefined;
   onSummarize?: (() => void) | undefined;
-}) {
+};
+
+function sameHandler<T>(left: T | undefined, right: T | undefined) {
+  return Boolean(left) === Boolean(right);
+}
+
+function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
+  return (
+    prev.item.id === next.item.id &&
+    prev.item.kind === next.item.kind &&
+    prev.item.text === next.item.text &&
+    prev.item.streaming === next.item.streaming &&
+    prev.item.providerId === next.item.providerId &&
+    prev.item.messageId === next.item.messageId &&
+    prev.item.createdAt === next.item.createdAt &&
+    prev.item.data === next.item.data &&
+    prev.highlighted === next.highlighted &&
+    prev.defaultOpen === next.defaultOpen &&
+    prev.hidden === next.hidden &&
+    prev.showProviderLabel === next.showProviderLabel &&
+    prev.providerName === next.providerName &&
+    prev.projectId === next.projectId &&
+    prev.projectPath === next.projectPath &&
+    prev.starred === next.starred &&
+    sameHandler(prev.onApproval, next.onApproval) &&
+    sameHandler(prev.onFork, next.onFork) &&
+    sameHandler(prev.onOpenFile, next.onOpenFile) &&
+    sameHandler(prev.onOpenThread, next.onOpenThread) &&
+    sameHandler(prev.onReply, next.onReply) &&
+    sameHandler(prev.onEdit, next.onEdit) &&
+    sameHandler(prev.onRetry, next.onRetry) &&
+    sameHandler(prev.onQuote, next.onQuote) &&
+    sameHandler(prev.onCopyLink, next.onCopyLink) &&
+    sameHandler(prev.onCreateFile, next.onCreateFile) &&
+    sameHandler(prev.onStar, next.onStar) &&
+    sameHandler(prev.onSaveNote, next.onSaveNote) &&
+    sameHandler(prev.onSummarize, next.onSummarize)
+  );
+}
+
+function EventCardComponent({
+  item,
+  providerName,
+  defaultOpen = true,
+  hidden = false,
+  showProviderLabel = true,
+  highlighted = false,
+  projectId,
+  projectPath,
+  onApproval,
+  onFork,
+  onOpenFile,
+  onOpenThread,
+  onReply,
+  onEdit,
+  onRetry,
+  onQuote,
+  onCopyLink,
+  onCreateFile,
+  starred,
+  onStar,
+  onSaveNote,
+  onSummarize
+}: EventCardProps) {
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
   const [open, setOpen] = useState(() => {
     if (item.kind === "reasoning") return defaultOpen;
@@ -685,6 +736,7 @@ export function EventCard({
         <div className="markdown">
           <MarkdownContent
             text={item.text ?? ""}
+            streaming={item.streaming}
             onOpenFile={onOpenFile}
             onCreateFile={onCreateFile}
           />
@@ -776,6 +828,7 @@ export function EventCard({
         <div className="markdown">
           <MarkdownContent
             text={item.text ?? ""}
+            streaming={item.streaming}
             onOpenFile={onOpenFile}
             onCreateFile={onCreateFile}
           />
@@ -1182,3 +1235,6 @@ export function EventCard({
     </article>
   );
 }
+
+export const EventCard = memo(EventCardComponent, areEventCardPropsEqual);
+EventCard.displayName = "EventCard";
