@@ -7,10 +7,12 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
+import { LoaderCircle } from "lucide-react";
 import { estimateTimelineItemSize, shouldVirtualizeTimeline, visibleWindow } from "./virtual-window";
 
 const DEFAULT_THRESHOLD = 8;
-const DEFAULT_OVERSCAN = 4;
+const DEFAULT_OVERSCAN = 6;
+const DEFAULT_OVERSCAN_PX = 1800;
 const ITEM_GAP = 12;
 
 export function VirtualTimeline<T extends { id: string; kind: string; text?: string | undefined }>({
@@ -20,6 +22,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   scrollToId,
   renderItem,
   overscan = DEFAULT_OVERSCAN,
+  overscanPx = DEFAULT_OVERSCAN_PX,
   threshold = DEFAULT_THRESHOLD
 }: {
   items: T[];
@@ -28,6 +31,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   scrollToId?: string | undefined;
   renderItem: (item: T, index: number) => ReactNode;
   overscan?: number | undefined;
+  overscanPx?: number | undefined;
   threshold?: number | undefined;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -37,7 +41,11 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   const frameRef = useRef<number | null>(null);
   const [version, setVersion] = useState(0);
 
-  const bump = useCallback(() => {
+  const bump = useCallback((sync = false) => {
+    if (sync) {
+      setVersion((value) => value + 1);
+      return;
+    }
     if (frameRef.current != null) return;
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
@@ -85,7 +93,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
         if (offset < scroller.scrollTop) scroller.scrollTop += height - previous;
       }
       sizeMap.current.set(id, height);
-      bump();
+      bump(true);
     },
     [bump, scrollRef, sizeOf, stickToBottom]
   );
@@ -106,20 +114,15 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     const scroller = scrollRef.current;
     const viewportHeight = scroller?.clientHeight ?? 800;
     const listTop = listRef.current?.offsetTop ?? 0;
-    let totalHeight = 0;
-    for (let index = 0; index < items.length; index += 1) totalHeight += sizeOf(index);
-    const maxScroll = Math.max(0, totalHeight + listTop - viewportHeight);
-    const pinned = Boolean(stickToBottom?.current);
-    const scrollTop = pinned
-      ? maxScroll
-      : Math.min(Math.max(0, (scroller?.scrollTop ?? 0) - listTop), maxScroll);
+    const scrollTop = Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
     return {
       ...visibleWindow({
         itemCount: items.length,
         itemSize: sizeOf,
         scrollTop,
         viewportHeight,
-        overscan
+        overscan,
+        overscanPx
       }),
       virtualized: true
     };
@@ -144,7 +147,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     if (Math.abs(scroller.scrollTop - maxScroll) < 2) return;
     scroller.scrollTop = maxScroll;
-  }, [items, scrollRef, stickToBottom, version]);
+  }, [items, range.totalHeight, scrollRef, stickToBottom]);
 
   useEffect(() => {
     if (!scrollToId) return;
@@ -168,8 +171,8 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
       data-virtual-start={String(range.start)}
       data-virtual-end={String(range.end)}
     >
-      {range.virtualized && range.paddingTop > 0 ? (
-        <div aria-hidden style={{ height: range.paddingTop }} />
+      {range.virtualized ? (
+        <VirtualGap height={range.paddingTop} position="before" />
       ) : null}
       {visible.map((item, offset) => {
         const index = range.start + offset;
@@ -184,8 +187,27 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
           </VirtualTimelineItem>
         );
       })}
-      {range.virtualized && range.paddingBottom > 0 ? (
-        <div aria-hidden style={{ height: range.paddingBottom }} />
+      {range.virtualized ? (
+        <VirtualGap height={range.paddingBottom} position="after" />
+      ) : null}
+    </div>
+  );
+}
+
+function VirtualGap({ height, position }: { height: number; position: "before" | "after" }) {
+  if (height <= 0) return null;
+  return (
+    <div
+      className="virtual-timeline-gap"
+      style={{ height }}
+      aria-hidden
+      data-virtual-gap={position}
+    >
+      {height >= 200 ? (
+        <div className="virtual-timeline-gap-hint">
+          <LoaderCircle className="size-3.5 animate-spin" />
+          {position === "before" ? "正在显示更早的消息" : "正在显示后续消息"}
+        </div>
       ) : null}
     </div>
   );

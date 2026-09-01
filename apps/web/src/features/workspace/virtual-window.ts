@@ -12,9 +12,11 @@ export function visibleWindow(input: {
   scrollTop: number;
   viewportHeight: number;
   overscan?: number;
+  overscanPx?: number;
 }): VirtualWindow {
   const itemCount = Math.max(0, input.itemCount);
   const overscan = Math.max(0, input.overscan ?? 8);
+  const overscanPx = Math.max(0, input.overscanPx ?? 0);
   if (itemCount === 0) {
     return { start: 0, end: 0, paddingTop: 0, paddingBottom: 0, totalHeight: 0 };
   }
@@ -29,11 +31,12 @@ export function visibleWindow(input: {
 
   const viewportHeight = Math.max(0, input.viewportHeight);
   const scrollTop = Math.min(Math.max(0, input.scrollTop), Math.max(0, totalHeight - viewportHeight));
-  const viewportEnd = scrollTop + viewportHeight;
+  const viewportStart = Math.max(0, scrollTop - overscanPx);
+  const viewportEnd = scrollTop + viewportHeight + overscanPx;
 
   let offset = 0;
   let start = 0;
-  while (start < itemCount && offset + (sizes[start] ?? 0) < scrollTop) {
+  while (start < itemCount && offset + (sizes[start] ?? 0) < viewportStart) {
     offset += sizes[start] ?? 0;
     start += 1;
   }
@@ -64,14 +67,14 @@ export function visibleWindow(input: {
 export function estimateTimelineItemSize(item: { kind: string; text?: string | undefined }) {
   if (item.kind === "user" || item.kind === "assistant") {
     const text = item.text ?? "";
-    const lines = Math.max(text.split("\n").length, Math.ceil(text.length / 88));
-    return Math.min(1400, 96 + Math.min(lines, 48) * 24);
+    const lines = Math.max(text.split("\n").length, Math.ceil(text.length / 96));
+    return Math.min(240, 84 + Math.min(lines, 8) * 16);
   }
-  if (item.kind === "reasoning") return 52;
-  if (item.kind === "activity") return 56;
-  if (item.kind === "tool") return 64;
-  if (item.kind === "approval") return 88;
-  return 72;
+  if (item.kind === "reasoning") return 48;
+  if (item.kind === "activity") return 52;
+  if (item.kind === "tool") return 56;
+  if (item.kind === "approval") return 80;
+  return 64;
 }
 
 export function shouldVirtualizeTimeline(

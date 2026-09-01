@@ -28,6 +28,20 @@ describe("visibleWindow", () => {
     expect(window.paddingBottom).toBe(5000 - window.paddingTop - (window.end - window.start) * 50);
   });
 
+  it("extends the window by pixel overscan so fast scrolling stays filled", () => {
+    const window = visibleWindow({
+      itemCount: 100,
+      itemSize: () => 50,
+      scrollTop: 1000,
+      viewportHeight: 200,
+      overscan: 0,
+      overscanPx: 150
+    });
+    expect(window.start).toBe(16);
+    expect(window.end).toBe(27);
+    expect(window.paddingTop).toBe(16 * 50);
+  });
+
   it("clamps to the last items when pinned near the bottom", () => {
     const window = visibleWindow({
       itemCount: 40,
@@ -43,11 +57,11 @@ describe("visibleWindow", () => {
 });
 
 describe("estimateTimelineItemSize", () => {
-  it("sizes user/assistant bubbles from line count and keeps compact rows small", () => {
-    expect(estimateTimelineItemSize({ kind: "activity" })).toBe(56);
+  it("keeps unmeasured bubbles compact so scroll gaps stay small", () => {
+    expect(estimateTimelineItemSize({ kind: "activity" })).toBe(52);
     expect(estimateTimelineItemSize({ kind: "user", text: "hi" })).toBeGreaterThan(90);
-    expect(estimateTimelineItemSize({ kind: "assistant", text: "a\n".repeat(80) })).toBe(1248);
-    expect(estimateTimelineItemSize({ kind: "assistant", text: "n".repeat(20_000) })).toBe(1248);
+    expect(estimateTimelineItemSize({ kind: "assistant", text: "a\n".repeat(80) })).toBe(212);
+    expect(estimateTimelineItemSize({ kind: "assistant", text: "n".repeat(20_000) })).toBe(212);
   });
 });
 

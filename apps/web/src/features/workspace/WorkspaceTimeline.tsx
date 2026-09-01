@@ -358,25 +358,25 @@ export function WorkspaceTimeline({
               </div>
             </div>
           ) : null}
-          {hasOlderMessages && (
+          {historyLoading ? (
+            <div className="timeline-history-loading" role="status">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              正在加载更早的对话
+            </div>
+          ) : hasOlderMessages ? (
             <div className="flex justify-center pb-1">
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={historyLoading}
                 onClick={() => void loadOlderMessages()}
                 className="text-xs text-muted-foreground"
               >
-                {historyLoading ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : (
-                  <Clock3 className="size-3.5" />
-                )}
+                <Clock3 className="size-3.5" />
                 加载更早的对话
               </Button>
             </div>
-          )}
+          ) : null}
           {activeSession?.parentSessionId && (
             <div className="rounded-xl border border-border bg-muted px-4 py-3 text-xs text-foreground">
               {activeSession.continuationMode === "fork"
