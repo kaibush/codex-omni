@@ -7,8 +7,7 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
-import { LoaderCircle } from "lucide-react";
-import { estimateTimelineItemSize, shouldVirtualizeTimeline, visibleWindow } from "./virtual-window";
+import { estimateTimelineItemSize, shouldVirtualizeTimeline, stickyVisibleRange, visibleWindow } from "./virtual-window";
 
 const DEFAULT_THRESHOLD = 8;
 const DEFAULT_OVERSCAN = 6;
@@ -38,6 +37,13 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   const sizeMap = useRef(new Map<string, number>());
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const stickyRef = useRef({ start: 0, end: 0 });
+  const headId = items[0]?.id;
+  const headIdRef = useRef(headId);
+  if (headIdRef.current !== headId) {
+    stickyRef.current = { start: 0, end: 0 };
+    headIdRef.current = headId;
+  }
   const frameRef = useRef<number | null>(null);
   const [version, setVersion] = useState(0);
 
@@ -115,15 +121,29 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     const viewportHeight = scroller?.clientHeight ?? 800;
     const listTop = listRef.current?.offsetTop ?? 0;
     const scrollTop = Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
+    const nextWindow = visibleWindow({
+      itemCount: items.length,
+      itemSize: sizeOf,
+      scrollTop,
+      viewportHeight,
+      overscan,
+      overscanPx
+    });
+    const sticky = stickyVisibleRange(nextWindow, stickyRef.current);
+    stickyRef.current = sticky;
+    if (sticky.start === nextWindow.start && sticky.end === nextWindow.end) {
+      return { ...nextWindow, virtualized: true };
+    }
+    let paddingTop = 0;
+    for (let index = 0; index < sticky.start; index += 1) paddingTop += sizeOf(index);
+    let rendered = 0;
+    for (let index = sticky.start; index < sticky.end; index += 1) rendered += sizeOf(index);
     return {
-      ...visibleWindow({
-        itemCount: items.length,
-        itemSize: sizeOf,
-        scrollTop,
-        viewportHeight,
-        overscan,
-        overscanPx
-      }),
+      start: sticky.start,
+      end: sticky.end,
+      paddingTop,
+      paddingBottom: Math.max(0, nextWindow.totalHeight - paddingTop - rendered),
+      totalHeight: nextWindow.totalHeight,
       virtualized: true
     };
   })();
@@ -196,21 +216,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
 
 function VirtualGap({ height, position }: { height: number; position: "before" | "after" }) {
   if (height <= 0) return null;
-  return (
-    <div
-      className="virtual-timeline-gap"
-      style={{ height }}
-      aria-hidden
-      data-virtual-gap={position}
-    >
-      {height >= 200 ? (
-        <div className="virtual-timeline-gap-hint">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          {position === "before" ? "正在显示更早的消息" : "正在显示后续消息"}
-        </div>
-      ) : null}
-    </div>
-  );
+  return <div className="virtual-timeline-gap" style={{ height }} aria-hidden data-virtual-gap={position} />;
 }
 
 function VirtualTimelineItem({

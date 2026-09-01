@@ -132,28 +132,51 @@ function parseTokenCountPayload(payload: Record<string, unknown>): Record<string
   return Object.keys(usage).length ? usage : null;
 }
 
-export function findRolloutFile(codexHome: string, threadId: string) {
+const rolloutFileCache = new Map<string, string>();
+
+function searchRolloutFile(codexHome: string, threadId: string) {
   const root = path.join(codexHome, "sessions");
   const suffix = `-${threadId}.jsonl`;
-  const stack = [root];
-  while (stack.length) {
-    const dir = stack.pop()!;
+  const walk = (dir: string): string => {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
-      continue;
+      return "";
     }
+    const dirs: string[] = [];
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        stack.push(full);
+        dirs.push(entry.name);
         continue;
       }
       if (entry.name.startsWith("rollout-") && entry.name.endsWith(suffix)) return full;
     }
+    dirs.sort((left, right) => (left < right ? 1 : left > right ? -1 : 0));
+    for (const name of dirs) {
+      const found = walk(path.join(dir, name));
+      if (found) return found;
+    }
+    return "";
+  };
+  return walk(root);
+}
+
+export function findRolloutFile(codexHome: string, threadId: string) {
+  if (!threadId) return "";
+  const key = `${codexHome}::${threadId}`;
+  const cached = rolloutFileCache.get(key);
+  if (cached) {
+    try {
+      if (statSync(cached).isFile()) return cached;
+    } catch {
+      rolloutFileCache.delete(key);
+    }
   }
-  return "";
+  const found = searchRolloutFile(codexHome, threadId);
+  if (found) rolloutFileCache.set(key, found);
+  return found;
 }
 
 function lineTimestamp(line: string) {

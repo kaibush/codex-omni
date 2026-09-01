@@ -35,6 +35,6 @@ describe("VirtualTimeline", () => {
     expect(html).toContain('data-virtualized="1"');
     expect(html).toContain("m-0");
     expect(html).not.toContain("m-39");
-    expect(html).toContain("正在显示后续消息");
+    expect(html).not.toContain("正在显示后续消息");
   });
 });

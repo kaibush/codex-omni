@@ -938,19 +938,6 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   if (!session) return reply.code(404).send({ error: "Session not found" });
   const project = store.getProject(session.projectId);
   const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
-  if (provider && session.threadId) {
-    try {
-      backfillSessionRolloutTools({
-        store,
-        sessionId: session.id,
-        threadId: session.threadId,
-        providerId: session.providerId,
-        codexHome: await providerHome(provider)
-      });
-    } catch {
-      // Rollout files are optional; keep the session readable if Codex home is missing.
-    }
-  }
   const query = z
     .object({
       limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -966,6 +953,21 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
       }
     })
     .parse(req.query ?? {});
+  // Pagination should only read SQLite. Re-walking Codex rollout JSONL on every
+  // "load older messages" request is what made history scrolling feel stuck.
+  if (provider && session.threadId && query.beforeCreatedAt == null) {
+    try {
+      backfillSessionRolloutTools({
+        store,
+        sessionId: session.id,
+        threadId: session.threadId,
+        providerId: session.providerId,
+        codexHome: await providerHome(provider)
+      });
+    } catch {
+      // Rollout files are optional; keep the session readable if Codex home is missing.
+    }
+  }
   const page = store.listMessagePage(id, {
     limit: query.limit,
     ...(query.beforeCreatedAt != null && query.beforeId

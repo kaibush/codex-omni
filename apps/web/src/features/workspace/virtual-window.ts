@@ -94,3 +94,32 @@ export function shouldVirtualizeTimeline(
   }
   return false;
 }
+
+export function stickyVisibleRange(
+  current: { start: number; end: number },
+  previous: { start: number; end: number },
+  maxItems = 36
+) {
+  if (previous.end <= previous.start) return current;
+  if (current.start > previous.end || current.end < previous.start) return current;
+  const start = Math.min(previous.start, current.start);
+  const end = Math.max(previous.end, current.end);
+  if (end - start <= maxItems) return { start, end };
+  const span = Math.max(maxItems, current.end - current.start);
+  let nextStart = current.start;
+  let nextEnd = current.end;
+  const extra = span - (nextEnd - nextStart);
+  if (extra > 0) {
+    const before = Math.min(current.start - start, Math.ceil(extra / 2));
+    nextStart = current.start - before;
+    nextEnd = nextStart + span;
+    if (nextEnd > end) {
+      nextEnd = end;
+      nextStart = Math.max(start, nextEnd - span);
+    }
+  }
+  return {
+    start: Math.min(nextStart, current.start),
+    end: Math.max(nextEnd, current.end)
+  };
+}

@@ -1,9 +1,12 @@
+import { statSync } from "node:fs";
 import {
   extractRolloutToolEvents,
   findRolloutFile,
   type CollabRolloutEvent
 } from "@codex-omni/codex-runtime";
 import type { MessageRow, Store } from "@codex-omni/db";
+
+const backfillSnapshot = new Map<string, { size: number; mtime: number }>();
 
 const MATCH_WINDOW_MS = 2000;
 
@@ -106,8 +109,21 @@ export function backfillSessionRolloutTools(input: {
   if (!input.threadId) return [];
   const filePath = findRolloutFile(input.codexHome, input.threadId);
   if (!filePath) return [];
+  let snapshot: { size: number; mtime: number };
+  try {
+    const stat = statSync(filePath);
+    snapshot = { size: stat.size, mtime: stat.mtimeMs };
+  } catch {
+    return [];
+  }
+  const cacheKey = `${input.sessionId}:${input.threadId}:${filePath}`;
+  const previous = backfillSnapshot.get(cacheKey);
+  if (previous && previous.size === snapshot.size && previous.mtime === snapshot.mtime) return [];
   const events = extractRolloutToolEvents(filePath);
-  if (!events.length) return [];
+  if (!events.length) {
+    backfillSnapshot.set(cacheKey, snapshot);
+    return [];
+  }
   const messages = input.store.listMessages(input.sessionId);
   const recovered = new Set(messages.map(recoveredCallId).filter(Boolean));
   const emptyErrors = messages.filter(isEmptyRuntimeError);
@@ -154,5 +170,6 @@ export function backfillSessionRolloutTools(input: {
     recovered.add(event.itemId);
     changes.push({ itemId, event });
   }
+  backfillSnapshot.set(cacheKey, snapshot);
   return changes;
 }

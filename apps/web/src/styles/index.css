@@ -890,11 +890,14 @@ button.composer-chip:hover,
   min-width: 0;
   pointer-events: none;
 }
-.virtual-timeline-gap-hint,
 .timeline-history-loading {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 5;
   display: flex;
   width: fit-content;
   max-width: calc(100% - 1rem);
+  margin: 0 auto 0.35rem;
   align-items: center;
   gap: 0.4rem;
   border: 1px solid var(--border);
@@ -905,18 +908,6 @@ button.composer-chip:hover,
   font-size: 0.75rem;
   line-height: 1rem;
   backdrop-filter: blur(8px);
-}
-.virtual-timeline-gap-hint {
-  position: sticky;
-  top: 42%;
-  z-index: 1;
-  margin: 0 auto;
-}
-.timeline-history-loading {
-  position: sticky;
-  top: 0.5rem;
-  z-index: 5;
-  margin: 0 auto 0.35rem;
 }
 .event-card.compact {
   gap: 0.35rem;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateTimelineItemSize, shouldVirtualizeTimeline, visibleWindow } from "./virtual-window";
+import { estimateTimelineItemSize, shouldVirtualizeTimeline, stickyVisibleRange, visibleWindow } from "./virtual-window";
 
 describe("visibleWindow", () => {
   it("returns an empty range for no items", () => {
@@ -82,5 +82,27 @@ describe("shouldVirtualizeTimeline", () => {
     expect(shouldVirtualizeTimeline([{ text: "a".repeat(7000) }, { text: "b".repeat(7000) }])).toBe(
       true
     );
+  });
+});
+
+describe("stickyVisibleRange", () => {
+  it("keeps the union of nearby windows so scrolling does not unmount cards", () => {
+    expect(stickyVisibleRange({ start: 12, end: 20 }, { start: 10, end: 18 })).toEqual({
+      start: 10,
+      end: 20
+    });
+  });
+
+  it("drops the sticky range after a jump and caps how many cards stay mounted", () => {
+    expect(stickyVisibleRange({ start: 80, end: 90 }, { start: 0, end: 12 })).toEqual({
+      start: 80,
+      end: 90
+    });
+    const shrunk = stickyVisibleRange({ start: 40, end: 50 }, { start: 0, end: 80 }, 20);
+    expect(shrunk.start).toBeGreaterThanOrEqual(30);
+    expect(shrunk.end).toBeLessThanOrEqual(60);
+    expect(shrunk.end - shrunk.start).toBeLessThanOrEqual(20);
+    expect(shrunk.start).toBeLessThanOrEqual(40);
+    expect(shrunk.end).toBeGreaterThanOrEqual(50);
   });
 });
