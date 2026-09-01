@@ -9,7 +9,7 @@
     "dev:server": "pnpm --filter @codex-omni/server dev",
     "dev:web": "pnpm --filter @codex-omni/web dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r --filter \"./packages/**\" build && pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:e2e": "playwright test",
     "lint": "eslint .",

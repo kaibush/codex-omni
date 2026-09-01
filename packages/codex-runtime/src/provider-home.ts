@@ -77,7 +77,9 @@ export function workerEnvironment(request: BridgeRequest) {
   }
   env.CODEX_HOME = request.codexHome;
   for (const [key, value] of Object.entries(request.messageEnvVars ?? {})) {
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && key !== "CODEX_HOME") env[key] = value;
+    if (typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && key !== "CODEX_HOME") {
+      env[key] = value;
+    }
   }
   return env;
 }
