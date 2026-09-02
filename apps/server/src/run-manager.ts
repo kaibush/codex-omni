@@ -18,6 +18,7 @@ import {
 import {
   applyTextPatch,
   compactStreamEvent,
+  firstUsefulFailureMessage,
   isGenericCodexExecError,
   sanitizeCodexExecError,
   truncateToolText,
@@ -61,6 +62,27 @@ const runLabels: Record<RunStatus, string> = {
   interrupted: "任务未完成（已中断）"
 };
 
+function failureMessageFromRunEvents(store: Store, requestId: string) {
+  const messages: unknown[] = [];
+  for (const event of store.listRunEvents(requestId, -1, 2000)) {
+    try {
+      const parsed = JSON.parse(event.eventJson) as {
+        type?: string;
+        payload?: Record<string, unknown>;
+      };
+      const payload = parsed.payload ?? {};
+      if (parsed.type === "run.failed" || parsed.type === "run.reconnecting") {
+        messages.push(payload.message, payload.reason);
+      } else if (parsed.type === "tool.output" && payload.tool === "runtime_error") {
+        messages.push(payload.error, payload.message);
+      }
+    } catch {
+      // Ignore malformed run events when recovering a readable failure reason.
+    }
+  }
+  return firstUsefulFailureMessage(...messages.reverse());
+}
+
 const parseJson = <T>(value: string | null | undefined, fallback: T): T => {
   if (!value) return fallback;
   try {
@@ -69,6 +91,26 @@ const parseJson = <T>(value: string | null | undefined, fallback: T): T => {
     return fallback;
   }
 };
+
+function resolveFailureMessage(
+  store: Store,
+  requestId: string,
+  incoming: unknown,
+  previous?: string | null
+) {
+  const run = store.getRun(requestId);
+  const reconnecting = parseJson<Record<string, unknown>>(run?.reconnectingJson, {});
+  return sanitizeCodexExecError(
+    incoming,
+    firstUsefulFailureMessage(
+      previous,
+      reconnecting.reason,
+      reconnecting.message,
+      failureMessageFromRunEvents(store, requestId)
+    )
+  );
+}
+
 
 export class RunManager {
   private worker = new BridgeWorkerAdapter();
@@ -248,13 +290,22 @@ export class RunManager {
         : (run?.firstResponseAt ?? undefined);
     const runId =
       typeof extra.runId === "string" ? extra.runId : (active?.runId ?? run?.id ?? undefined);
+    const resolvedReason =
+      extra.reason == null
+        ? undefined
+        : run?.reason &&
+            isGenericCodexExecError(String(extra.reason)) &&
+            !isGenericCodexExecError(run.reason)
+          ? String(run.reason)
+          : sanitizeCodexExecError(extra.reason, run?.reason ?? "");
     const data = {
       status,
       startedAt,
       endedAt,
       ...extra,
       ...(typeof firstResponseAt === "number" ? { firstResponseAt } : {}),
-      ...(runId ? { runId } : {})
+      ...(runId ? { runId } : {}),
+      ...(resolvedReason ? { reason: resolvedReason } : {})
     };
     this.store.upsertEventMessage({
       sessionId,
@@ -273,16 +324,7 @@ export class RunManager {
           ? { firstResponseAt: extra.firstResponseAt }
           : {}),
         ...(extra.usage ? { usageJson: JSON.stringify(extra.usage) } : {}),
-        ...(extra.reason
-          ? {
-              reason:
-                run.reason &&
-                isGenericCodexExecError(String(extra.reason)) &&
-                !isGenericCodexExecError(run.reason)
-                  ? run.reason
-                  : String(extra.reason)
-            }
-          : {}),
+        ...(resolvedReason ? { reason: resolvedReason } : {}),
         reconnectingJson: extra.reconnecting ? JSON.stringify(extra.reconnecting) : null
       });
     }
@@ -643,17 +685,12 @@ export class RunManager {
         ) {
           return;
         }
-        let fallback = previous?.content ?? "";
-        const run = this.store.getRun(requestId);
-        if (run?.reconnectingJson) {
-          try {
-            const reconnecting = JSON.parse(run.reconnectingJson) as Record<string, unknown>;
-            fallback = String(reconnecting.reason ?? reconnecting.message ?? fallback);
-          } catch {
-            // Keep the previous fallback when reconnect metadata is malformed.
-          }
-        }
-        const sanitized = sanitizeCodexExecError(incoming, fallback);
+        const sanitized = resolveFailureMessage(
+          this.store,
+          requestId,
+          incoming,
+          previous?.content
+        );
         if (sanitized && sanitized !== incoming) payload.message = sanitized;
       }
       const terminalEvent = event.type === "turn.completed" || event.type === "run.failed";
@@ -792,10 +829,31 @@ export class RunManager {
     } catch (error) {
       const current = this.store.getSession(session.id);
       if (current?.status === "running") {
-        this.finishRun(session.id, "failed", {
-          startedAt,
-          reason: error instanceof Error ? error.message : String(error)
-        });
+        const incoming = error instanceof Error ? error.message : String(error);
+        const previous = this.store.getMessageByItemId(session.id, `${requestId}:run.failed`);
+        const reason = resolveFailureMessage(
+          this.store,
+          requestId,
+          incoming,
+          previous?.content
+        );
+        if (!previous?.content || isGenericCodexExecError(previous.content)) {
+          this.store.upsertEventMessage({
+            sessionId: session.id,
+            role: "error",
+            content: reason,
+            providerId: provider.id,
+            eventType: "run.failed",
+            itemId: `${requestId}:run.failed`,
+            dataJson: JSON.stringify({
+              message: reason,
+              status: "failed",
+              startedAt,
+              runId: requestId
+            })
+          });
+        }
+        this.finishRun(session.id, "failed", { startedAt, reason });
       }
     } finally {
       clearTimeout(timeout);

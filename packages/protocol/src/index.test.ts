@@ -3,6 +3,7 @@ import {
   authStatusSchema,
   eventSchema,
   filesystemBrowseSchema,
+  firstUsefulFailureMessage,
   isGenericCodexExecError,
   normalizeProviderHomeMode,
   parseReconnectNotice,
@@ -49,6 +50,23 @@ describe("protocol", () => {
     ).toBe("No prompt provided via stdin.");
     expect(sanitizeCodexExecError(banner)).toBe("Codex 进程异常退出（code 1），未返回具体错误信息");
     expect(sanitizeCodexExecError("request failed permanently")).toBe("request failed permanently");
+    expect(
+      firstUsefulFailureMessage(
+        "Reading prompt from stdin...",
+        "Codex Exec exited with code 1: Reading prompt from stdin...",
+        "401 Unauthorized: invalid API key"
+      )
+    ).toBe("401 Unauthorized: invalid API key");
+    expect(isGenericCodexExecError("Bridge worker exited with 1")).toBe(true);
+    expect(
+      sanitizeCodexExecError("Bridge worker exited with 1", "401 Unauthorized: invalid API key")
+    ).toBe("401 Unauthorized: invalid API key");
+    expect(sanitizeCodexExecError("Bridge worker exited with 1")).toBe(
+      "Codex 进程异常退出，未返回具体错误信息"
+    );
+    expect(
+      sanitizeCodexExecError("Reading prompt from stdin...", "model grok-4.6 does not exist")
+    ).toBe("model grok-4.6 does not exist");
   });
   it("accepts a non-terminal reconnect event", () => {
     expect(

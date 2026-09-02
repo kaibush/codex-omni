@@ -337,6 +337,157 @@ describe("RunManager reconnect state", () => {
       "stream disconnected before completion: stream closed before response.completed"
     );
   });
+
+  it("keeps provider errors instead of the Codex exec stdin banner", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "run.failed",
+            payload: { status: "failed", message: "401 Unauthorized: invalid API key" }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "run.failed",
+            payload: {
+              status: "failed",
+              message: "Codex Exec exited with code 1: Reading prompt from stdin...\n"
+            }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")[0]?.content
+    ).toBe("401 Unauthorized: invalid API key");
+    expect(store?.getLatestRun(session.id)?.reason).toBe("401 Unauthorized: invalid API key");
+  });
+
+  it("surfaces runtime_error items when Codex exec only reports a stdin banner", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "tool.output",
+            payload: {
+              itemId: "err-1",
+              tool: "runtime_error",
+              message: "model grok-4.6 does not exist",
+              phase: "completed"
+            }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "run.failed",
+            payload: {
+              status: "failed",
+              message: "Codex Exec exited with code 1: Reading prompt from stdin...\n"
+            }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")[0]?.content
+    ).toBe("model grok-4.6 does not exist");
+    expect(store?.getLatestRun(session.id)?.reason).toBe("model grok-4.6 does not exist");
+  });
+
+  it("recovers a runtime_error when the worker exits without run.failed", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "tool.output",
+            payload: {
+              itemId: "err-1",
+              tool: "runtime_error",
+              message: "model grok-4.6 does not exist",
+              phase: "completed"
+            }
+          })
+        );
+        throw new Error("Codex Exec exited with code 1: Reading prompt from stdin...\n");
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")[0]?.content
+    ).toBe("model grok-4.6 does not exist");
+    expect(store?.getLatestRun(session.id)?.reason).toBe("model grok-4.6 does not exist");
+  });
+
+  it("does not persist the Codex exec stdin banner when the worker exits uncleanly", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(async () => {
+      throw new Error("Bridge worker exited with 1");
+    });
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")[0]?.content
+    ).toBe("Codex 进程异常退出，未返回具体错误信息");
+    expect(store?.getLatestRun(session.id)?.reason).toBe("Codex 进程异常退出，未返回具体错误信息");
+  });
 });
 
 describe("RunManager recovery and queue", () => {

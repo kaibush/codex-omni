@@ -34,6 +34,7 @@ export function parseReconnectNotice(value: unknown): ReconnectNotice | null {
 const CODEX_STDIN_BANNER =
   /^(?:reading (?:prompt|additional input) from stdin\.{3}|reading prompt from stdin\u2026)$/i;
 const CODEX_EXEC_EXIT = /^Codex Exec exited with ((?:code|signal)\s+\S+):\s*([\s\S]*)$/i;
+const GENERIC_WORKER_EXIT = /^Bridge worker exited with (?:\d+|signal \S+)$/i;
 
 function usefulCodexStderr(stderr: string) {
   return stderr
@@ -48,7 +49,7 @@ export function isGenericCodexExecError(value: unknown) {
   if (typeof value !== "string") return false;
   const message = value.trim();
   if (!message) return true;
-  if (CODEX_STDIN_BANNER.test(message)) return true;
+  if (CODEX_STDIN_BANNER.test(message) || GENERIC_WORKER_EXIT.test(message)) return true;
   const match = message.match(CODEX_EXEC_EXIT);
   if (!match) return false;
   return !usefulCodexStderr(match[2] ?? "");
@@ -68,8 +69,17 @@ export function sanitizeCodexExecError(value: unknown, fallback?: string) {
   }
   if (message && !isGenericCodexExecError(message)) return message;
   if (usableFallback) return usableFallback;
-  if (CODEX_STDIN_BANNER.test(message)) return "Codex 进程异常退出，未返回具体错误信息";
-  return message || usableFallback || "Codex 运行失败";
+  if (isGenericCodexExecError(message)) return "Codex 进程异常退出，未返回具体错误信息";
+  return message || "Codex 运行失败";
+}
+
+export function firstUsefulFailureMessage(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const text = value.trim();
+    if (text && !isGenericCodexExecError(text)) return text;
+  }
+  return "";
 }
 
 export const providerHomeModeSchema = z.enum(["managed", "api-key", "external"]);

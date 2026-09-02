@@ -1,7 +1,7 @@
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { Codex } from "@openai/codex-sdk";
-import { bridgeRequestSchema } from "@codex-omni/protocol";
+import { bridgeRequestSchema, firstUsefulFailureMessage } from "@codex-omni/protocol";
 import { createCollabRolloutTailer } from "./collab-rollout.js";
 import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { createNormalizer } from "./normalizer.js";
@@ -129,11 +129,23 @@ try {
       } else {
         send(mapped);
       }
-      const message = eventMessage(mapped.payload);
+      const payload = (mapped.payload ?? {}) as Record<string, unknown>;
+      const message = firstUsefulFailureMessage(
+        payload.reason,
+        payload.message,
+        payload.error,
+        eventMessage(payload)
+      );
       if (mapped.type === "run.failed") {
         terminalFailure = true;
         if (message) lastFailureMessage = message;
       } else if (mapped.type === "run.reconnecting" && message) {
+        lastFailureMessage = message;
+      } else if (
+        mapped.type === "tool.output" &&
+        payload.tool === "runtime_error" &&
+        message
+      ) {
         lastFailureMessage = message;
       }
     }
