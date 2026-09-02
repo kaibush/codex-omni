@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compactTimelineEvents, displayTimelineEvents, mergeSessionTimeline } from "./timeline";
+import {
+  capTimelineEvents,
+  compactTimelineEvents,
+  displayTimelineEvents,
+  mergeSessionTimeline
+} from "./timeline";
 import type { TimelineItem } from "@/types";
 
 const item = (id: string, createdAt: number, extra: Partial<TimelineItem> = {}): TimelineItem => ({
@@ -62,6 +67,19 @@ describe("mergeSessionTimeline", () => {
         historyExpanded: false
       }).map((entry) => entry.id)
     ).toEqual(["m3", "stream", "error"]);
+  });
+
+  it("drops stale streaming reasoning that is no longer on the latest page", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [item("m3", 30)],
+        current: [
+          item("old-reason", 10, { kind: "reasoning", streaming: true }),
+          item("m3", 30)
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["m3"]);
   });
 
   it("keeps view_image input.path when history overwrites a live tool card", () => {
@@ -229,5 +247,33 @@ describe("compactTimelineEvents", () => {
         false
       );
     }
+  });
+});
+
+describe("capTimelineEvents", () => {
+  it("keeps the tail of a long live session", () => {
+    const items = Array.from({ length: 200 }, (_, index) => item(`m-${index}`, index));
+    const result = capTimelineEvents(items);
+    expect(result).toHaveLength(120);
+    expect(result[0]?.id).toBe("m-80");
+    expect(result.at(-1)?.id).toBe("m-199");
+  });
+
+  it("snaps the tail window back to a nearby user turn", () => {
+    const items = [
+      ...Array.from({ length: 100 }, (_, index) => item(`tool-${index}`, index, { kind: "tool" })),
+      item("user-1", 100, { kind: "user", text: "continue" }),
+      ...Array.from({ length: 40 }, (_, index) =>
+        item(`live-${index}`, 101 + index, { kind: "tool" })
+      )
+    ];
+    const result = capTimelineEvents(items, { maxItems: 30 });
+    expect(result[0]?.id).toBe("user-1");
+    expect(result.at(-1)?.id).toBe("live-39");
+  });
+
+  it("returns the same array when the window already fits", () => {
+    const items = [item("a", 1), item("b", 2)];
+    expect(capTimelineEvents(items)).toBe(items);
   });
 });

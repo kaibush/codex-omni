@@ -42,7 +42,7 @@ import {
   reconcileTaskState,
   resolveTaskState
 } from "@/lib/task-state";
-import { mergeSessionTimeline } from "@/lib/timeline";
+import { capTimelineEvents, LIVE_TIMELINE_TAIL_ITEMS, mergeSessionTimeline } from "@/lib/timeline";
 import { createId } from "@/lib/utils";
 import type {
   Message,
@@ -459,13 +459,14 @@ export function Workspace() {
     const messages = detail.data.messages;
     const historical = messages.filter(isVisibleTimelineMessage).map((message) => fromMessage(message));
     const expanded = historyExpanded.current;
-    setEvents((current) =>
-      mergeSessionTimeline({
+    setEvents((current) => {
+      const merged = mergeSessionTimeline({
         historical,
         current,
         historyExpanded: expanded
-      })
-    );
+      });
+      return stickToBottom.current ? capTimelineEvents(merged) : merged;
+    });
     if (!expanded) {
       setHistoryCursor(detail.data.nextCursor);
       setHasOlderMessages(detail.data.hasMore);
@@ -476,6 +477,18 @@ export function Workspace() {
     });
     setRunState((current) => reconcileTaskState(current, resolved));
   }, [detail.data?.messages, detail.data?.latestRun, detail.data?.session.status, sessionId]);
+  useEffect(() => {
+    if (!sessionId || !stickToBottom.current) return;
+    if (events.length < LIVE_TIMELINE_TAIL_ITEMS) return;
+    const oldest = events.find((item) => item.messageId && item.createdAt != null);
+    const messageId = oldest?.messageId;
+    const createdAt = oldest?.createdAt;
+    if (!messageId || createdAt == null) return;
+    setHasOlderMessages(true);
+    setHistoryCursor((current) =>
+      current?.id === messageId ? current : { createdAt, id: messageId }
+    );
+  }, [events, sessionId]);
   useLayoutEffect(() => {
     const container = chatScroll.current;
     if (!container) return;
@@ -854,8 +867,10 @@ export function Workspace() {
         );
       }
       setEvents((current) => {
-        const put = (id: string, next: Omit<TimelineItem, "id">) =>
-          upsert(current, id, compactTimelineItem(next));
+        const put = (id: string, next: Omit<TimelineItem, "id">) => {
+          const updated = upsert(current, id, compactTimelineItem(next));
+          return stickToBottom.current ? capTimelineEvents(updated) : updated;
+        };
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
           const previous = current.find((item) => item.id === id);
@@ -873,9 +888,7 @@ export function Workspace() {
           return put(id, {
             kind: "reasoning",
             text: applyTextPatch(previous?.text ?? "", payload),
-            data: payload,
-            providerId: providerIdRef.current,
-            streaming: true
+            providerId: providerIdRef.current
           });
         }
         if (event.type === "tool.started" || event.type === "tool.output") {

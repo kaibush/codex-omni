@@ -112,6 +112,58 @@ export function compactTimelineEvents(items: TimelineItem[]): TimelineItem[] {
   return result;
 }
 
+export const LIVE_TIMELINE_TAIL_ITEMS = 120;
+export const LIVE_TIMELINE_MAX_CHARS = 1_200_000;
+
+function timelineItemSize(item: TimelineItem) {
+  return item.text?.length ?? 0;
+}
+
+/** Keep a bounded window so hours-long chats cannot retain the whole session in RAM. */
+export function capTimelineEvents(
+  items: TimelineItem[],
+  options?: { keep?: "tail" | "head"; maxItems?: number; maxChars?: number }
+): TimelineItem[] {
+  const keep = options?.keep ?? "tail";
+  const maxItems = options?.maxItems ?? LIVE_TIMELINE_TAIL_ITEMS;
+  const maxChars = options?.maxChars ?? LIVE_TIMELINE_MAX_CHARS;
+  if (items.length <= maxItems) {
+    let chars = 0;
+    for (const item of items) {
+      chars += timelineItemSize(item);
+      if (chars > maxChars) break;
+    }
+    if (chars <= maxChars) return items;
+  }
+  if (keep === "head") {
+    let chars = 0;
+    let end = 0;
+    while (end < items.length && end < maxItems) {
+      const size = timelineItemSize(items[end]!);
+      if (end > 0 && chars + size > maxChars) break;
+      chars += size;
+      end += 1;
+    }
+    return end >= items.length ? items : items.slice(0, Math.max(1, end));
+  }
+  let chars = 0;
+  let start = items.length;
+  while (start > 0 && items.length - (start - 1) <= maxItems) {
+    const size = timelineItemSize(items[start - 1]!);
+    if (items.length - start > 0 && chars + size > maxChars) break;
+    chars += size;
+    start -= 1;
+  }
+  const minStart = Math.max(0, items.length - maxItems - 24);
+  for (let index = start; index > minStart; index -= 1) {
+    if (items[index]?.kind === "user") {
+      start = index;
+      break;
+    }
+  }
+  return start <= 0 ? items : items.slice(start);
+}
+
 export function displayTimelineEvents(
   items: TimelineItem[],
   view: TimelineView = "folded"
@@ -167,7 +219,7 @@ export function mergeSessionTimeline(input: {
   const inFlight = extras.filter((item) => {
     if (olderIds.has(item.id)) return false;
     if (afterHistoricalIds.has(item.id)) return true;
-    if (item.streaming) return true;
+    if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
     if (item.kind === "error") return true;
     return (item.createdAt ?? 0) > newestCreatedAt;
   });
