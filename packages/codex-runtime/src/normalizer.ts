@@ -1,5 +1,6 @@
 import {
   parseReconnectNotice,
+  sanitizeCodexExecError,
   textPatch,
   type BridgeEvent,
   type BridgeRequest
@@ -375,9 +376,12 @@ export function createNormalizer(request: BridgeRequest) {
       firstResponseAt ??= Date.now();
       return envelope("approval.requested", { ...payload, startedAt, firstResponseAt });
     },
-    failure: (error: unknown) =>
+    failure: (error: unknown, fallback?: string) =>
       envelope("run.failed", {
-        message: error instanceof Error ? error.message : String(error),
+        message: sanitizeCodexExecError(
+          error instanceof Error ? error.message : String(error),
+          fallback
+        ),
         status: "failed",
         startedAt,
         firstResponseAt,

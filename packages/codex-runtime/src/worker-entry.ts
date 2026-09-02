@@ -16,6 +16,13 @@ function numericUsage(value: unknown): Record<string, number> {
   return result;
 }
 
+function eventMessage(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const record = payload as Record<string, unknown>;
+  const message = record.reason ?? record.message;
+  return typeof message === "string" ? message.trim() : "";
+}
+
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const line = await new Promise<string>((resolve, reject) => {
   rl.once("line", resolve);
@@ -71,6 +78,8 @@ const flushCollab = () => {
 };
 const collabTimer = setInterval(flushCollab, 250);
 collabTimer.unref();
+let terminalFailure = false;
+let lastFailureMessage = "";
 try {
   const codex = new Codex({
     ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
@@ -96,7 +105,6 @@ try {
     ? codex.resumeThread(request.threadId, options)
     : codex.startThread(options);
   const { events } = await thread.runStreamed(request.message);
-  let terminalFailure = false;
   for await (const event of events) {
     if (
       request.approvalPolicy !== "never" &&
@@ -121,14 +129,20 @@ try {
       } else {
         send(mapped);
       }
-      if (mapped.type === "run.failed") terminalFailure = true;
+      const message = eventMessage(mapped.payload);
+      if (mapped.type === "run.failed") {
+        terminalFailure = true;
+        if (message) lastFailureMessage = message;
+      } else if (mapped.type === "run.reconnecting" && message) {
+        lastFailureMessage = message;
+      }
     }
     flushCollab();
   }
   flushCollab();
   if (terminalFailure) process.exitCode = 1;
 } catch (error) {
-  send(normalizer.failure(error));
+  if (!terminalFailure) send(normalizer.failure(error, lastFailureMessage));
   process.exitCode = 1;
 } finally {
   clearInterval(collabTimer);

@@ -31,6 +31,47 @@ export function parseReconnectNotice(value: unknown): ReconnectNotice | null {
   };
 }
 
+const CODEX_STDIN_BANNER =
+  /^(?:reading (?:prompt|additional input) from stdin\.{3}|reading prompt from stdin\u2026)$/i;
+const CODEX_EXEC_EXIT = /^Codex Exec exited with ((?:code|signal)\s+\S+):\s*([\s\S]*)$/i;
+
+function usefulCodexStderr(stderr: string) {
+  return stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !CODEX_STDIN_BANNER.test(line))
+    .join("\n")
+    .trim();
+}
+
+export function isGenericCodexExecError(value: unknown) {
+  if (typeof value !== "string") return false;
+  const message = value.trim();
+  if (!message) return true;
+  if (CODEX_STDIN_BANNER.test(message)) return true;
+  const match = message.match(CODEX_EXEC_EXIT);
+  if (!match) return false;
+  return !usefulCodexStderr(match[2] ?? "");
+}
+
+export function sanitizeCodexExecError(value: unknown, fallback?: string) {
+  const message = typeof value === "string" ? value.trim() : "";
+  const fallbackText = typeof fallback === "string" ? fallback.trim() : "";
+  const usableFallback =
+    fallbackText && !isGenericCodexExecError(fallbackText) ? fallbackText : "";
+  const match = message.match(CODEX_EXEC_EXIT);
+  if (match) {
+    const stderr = usefulCodexStderr(match[2] ?? "");
+    if (stderr) return stderr;
+    if (usableFallback) return usableFallback;
+    return `Codex 进程异常退出（${match[1]}），未返回具体错误信息`;
+  }
+  if (message && !isGenericCodexExecError(message)) return message;
+  if (usableFallback) return usableFallback;
+  if (CODEX_STDIN_BANNER.test(message)) return "Codex 进程异常退出，未返回具体错误信息";
+  return message || usableFallback || "Codex 运行失败";
+}
+
 export const providerHomeModeSchema = z.enum(["managed", "api-key", "external"]);
 export type ProviderHomeMode = z.infer<typeof providerHomeModeSchema>;
 

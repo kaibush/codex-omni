@@ -18,6 +18,8 @@ import {
 import {
   applyTextPatch,
   compactStreamEvent,
+  isGenericCodexExecError,
+  sanitizeCodexExecError,
   truncateToolText,
   type BridgeEvent,
   type RunCommand
@@ -271,7 +273,16 @@ export class RunManager {
           ? { firstResponseAt: extra.firstResponseAt }
           : {}),
         ...(extra.usage ? { usageJson: JSON.stringify(extra.usage) } : {}),
-        ...(extra.reason ? { reason: String(extra.reason) } : {}),
+        ...(extra.reason
+          ? {
+              reason:
+                run.reason &&
+                isGenericCodexExecError(String(extra.reason)) &&
+                !isGenericCodexExecError(run.reason)
+                  ? run.reason
+                  : String(extra.reason)
+            }
+          : {}),
         reconnectingJson: extra.reconnecting ? JSON.stringify(extra.reconnecting) : null
       });
     }
@@ -621,8 +632,31 @@ export class RunManager {
         projectId: project.id,
         sessionId: session.id
       });
-      const terminalEvent = event.type === "turn.completed" || event.type === "run.failed";
       const payload = (event.payload ?? {}) as Record<string, any>;
+      if (event.type === "run.failed") {
+        const incoming = String(payload.message ?? payload.reason ?? "");
+        const previous = this.store.getMessageByItemId(session.id, `${requestId}:run.failed`);
+        if (
+          previous?.content &&
+          isGenericCodexExecError(incoming) &&
+          !isGenericCodexExecError(previous.content)
+        ) {
+          return;
+        }
+        let fallback = previous?.content ?? "";
+        const run = this.store.getRun(requestId);
+        if (run?.reconnectingJson) {
+          try {
+            const reconnecting = JSON.parse(run.reconnectingJson) as Record<string, unknown>;
+            fallback = String(reconnecting.reason ?? reconnecting.message ?? fallback);
+          } catch {
+            // Keep the previous fallback when reconnect metadata is malformed.
+          }
+        }
+        const sanitized = sanitizeCodexExecError(incoming, fallback);
+        if (sanitized && sanitized !== incoming) payload.message = sanitized;
+      }
+      const terminalEvent = event.type === "turn.completed" || event.type === "run.failed";
       if (event.type === "run.reconnecting") {
         this.reconnecting.add(session.id);
         this.persistRun(session.id, "running", { startedAt, reconnecting: payload });

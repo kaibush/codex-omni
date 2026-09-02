@@ -230,6 +230,113 @@ describe("RunManager reconnect state", () => {
       reason: "stream retries exhausted"
     });
   });
+
+  it("does not replace a stream failure with the Codex exec stdin banner", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "run.failed",
+            payload: {
+              status: "failed",
+              message: "stream disconnected before completion: stream closed before response.completed"
+            }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "run.failed",
+            payload: {
+              status: "failed",
+              message: "Codex Exec exited with code 1: Reading prompt from stdin...\n"
+            }
+          })
+        );
+        throw new Error("Bridge worker exited with 1");
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(store?.getSession(session.id)?.status).toBe("failed");
+    expect(sent.filter((event) => event.type === "run.failed")).toHaveLength(1);
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")
+    ).toMatchObject([
+      {
+        content:
+          "stream disconnected before completion: stream closed before response.completed"
+      }
+    ]);
+    expect(store?.getLatestRun(session.id)?.reason).toBe(
+      "stream disconnected before completion: stream closed before response.completed"
+    );
+  });
+
+  it("uses the last reconnect reason when Codex exec only reports a stdin banner", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "run.reconnecting",
+            payload: {
+              status: "running",
+              message:
+                "Reconnecting... 4/5 (stream disconnected before completion: stream closed before response.completed)",
+              attempt: 4,
+              maxAttempts: 5,
+              reason: "stream disconnected before completion: stream closed before response.completed"
+            }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "run.failed",
+            payload: {
+              status: "failed",
+              message: "Codex Exec exited with code 1: Reading prompt from stdin...\n"
+            }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(store?.getSession(session.id)?.status).toBe("failed");
+    expect(
+      store?.listMessages(session.id).filter((message) => message.role === "error")[0]?.content
+    ).toBe("stream disconnected before completion: stream closed before response.completed");
+    expect(store?.getLatestRun(session.id)?.reason).toBe(
+      "stream disconnected before completion: stream closed before response.completed"
+    );
+  });
 });
 
 describe("RunManager recovery and queue", () => {

@@ -3,10 +3,12 @@ import {
   authStatusSchema,
   eventSchema,
   filesystemBrowseSchema,
+  isGenericCodexExecError,
   normalizeProviderHomeMode,
   parseReconnectNotice,
   providerInputSchema,
   runCommandSchema,
+  sanitizeCodexExecError,
   sessionSchema
 } from "./index.js";
 
@@ -24,6 +26,29 @@ describe("protocol", () => {
       reason: "stream disconnected before completion: stream closed before response.completed"
     });
     expect(parseReconnectNotice("request failed permanently")).toBeNull();
+  });
+  it("strips Codex exec stdin banners and keeps the real error", () => {
+    const banner = "Codex Exec exited with code 1: Reading prompt from stdin...\n";
+    expect(isGenericCodexExecError(banner)).toBe(true);
+    expect(isGenericCodexExecError("Reading prompt from stdin...")).toBe(true);
+    expect(
+      isGenericCodexExecError(
+        "Codex Exec exited with code 1: Reading prompt from stdin...\nNo prompt provided via stdin."
+      )
+    ).toBe(false);
+    expect(
+      sanitizeCodexExecError(
+        banner,
+        "stream disconnected before completion: stream closed before response.completed"
+      )
+    ).toBe("stream disconnected before completion: stream closed before response.completed");
+    expect(
+      sanitizeCodexExecError(
+        "Codex Exec exited with code 1: Reading prompt from stdin...\nNo prompt provided via stdin."
+      )
+    ).toBe("No prompt provided via stdin.");
+    expect(sanitizeCodexExecError(banner)).toBe("Codex 进程异常退出（code 1），未返回具体错误信息");
+    expect(sanitizeCodexExecError("request failed permanently")).toBe("request failed permanently");
   });
   it("accepts a non-terminal reconnect event", () => {
     expect(

@@ -266,6 +266,26 @@ describe("normalizer", () => {
       payload: { status: "failed", message: "Reconnecting... 5/5 (all retries exhausted)" }
     });
   });
+
+  it("replaces Codex exec stdin banners with the last real failure reason", () => {
+    const n = createNormalizer(req);
+    expect(
+      n.failure(
+        new Error("Codex Exec exited with code 1: Reading prompt from stdin...\n"),
+        "stream disconnected before completion: stream closed before response.completed"
+      )
+    ).toMatchObject({
+      type: "run.failed",
+      payload: {
+        status: "failed",
+        message: "stream disconnected before completion: stream closed before response.completed"
+      }
+    });
+    expect(n.failure(new Error("Codex Exec exited with code 1: Reading prompt from stdin..."))).toMatchObject({
+      type: "run.failed",
+      payload: { status: "failed", message: "Codex 进程异常退出（code 1），未返回具体错误信息" }
+    });
+  });
 });
 
 it("includes firstResponseAt on the first visible item event", () => {
