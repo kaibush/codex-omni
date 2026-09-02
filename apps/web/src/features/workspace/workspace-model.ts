@@ -1,4 +1,4 @@
-import { parseReconnectNotice, type ReconnectNotice } from "@codex-omni/protocol";
+import { compactTimelineItem, parseReconnectNotice, type ReconnectNotice } from "@codex-omni/protocol";
 import type { Message, TimelineItem } from "@/types";
 import type { TaskState } from "@/lib/task-state";
 
@@ -117,17 +117,20 @@ export const timelineMessageId = (message: Message) => {
   }
   return `${message.role}-${message.itemId}`;
 };
-export const fromMessage = (m: Message): TimelineItem => ({
-  id: timelineMessageId(m),
-  messageId: m.id,
-  kind:
-    m.role === "system" ? "system" : m.role === "run" ? "system" : (m.role as TimelineItem["kind"]),
-  text: m.content,
-  data: parseData(m.dataJson),
-  providerId: m.providerId,
-  streaming: false,
-  createdAt: m.createdAt
-});
+export const fromMessage = (m: Message, options?: { preview?: boolean }): TimelineItem => {
+  const item: TimelineItem = {
+    id: timelineMessageId(m),
+    messageId: m.id,
+    kind:
+      m.role === "system" ? "system" : m.role === "run" ? "system" : (m.role as TimelineItem["kind"]),
+    text: m.content,
+    data: parseData(m.dataJson),
+    providerId: m.providerId,
+    streaming: false,
+    createdAt: m.createdAt
+  };
+  return compactTimelineItem(item, options);
+};
 export const isVisibleTimelineMessage = (message: Message) =>
   message.role !== "run" &&
   !(message.role === "error" && parseReconnectNotice(message.content) !== null);

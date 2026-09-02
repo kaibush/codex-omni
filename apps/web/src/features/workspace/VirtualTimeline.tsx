@@ -10,9 +10,10 @@ import {
 import { estimateTimelineItemSize, shouldVirtualizeTimeline, stickyVisibleRange, visibleWindow } from "./virtual-window";
 
 const DEFAULT_THRESHOLD = 8;
-const DEFAULT_OVERSCAN = 6;
-const DEFAULT_OVERSCAN_PX = 1800;
+const DEFAULT_OVERSCAN = 4;
+const DEFAULT_OVERSCAN_PX = 900;
 const ITEM_GAP = 12;
+const STICKY_MAX = 18;
 
 export function VirtualTimeline<T extends { id: string; kind: string; text?: string | undefined }>({
   items,
@@ -28,7 +29,11 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   scrollRef: RefObject<HTMLElement | null>;
   stickToBottom?: { current: boolean } | undefined;
   scrollToId?: string | undefined;
-  renderItem: (item: T, index: number) => ReactNode;
+  renderItem: (
+    item: T,
+    index: number,
+    meta: { lite: boolean; height: number | undefined }
+  ) => ReactNode;
   overscan?: number | undefined;
   overscanPx?: number | undefined;
   threshold?: number | undefined;
@@ -111,6 +116,8 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
       return {
         start: 0,
         end: items.length,
+        tightStart: 0,
+        tightEnd: items.length,
         paddingTop: 0,
         paddingBottom: 0,
         totalHeight: 0,
@@ -129,11 +136,8 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
       overscan,
       overscanPx
     });
-    const sticky = stickyVisibleRange(nextWindow, stickyRef.current);
+    const sticky = stickyVisibleRange(nextWindow, stickyRef.current, STICKY_MAX);
     stickyRef.current = sticky;
-    if (sticky.start === nextWindow.start && sticky.end === nextWindow.end) {
-      return { ...nextWindow, virtualized: true };
-    }
     let paddingTop = 0;
     for (let index = 0; index < sticky.start; index += 1) paddingTop += sizeOf(index);
     let rendered = 0;
@@ -141,6 +145,8 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     return {
       start: sticky.start,
       end: sticky.end,
+      tightStart: nextWindow.start,
+      tightEnd: nextWindow.end,
       paddingTop,
       paddingBottom: Math.max(0, nextWindow.totalHeight - paddingTop - rendered),
       totalHeight: nextWindow.totalHeight,
@@ -203,7 +209,10 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
             last={index === items.length - 1}
             onMeasure={measure}
           >
-            {renderItem(item, index)}
+            {renderItem(item, index, {
+              lite: range.virtualized && (index < range.tightStart || index >= range.tightEnd),
+              height: sizeMap.current.get(item.id)
+            })}
           </VirtualTimelineItem>
         );
       })}

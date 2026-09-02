@@ -47,6 +47,8 @@ describe("Store", () => {
       itemId: "req:item"
     });
     expect(store.getMessageByItemId(session.id, "req:item")?.content).toBe("hello");
+    const byItem = store.getMessageByItemId(session.id, "req:item");
+    expect(byItem && store.getMessage(byItem.id)?.content).toBe("hello");
   });
   it("manages one default provider and persistent settings", () => {
     store = new Store(":memory:");

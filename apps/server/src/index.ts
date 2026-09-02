@@ -978,7 +978,7 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   return {
     session,
     ...page,
-    messages: page.messages.map(compactMessageForClient),
+    messages: page.messages.map((row) => compactMessageForClient(row)),
     latestRun: latestRun ? compactMessageForClient(latestRun) : null
   };
 });
@@ -1380,6 +1380,12 @@ app.get("/api/sessions/:id/stars", { preHandler: auth }, async (req, reply) => {
   const session = store.getSession(routeId(req));
   if (!session) return reply.code(404).send({ error: "Session not found" });
   return { ids: store.listSessionStars(session.id) };
+});
+
+app.get("/api/messages/:id", { preHandler: auth }, async (req, reply) => {
+  const message = store.getMessage(routeId(req));
+  if (!message) return reply.code(404).send({ error: "Message not found" });
+  return compactMessageForClient(message, { preview: false });
 });
 app.put("/api/messages/:id/star", { preHandler: auth }, async (req, reply) => {
   const { starred } = z.object({ starred: z.boolean() }).parse(req.body ?? {});

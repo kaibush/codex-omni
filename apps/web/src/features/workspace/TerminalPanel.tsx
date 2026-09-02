@@ -150,7 +150,7 @@ function TerminalViewport({
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: window.innerWidth < 640 ? 12 : 13,
       lineHeight: 1.2,
-      scrollback: 10_000,
+      scrollback: 2_000,
       allowTransparency: false,
       theme:
         resolvedTheme === "dark"

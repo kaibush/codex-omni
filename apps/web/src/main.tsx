@@ -11,7 +11,7 @@ import "@/styles/index.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { staleTime: 5000, retry: 1 } } })}
+      client={new QueryClient({ defaultOptions: { queries: { staleTime: 5000, gcTime: 60_000, retry: 1 } } })}
     >
       <ThemeProvider>
         <TooltipProvider>

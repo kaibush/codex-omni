@@ -976,6 +976,13 @@ export class Store {
       ...input
     };
   }
+  getMessage(id: string) {
+    return this.db
+      .prepare(
+        "SELECT id,session_id as sessionId,role,content,provider_id as providerId,event_type as eventType,item_id as itemId,data_json as dataJson,created_at as createdAt,updated_at as updatedAt FROM messages WHERE id=?"
+      )
+      .get(id) as MessageRow | undefined;
+  }
   getMessageByItemId(sessionId: string, itemId: string) {
     return this.db
       .prepare(

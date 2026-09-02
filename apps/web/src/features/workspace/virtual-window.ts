@@ -98,7 +98,7 @@ export function shouldVirtualizeTimeline(
 export function stickyVisibleRange(
   current: { start: number; end: number },
   previous: { start: number; end: number },
-  maxItems = 36
+  maxItems = 18
 ) {
   if (previous.end <= previous.start) return current;
   if (current.start > previous.end || current.end < previous.start) return current;

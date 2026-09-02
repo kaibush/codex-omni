@@ -309,3 +309,12 @@ export {
   textPatch,
   truncateToolText
 } from "./stream-patch.js";
+export {
+  TIMELINE_ASSISTANT_PREVIEW_CHARS,
+  TIMELINE_JSON_STRING_CHARS,
+  TIMELINE_PREVIEW_CHARS,
+  compactJsonData,
+  compactTimelineItem,
+  previewLimitForKind,
+  previewText
+} from "./timeline-preview.js";

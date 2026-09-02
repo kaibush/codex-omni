@@ -113,7 +113,8 @@ export function WorkspaceTimeline({
   runState,
   connection,
   sendNotice,
-  saveWorkspaceSettings
+  saveWorkspaceSettings,
+  loadFullMessage
 }: {
   workspaceView: "chat" | "files" | "git" | "terminal";
   messageHits: Array<{ projectId: string; sessionId: string; messageId: string }>;
@@ -164,6 +165,7 @@ export function WorkspaceTimeline({
   connection: ConnectionState;
   sendNotice: string;
   saveWorkspaceSettings: (settings: WorkspaceSettings) => Promise<void>;
+  loadFullMessage: (item: TimelineItem) => void;
 }) {
   const detail = { isError: detailError, refetch: refetchDetail };
   const timelineView: TimelineView = isTimelineView(workspaceSettings.timelineView)
@@ -393,9 +395,12 @@ export function WorkspaceTimeline({
               scrollRef={chatScroll}
               stickToBottom={stickToBottom}
               scrollToId={highlightMessageId || undefined}
-              renderItem={(item) => (
+              renderItem={(item, _index, meta) => (
                 <EventCard
                   item={item}
+                  lite={meta.lite}
+                  liteHeight={meta.height}
+                  onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
                   highlighted={highlightMessageId === item.id}
                   defaultOpen={
                     timelineView === "expanded" ||

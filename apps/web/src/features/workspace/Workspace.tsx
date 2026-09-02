@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { applyTextPatch } from "@codex-omni/protocol";
+import { applyTextPatch, compactTimelineItem } from "@codex-omni/protocol";
 import { useNavigate, useParams } from "react-router";
 import { FolderPlus, LoaderCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ import {
 import { mergeSessionTimeline } from "@/lib/timeline";
 import { createId } from "@/lib/utils";
 import type {
+  Message,
   MessageCursor,
   Project,
   Provider,
@@ -456,7 +457,7 @@ export function Workspace() {
   useEffect(() => {
     if (!detail.data || detail.data.session.id !== sessionId) return;
     const messages = detail.data.messages;
-    const historical = messages.filter(isVisibleTimelineMessage).map(fromMessage);
+    const historical = messages.filter(isVisibleTimelineMessage).map((message) => fromMessage(message));
     const expanded = historyExpanded.current;
     setEvents((current) =>
       mergeSessionTimeline({
@@ -853,10 +854,12 @@ export function Workspace() {
         );
       }
       setEvents((current) => {
+        const put = (id: string, next: Omit<TimelineItem, "id">) =>
+          upsert(current, id, compactTimelineItem(next));
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
           const previous = current.find((item) => item.id === id);
-          return upsert(current, id, {
+          return put(id, {
             kind: "assistant",
             text: applyTextPatch(previous?.text ?? "", payload),
             providerId: providerIdRef.current,
@@ -867,11 +870,12 @@ export function Workspace() {
         if (event.type === "reasoning.delta") {
           const id = `reasoning-${event.requestId}-${payload.itemId}`;
           const previous = current.find((item) => item.id === id);
-          return upsert(current, id, {
+          return put(id, {
             kind: "reasoning",
             text: applyTextPatch(previous?.text ?? "", payload),
             data: payload,
-            providerId: providerIdRef.current
+            providerId: providerIdRef.current,
+            streaming: true
           });
         }
         if (event.type === "tool.started" || event.type === "tool.output") {
@@ -881,15 +885,18 @@ export function Workspace() {
             text: payload.output,
             delta: payload.outputDelta
           });
-          return upsert(current, id, {
+          const rest = { ...(payload as Record<string, unknown>) };
+          delete rest.outputDelta;
+          return put(id, {
             kind: "tool",
-            data: { ...previous?.data, ...payload, output },
+            data: { ...previous?.data, ...rest, output },
             text: output,
-            providerId: providerIdRef.current
+            providerId: providerIdRef.current,
+            streaming: event.type === "tool.started" || rest.status === "in_progress"
           });
         }
         if (event.type === "file.change")
-          return upsert(current, `file-${event.requestId}-${payload.itemId}`, {
+          return put(`file-${event.requestId}-${payload.itemId}`, {
             kind: "file",
             data: payload,
             providerId: providerIdRef.current
@@ -946,7 +953,7 @@ export function Workspace() {
       });
       const older = await api<SessionDetailPage>(`/api/sessions/${sessionId}?${params}`);
       if (currentSessionId.current !== sessionId) return;
-      const olderEvents = older.messages.filter(isVisibleTimelineMessage).map(fromMessage);
+      const olderEvents = older.messages.filter(isVisibleTimelineMessage).map((message) => fromMessage(message));
       const container = chatScroll.current;
       if (container) {
         historyScrollSnapshot.current = {
@@ -975,6 +982,18 @@ export function Workspace() {
       }
     }
   }, [hasOlderMessages, historyCursor, sessionId]);
+  const loadFullMessage = useCallback(async (item: TimelineItem) => {
+    if (!item.messageId) return;
+    try {
+      const message = await api<Message>(`/api/messages/${item.messageId}`);
+      const full = fromMessage(message, { preview: false });
+      setEvents((current) =>
+        current.map((entry) => (entry.id === item.id ? { ...entry, ...full, id: entry.id } : entry))
+      );
+    } catch (error) {
+      setSendNotice(error instanceof Error ? error.message : "完整内容加载失败");
+    }
+  }, []);
   useEffect(() => {
     if (
       !providers.data ||
@@ -1970,6 +1989,7 @@ export function Workspace() {
               connection={connection}
               sendNotice={sendNotice}
               saveWorkspaceSettings={saveWorkspaceSettings}
+              loadFullMessage={loadFullMessage}
             />
             <WorkspaceComposer
               workspaceView={workspaceView}

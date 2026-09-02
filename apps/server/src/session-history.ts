@@ -1,26 +1,37 @@
 import type { MessageRow } from "@codex-omni/db";
+import { compactTimelineItem } from "@codex-omni/protocol";
 
-const DUPLICATE_CONTENT_FIELDS = ["text", "output", "message"] as const;
-
-export function compactMessageForClient(message: MessageRow): MessageRow {
-  if (!message.dataJson) return message;
+function parseData(dataJson: string | null) {
+  if (!dataJson) return undefined;
   try {
-    const data = JSON.parse(message.dataJson) as unknown;
-    if (!data || typeof data !== "object" || Array.isArray(data)) return message;
-    const record = data as Record<string, unknown>;
-    let changed = false;
-    for (const field of DUPLICATE_CONTENT_FIELDS) {
-      if (record[field] === message.content) {
-        delete record[field];
-        changed = true;
-      }
-    }
-    if (!changed) return message;
-    return {
-      ...message,
-      dataJson: Object.keys(record).length ? JSON.stringify(record) : null
-    };
+    return JSON.parse(dataJson) as unknown;
   } catch {
-    return message;
+    return undefined;
   }
+}
+
+export function compactMessageForClient(
+  message: MessageRow,
+  options?: { preview?: boolean }
+): MessageRow {
+  const parsed = parseData(message.dataJson);
+  const malformed = Boolean(message.dataJson) && parsed === undefined;
+  const compacted = compactTimelineItem(
+    {
+      kind: message.role,
+      text: message.content,
+      ...(parsed === undefined ? {} : { data: parsed })
+    },
+    options
+  );
+  if (compacted.text === message.content && compacted.data === parsed) return message;
+  let dataJson = message.dataJson;
+  if (!malformed) {
+    dataJson = compacted.data == null ? null : JSON.stringify(compacted.data);
+  }
+  return {
+    ...message,
+    content: compacted.text ?? "",
+    dataJson
+  };
 }

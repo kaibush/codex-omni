@@ -440,4 +440,38 @@ describe("EventCard copy controls", () => {
     expect(outside).toContain("/tmp/gamepad.png");
     expect(outside).not.toContain("files/download?path=tmp");
   });
+
+  it("renders a lightweight placeholder without markdown", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        lite
+        item={{
+          id: "assistant-lite",
+          kind: "assistant",
+          text: "示例：\n```ts\nconst answer = 42;\n```"
+        }}
+      />
+    );
+    expect(html).toContain('data-lite="1"');
+    expect(html).toContain("Codex");
+    expect(html).not.toContain("markdown-code-block");
+    expect(html).not.toContain("language-typescript");
+  });
+
+  it("offers to load the full truncated payload", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "tool-truncated",
+          messageId: "message-1",
+          kind: "tool",
+          text: "head",
+          data: { previewTruncated: true, originalLength: 50_000, tool: "command" }
+        }}
+        onLoadFull={() => undefined}
+      />
+    );
+    expect(html).toContain("加载完整内容");
+    expect(html).toContain("字符");
+  });
 });

@@ -521,6 +521,66 @@ function NoticeCard({ message, level }: { message: string; level: "info" | "warn
   return <p className={`notice-card-body${level === "error" ? " is-error" : ""}`}>{message}</p>;
 }
 
+function truncatedLabel(originalLength: unknown) {
+  const size = typeof originalLength === "number" ? originalLength : Number(originalLength);
+  if (!Number.isFinite(size) || size <= 0) return "加载完整内容";
+  return `加载完整内容（${Math.round(size).toLocaleString()} 字符）`;
+}
+
+function TruncatedNotice({
+  item,
+  onLoadFull
+}: {
+  item: TimelineItem;
+  onLoadFull?: (() => void) | undefined;
+}) {
+  if (!item.data?.previewTruncated || !onLoadFull) return null;
+  return (
+    <div className="px-3 pb-3">
+      <button
+        type="button"
+        className="h-8 rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground"
+        onClick={onLoadFull}
+      >
+        {truncatedLabel(item.data.originalLength)}
+      </button>
+    </div>
+  );
+}
+
+function EventCardLite({ item, height }: { item: TimelineItem; height: number | undefined }) {
+  const label =
+    item.kind === "user"
+      ? "你"
+      : item.kind === "assistant"
+        ? "Codex"
+        : item.kind === "reasoning"
+          ? "Thinking"
+          : item.kind === "activity"
+            ? "执行过程"
+            : item.kind === "approval"
+              ? "等待操作确认"
+              : item.kind === "file"
+                ? "File changes"
+                : item.kind === "error"
+                  ? "运行失败"
+                  : item.kind === "system"
+                    ? "系统"
+                    : "调用";
+  return (
+    <article
+      data-message-id={item.id}
+      data-lite="1"
+      className="event-card event-card-lite overflow-hidden"
+      style={height ? { height } : undefined}
+    >
+      <header className="event-title min-w-0">
+        <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+      </header>
+    </article>
+  );
+}
+
 type EventCardProps = {
   item: TimelineItem;
   providerName?: string | undefined;
@@ -544,6 +604,9 @@ type EventCardProps = {
   onStar?: (() => void) | undefined;
   onSaveNote?: (() => void) | undefined;
   onSummarize?: (() => void) | undefined;
+  lite?: boolean | undefined;
+  liteHeight?: number | undefined;
+  onLoadFull?: (() => void) | undefined;
 };
 
 function sameHandler<T>(left: T | undefined, right: T | undefined) {
@@ -580,7 +643,10 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     sameHandler(prev.onCreateFile, next.onCreateFile) &&
     sameHandler(prev.onStar, next.onStar) &&
     sameHandler(prev.onSaveNote, next.onSaveNote) &&
-    sameHandler(prev.onSummarize, next.onSummarize)
+    sameHandler(prev.onSummarize, next.onSummarize) &&
+    prev.lite === next.lite &&
+    prev.liteHeight === next.liteHeight &&
+    sameHandler(prev.onLoadFull, next.onLoadFull)
   );
 }
 
@@ -606,7 +672,10 @@ function EventCardComponent({
   starred,
   onStar,
   onSaveNote,
-  onSummarize
+  onSummarize,
+  lite = false,
+  liteHeight,
+  onLoadFull
 }: EventCardProps) {
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
   const [open, setOpen] = useState(() => {
@@ -626,6 +695,7 @@ function EventCardComponent({
     return defaultOpen;
   });
   if (hidden) return null;
+  if (lite) return <EventCardLite item={item} height={liteHeight} />;
   if (isRuntimePlaceholder(item.data, item.text)) return null;
   const highlightClass = highlighted ? " is-highlighted" : "";
   if (item.kind === "user")
@@ -741,6 +811,7 @@ function EventCardComponent({
             onCreateFile={onCreateFile}
           />
         </div>
+        <TruncatedNotice item={item} onLoadFull={onLoadFull} />
       </article>
     );
   if (item.kind === "assistant")
@@ -833,6 +904,7 @@ function EventCardComponent({
             onCreateFile={onCreateFile}
           />
         </div>
+        <TruncatedNotice item={item} onLoadFull={onLoadFull} />
       </article>
     );
   if (item.kind === "approval")
@@ -1232,6 +1304,7 @@ function EventCardComponent({
         ) : (
           <pre className="tool-pre">{item.text ?? JSON.stringify(item.data, null, 2)}</pre>
         ))}
+      <TruncatedNotice item={item} onLoadFull={onLoadFull} />
     </article>
   );
 }
