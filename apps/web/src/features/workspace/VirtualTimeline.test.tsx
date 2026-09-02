@@ -37,4 +37,23 @@ describe("VirtualTimeline", () => {
     expect(html).not.toContain("m-39");
     expect(html).not.toContain("正在显示后续消息");
   });
+
+  it("pins a long timeline to the newest cards while sticking to bottom", () => {
+    const items = Array.from({ length: 40 }, (_, index) => ({
+      id: `m-${index}`,
+      kind: "assistant" as const,
+      text: "hi"
+    }));
+    const html = renderToStaticMarkup(
+      <VirtualTimeline
+        items={items}
+        scrollRef={{ current: null }}
+        stickToBottom={{ current: true }}
+        renderItem={(item) => <div>{item.id}</div>}
+      />
+    );
+    expect(html).toContain('data-virtualized="1"');
+    expect(html).toContain("m-39");
+    expect(html).not.toContain("m-0");
+  });
 });

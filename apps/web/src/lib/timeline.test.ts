@@ -73,10 +73,7 @@ describe("mergeSessionTimeline", () => {
     expect(
       mergeSessionTimeline({
         historical: [item("m3", 30)],
-        current: [
-          item("old-reason", 10, { kind: "reasoning", streaming: true }),
-          item("m3", 30)
-        ],
+        current: [item("old-reason", 10, { kind: "reasoning", streaming: true }), item("m3", 30)],
         historyExpanded: false
       }).map((entry) => entry.id)
     ).toEqual(["m3"]);
@@ -275,5 +272,18 @@ describe("capTimelineEvents", () => {
   it("returns the same array when the window already fits", () => {
     const items = [item("a", 1), item("b", 2)];
     expect(capTimelineEvents(items)).toBe(items);
+  });
+
+  it("counts tool payloads so huge outputs cannot keep the whole tail", () => {
+    const items = Array.from({ length: 40 }, (_, index) =>
+      item(`tool-${index}`, index, {
+        kind: "tool",
+        text: "ok",
+        data: { output: "n".repeat(80_000) }
+      })
+    );
+    const result = capTimelineEvents(items, { maxItems: 40, maxChars: 200_000 });
+    expect(result.length).toBeLessThan(items.length);
+    expect(result.at(-1)?.id).toBe("tool-39");
   });
 });

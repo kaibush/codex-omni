@@ -334,7 +334,9 @@ export function WorkspaceTimeline({
         }}
         className="chat-scroll absolute inset-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 sm:px-5 lg:px-8"
       >
-        <div className="chat-content-width mx-auto flex min-w-0 flex-col gap-2.5 py-3 sm:gap-3 sm:py-4">
+        <div
+          className={`chat-content-width mx-auto flex min-w-0 flex-col py-3 sm:py-4${sessionId ? " min-h-full" : ""}`}
+        >
           {sessionId ? (
             <div
               className={`timeline-view-float${viewToggle.visible ? " is-visible" : ""}`}
@@ -351,7 +353,10 @@ export function WorkspaceTimeline({
                     title={option.hint}
                     onClick={() => {
                       if (option.value === timelineView) return;
-                      void saveWorkspaceSettings({ ...workspaceSettings, timelineView: option.value });
+                      void saveWorkspaceSettings({
+                        ...workspaceSettings,
+                        timelineView: option.value
+                      });
                     }}
                   >
                     {option.label}
@@ -360,193 +365,199 @@ export function WorkspaceTimeline({
               </div>
             </div>
           ) : null}
-          {historyLoading ? (
-            <div className="timeline-history-loading" role="status">
-              <LoaderCircle className="size-3.5 animate-spin" />
-              正在加载更早的对话
-            </div>
-          ) : hasOlderMessages ? (
-            <div className="flex justify-center pb-1">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => void loadOlderMessages()}
-                className="text-xs text-muted-foreground"
-              >
-                <Clock3 className="size-3.5" />
-                加载更早的对话
-              </Button>
-            </div>
-          ) : null}
-          {activeSession?.parentSessionId && (
-            <div className="rounded-xl border border-border bg-muted px-4 py-3 text-xs text-foreground">
-              {activeSession.continuationMode === "fork"
-                ? "此 Session 由消息分叉生成，来源 Session 保持可回看。"
-                : "此 Session 由其他 Provider 续接生成，来源 Session 保持可回看。"}
-            </div>
-          )}
-          {sessionLoading ? (
-            <div className="min-h-[45dvh] sm:min-h-[55vh]" />
-          ) : timelineItems.length ? (
-            <VirtualTimeline
-              key={timelineView}
-              items={timelineItems}
-              scrollRef={chatScroll}
-              stickToBottom={stickToBottom}
-              scrollToId={highlightMessageId || undefined}
-              renderItem={(item, _index, meta) => (
-                <EventCard
-                  item={item}
-                  lite={meta.lite}
-                  liteHeight={meta.height}
-                  onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
-                  highlighted={highlightMessageId === item.id}
-                  defaultOpen={
-                    timelineView === "expanded" ||
-                    (item.kind !== "reasoning" &&
-                      workspaceSettings.expandToolCalls &&
-                      item.streaming !== false)
-                  }
-                  hidden={item.kind === "reasoning" && !showReasoning}
-                  showProviderLabel={workspaceSettings.showProviderLabels}
-                  providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
-                  projectId={activeSession?.projectId}
-                  projectPath={projectPath}
-                  onReply={onReply}
-                  onOpenThread={onOpenThread}
-                  onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
-                  onEdit={
-                    item.kind === "user"
-                      ? () => {
-                          setInput(item.text ?? "");
-                          setAttachments([]);
-                          requestAnimationFrame(() => inputRef.current?.focus());
-                        }
-                      : undefined
-                  }
-                  onRetry={
-                    item.kind === "user" ? () => void submitMessage(item.text ?? "") : undefined
-                  }
-                  onQuote={
-                    item.kind === "user" || item.kind === "assistant"
-                      ? () => quoteToInput(item.text ?? "")
-                      : undefined
-                  }
-                  onCopyLink={() => void copyMessageLink(item.id)}
-                  starred={item.messageId ? starredIds.includes(item.messageId) : false}
-                  onStar={
-                    item.messageId && (item.kind === "user" || item.kind === "assistant")
-                      ? () => onStarMessage(item.messageId!)
-                      : undefined
-                  }
-                  onSaveNote={
-                    item.kind === "user" || item.kind === "assistant"
-                      ? () => onSaveNote(item.text ?? "")
-                      : undefined
-                  }
-                  onSummarize={
-                    item.kind === "user" || item.kind === "assistant"
-                      ? () => onSummarize(item.text ?? "")
-                      : undefined
-                  }
-                  onCreateFile={onCreateFile}
-                  onOpenFile={onOpenFile}
-                  onApproval={onApproval}
-                />
-              )}
-            />
-          ) : !activeSession ? (
-            <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-1 py-8 sm:py-12">
-              <div className="text-center">
-                <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-card shadow-sm">
-                  <MessageSquareText className="size-6 text-muted-foreground" />
-                </span>
-                <h2 className="mt-4 font-semibold">选择对话</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {sessionsPending
-                    ? "正在读取这个工程的对话。"
-                    : latestSession
-                      ? "打开最近对话，或从下面的列表里选择。"
-                      : "这个工程还没有对话，先新建一个。"}
-                </p>
-                <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-                  {latestSession ? (
+          <div
+            className={`flex min-w-0 flex-col gap-2.5 sm:gap-3${
+              sessionId && !sessionLoading && timelineItems.length ? " mt-auto" : ""
+            }`}
+          >
+            {historyLoading ? (
+              <div className="timeline-history-loading" role="status">
+                <LoaderCircle className="size-3.5 animate-spin" />
+                正在加载更早的对话
+              </div>
+            ) : hasOlderMessages ? (
+              <div className="flex justify-center pb-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void loadOlderMessages()}
+                  className="text-xs text-muted-foreground"
+                >
+                  <Clock3 className="size-3.5" />
+                  加载更早的对话
+                </Button>
+              </div>
+            ) : null}
+            {activeSession?.parentSessionId && (
+              <div className="rounded-xl border border-border bg-muted px-4 py-3 text-xs text-foreground">
+                {activeSession.continuationMode === "fork"
+                  ? "此 Session 由消息分叉生成，来源 Session 保持可回看。"
+                  : "此 Session 由其他 Provider 续接生成，来源 Session 保持可回看。"}
+              </div>
+            )}
+            {sessionLoading ? (
+              <div className="min-h-[45dvh] sm:min-h-[55vh]" />
+            ) : timelineItems.length ? (
+              <VirtualTimeline
+                key={timelineView}
+                items={timelineItems}
+                scrollRef={chatScroll}
+                stickToBottom={stickToBottom}
+                scrollToId={highlightMessageId || undefined}
+                renderItem={(item, _index, meta) => (
+                  <EventCard
+                    item={item}
+                    lite={meta.lite}
+                    liteHeight={meta.height}
+                    onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
+                    highlighted={highlightMessageId === item.id}
+                    defaultOpen={
+                      timelineView === "expanded" ||
+                      (item.kind !== "reasoning" &&
+                        workspaceSettings.expandToolCalls &&
+                        item.streaming !== false)
+                    }
+                    hidden={item.kind === "reasoning" && !showReasoning}
+                    showProviderLabel={workspaceSettings.showProviderLabels}
+                    providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
+                    projectId={activeSession?.projectId}
+                    projectPath={projectPath}
+                    onReply={onReply}
+                    onOpenThread={onOpenThread}
+                    onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
+                    onEdit={
+                      item.kind === "user"
+                        ? () => {
+                            setInput(item.text ?? "");
+                            setAttachments([]);
+                            requestAnimationFrame(() => inputRef.current?.focus());
+                          }
+                        : undefined
+                    }
+                    onRetry={
+                      item.kind === "user" ? () => void submitMessage(item.text ?? "") : undefined
+                    }
+                    onQuote={
+                      item.kind === "user" || item.kind === "assistant"
+                        ? () => quoteToInput(item.text ?? "")
+                        : undefined
+                    }
+                    onCopyLink={() => void copyMessageLink(item.id)}
+                    starred={item.messageId ? starredIds.includes(item.messageId) : false}
+                    onStar={
+                      item.messageId && (item.kind === "user" || item.kind === "assistant")
+                        ? () => onStarMessage(item.messageId!)
+                        : undefined
+                    }
+                    onSaveNote={
+                      item.kind === "user" || item.kind === "assistant"
+                        ? () => onSaveNote(item.text ?? "")
+                        : undefined
+                    }
+                    onSummarize={
+                      item.kind === "user" || item.kind === "assistant"
+                        ? () => onSummarize(item.text ?? "")
+                        : undefined
+                    }
+                    onCreateFile={onCreateFile}
+                    onOpenFile={onOpenFile}
+                    onApproval={onApproval}
+                  />
+                )}
+              />
+            ) : !activeSession ? (
+              <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-1 py-8 sm:py-12">
+                <div className="text-center">
+                  <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-card shadow-sm">
+                    <MessageSquareText className="size-6 text-muted-foreground" />
+                  </span>
+                  <h2 className="mt-4 font-semibold">选择对话</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {sessionsPending
+                      ? "正在读取这个工程的对话。"
+                      : latestSession
+                        ? "打开最近对话，或从下面的列表里选择。"
+                        : "这个工程还没有对话，先新建一个。"}
+                  </p>
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                    {latestSession ? (
+                      <Button
+                        onClick={() => onOpenSession(latestSession.id)}
+                        disabled={startSessionPending}
+                      >
+                        <MessageSquareText className="size-4" />
+                        打开最近对话
+                      </Button>
+                    ) : null}
                     <Button
-                      onClick={() => onOpenSession(latestSession.id)}
+                      variant={latestSession ? "outline" : "default"}
+                      onClick={beginNewSession}
                       disabled={startSessionPending}
                     >
-                      <MessageSquareText className="size-4" />
-                      打开最近对话
+                      <MessageSquarePlus className="size-4" />
+                      新建对话
                     </Button>
-                  ) : null}
-                  <Button
-                    variant={latestSession ? "outline" : "default"}
-                    onClick={beginNewSession}
-                    disabled={startSessionPending}
-                  >
-                    <MessageSquarePlus className="size-4" />
-                    新建对话
-                  </Button>
+                  </div>
                 </div>
+                {sessionsPending ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    正在读取对话
+                  </div>
+                ) : recentSessions.length ? (
+                  <div className="space-y-2">
+                    <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      最近对话
+                    </p>
+                    {recentSessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => onOpenSession(session.id)}
+                        className="flex w-full items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-muted"
+                      >
+                        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-background text-primary shadow-sm">
+                          <MessageSquareText className="size-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-center gap-1">
+                            {session.pinnedAt ? (
+                              <Pin className="size-3 shrink-0 text-primary" />
+                            ) : null}
+                            <span className="truncate text-sm font-medium">{session.title}</span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            {[
+                              formatCompactDateTime(session.lastMessageAt ?? session.updatedAt),
+                              session.providerId ? providerNames.get(session.providerId) : null
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              {sessionsPending ? (
-                <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                  <LoaderCircle className="size-4 animate-spin" />
-                  正在读取对话
-                </div>
-              ) : recentSessions.length ? (
-                <div className="space-y-2">
-                  <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    最近对话
+            ) : (
+              <div className="grid min-h-[45dvh] place-items-center px-4 text-center sm:min-h-[55vh]">
+                <div>
+                  <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-card shadow-sm">
+                    <TerminalSquare className="size-6 text-muted-foreground" />
+                  </span>
+                  <h2 className="mt-4 font-semibold">开始处理这个工程</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    询问代码、运行工具、编辑文件，事件会实时呈现在这里。
                   </p>
-                  {recentSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      onClick={() => onOpenSession(session.id)}
-                      className="flex w-full items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-muted"
-                    >
-                      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-background text-primary shadow-sm">
-                        <MessageSquareText className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 items-center gap-1">
-                          {session.pinnedAt ? (
-                            <Pin className="size-3 shrink-0 text-primary" />
-                          ) : null}
-                          <span className="truncate text-sm font-medium">{session.title}</span>
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                          {[
-                            formatCompactDateTime(session.lastMessageAt ?? session.updatedAt),
-                            session.providerId ? providerNames.get(session.providerId) : null
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
                 </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="grid min-h-[45dvh] place-items-center px-4 text-center sm:min-h-[55vh]">
-              <div>
-                <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-card shadow-sm">
-                  <TerminalSquare className="size-6 text-muted-foreground" />
-                </span>
-                <h2 className="mt-4 font-semibold">开始处理这个工程</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  询问代码、运行工具、编辑文件，事件会实时呈现在这里。
-                </p>
               </div>
-            </div>
-          )}
-          {sessionId && runState?.status === "running" && (
-            <RunStatusBubble state={runState} connection={connection} notice={sendNotice} />
-          )}
+            )}
+            {sessionId && runState?.status === "running" && (
+              <RunStatusBubble state={runState} connection={connection} notice={sendNotice} />
+            )}
+          </div>
         </div>
       </section>
     </div>

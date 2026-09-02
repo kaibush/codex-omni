@@ -7,7 +7,12 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
-import { estimateTimelineItemSize, shouldVirtualizeTimeline, stickyVisibleRange, visibleWindow } from "./virtual-window";
+import {
+  estimateTimelineItemSize,
+  shouldVirtualizeTimeline,
+  stickyVisibleRange,
+  visibleWindow
+} from "./virtual-window";
 
 const DEFAULT_THRESHOLD = 8;
 const DEFAULT_OVERSCAN = 4;
@@ -127,7 +132,12 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     const scroller = scrollRef.current;
     const viewportHeight = scroller?.clientHeight ?? 800;
     const listTop = listRef.current?.offsetTop ?? 0;
-    const scrollTop = Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
+    // Pinning to the bottom must not wait for scrollTop. The first paint (and
+    // the first 折叠/平铺/展开 remount) still has scrollTop=0, which would
+    // window the oldest cards and leave a huge empty padding below.
+    const scrollTop = stickToBottom?.current
+      ? Number.MAX_SAFE_INTEGER
+      : Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
     const nextWindow = visibleWindow({
       itemCount: items.length,
       itemSize: sizeOf,
@@ -197,9 +207,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
       data-virtual-start={String(range.start)}
       data-virtual-end={String(range.end)}
     >
-      {range.virtualized ? (
-        <VirtualGap height={range.paddingTop} position="before" />
-      ) : null}
+      {range.virtualized ? <VirtualGap height={range.paddingTop} position="before" /> : null}
       {visible.map((item, offset) => {
         const index = range.start + offset;
         return (
@@ -216,16 +224,21 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
           </VirtualTimelineItem>
         );
       })}
-      {range.virtualized ? (
-        <VirtualGap height={range.paddingBottom} position="after" />
-      ) : null}
+      {range.virtualized ? <VirtualGap height={range.paddingBottom} position="after" /> : null}
     </div>
   );
 }
 
 function VirtualGap({ height, position }: { height: number; position: "before" | "after" }) {
   if (height <= 0) return null;
-  return <div className="virtual-timeline-gap" style={{ height }} aria-hidden data-virtual-gap={position} />;
+  return (
+    <div
+      className="virtual-timeline-gap"
+      style={{ height }}
+      aria-hidden
+      data-virtual-gap={position}
+    />
+  );
 }
 
 function VirtualTimelineItem({
