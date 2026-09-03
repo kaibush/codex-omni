@@ -63,6 +63,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -387,6 +388,7 @@ function FilesWorkspace({
   const [activeDirectory, setActiveDirectory] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [checkedPaths, setCheckedPaths] = useState<Set<string>>(new Set());
+  const [multiSelect, setMultiSelect] = useState(false);
   const [fileLookupMode, setFileLookupMode] = useState<FileLookupMode>("tree");
   const [fileLookup, setFileLookup] = useState("");
   const [treeFilterHits, setTreeFilterHits] = useState<string[] | null>(null);
@@ -502,6 +504,7 @@ function FilesWorkspace({
     setSelectedPath(null);
     setCheckedPaths(new Set());
     lastCheckedPath.current = null;
+    setMultiSelect(false);
     setTabs([]);
     setActivePath(null);
     setSearchResult(null);
@@ -1152,7 +1155,7 @@ function FilesWorkspace({
       return (
         <div key={entry.path}>
           <div
-            className={`file-tree-row ${isActive ? "active" : ""} ${isChecked ? "is-checked" : ""}`}
+            className={`file-tree-row ${isActive ? "active" : ""} ${multiSelect && isChecked ? "is-checked" : ""}`}
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -1161,19 +1164,21 @@ function FilesWorkspace({
               trigger?.click();
             }}
           >
-            <input
-              type="checkbox"
-              className="file-tree-check"
-              checked={isChecked}
-              aria-label={`选择 ${entry.name}`}
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-              onChange={(event) => {
-                toggleCheckedPath(entry.path, {
-                  range: Boolean((event.nativeEvent as MouseEvent).shiftKey)
-                });
-              }}
-            />
+            {multiSelect ? (
+              <input
+                type="checkbox"
+                className="file-tree-check"
+                checked={isChecked}
+                aria-label={`选择 ${entry.name}`}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  toggleCheckedPath(entry.path, {
+                    range: Boolean((event.nativeEvent as MouseEvent).shiftKey)
+                  });
+                }}
+              />
+            ) : null}
             <button
               type="button"
               className="file-tree-main"
@@ -1196,12 +1201,12 @@ function FilesWorkspace({
                   skipClickRef.current = false;
                   return;
                 }
-                if (event.shiftKey) {
+                if (multiSelect && event.shiftKey) {
                   toggleCheckedPath(entry.path, { range: true });
                   setSelectedPath(entry.path);
                   return;
                 }
-                if (event.metaKey || event.ctrlKey) {
+                if (multiSelect && (event.metaKey || event.ctrlKey)) {
                   toggleCheckedPath(entry.path);
                   setSelectedPath(entry.path);
                   return;
@@ -1420,15 +1425,31 @@ function FilesWorkspace({
           <div className="file-lookup-meta">
             {fileLookupMode === "tree" ? (
               <>
-                <button
-                  type="button"
-                  className={cn("file-lookup-option", !showHidden && "is-active")}
-                  aria-pressed={!showHidden}
-                  title="隐藏以 . 开头的文件"
-                  onClick={() => setShowHidden((value) => !value)}
-                >
-                  隐藏文件
-                </button>
+                <div className="flex min-w-0 items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+                    多选
+                    <Switch
+                      checked={multiSelect}
+                      aria-label="多选文件"
+                      onCheckedChange={(checked) => {
+                        setMultiSelect(checked);
+                        if (!checked) {
+                          setCheckedPaths(new Set());
+                          lastCheckedPath.current = null;
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={cn("file-lookup-option", !showHidden && "is-active")}
+                    aria-pressed={!showHidden}
+                    title="隐藏以 . 开头的文件"
+                    onClick={() => setShowHidden((value) => !value)}
+                  >
+                    隐藏文件
+                  </button>
+                </div>
                 <Select value={sort} onValueChange={(value) => setSort(value as FileSort)}>
                   <SelectTrigger size="sm" className="h-7 min-w-20" aria-label="排序方式">
                     <SelectValue />
@@ -1453,7 +1474,7 @@ function FilesWorkspace({
             )}
           </div>
         </div>
-        {checkedPaths.size ? (
+        {multiSelect && checkedPaths.size ? (
           <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
               已选 {checkedPaths.size} 项
