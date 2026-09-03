@@ -9,7 +9,7 @@ import {
   type RefObject
 } from "react";
 import {
-  ArrowDownToLine,
+  ArrowDown,
   CircleAlert,
   Clock3,
   LoaderCircle,
@@ -314,13 +314,12 @@ export function WorkspaceTimeline({
       {sessionId && !followingLive ? (
         <Button
           type="button"
-          size="sm"
-          variant="secondary"
-          className="absolute right-4 bottom-3 z-20 h-8 rounded-lg border border-border shadow-lg"
+          variant="outline"
+          className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2"
           onClick={resumeLiveTimeline}
         >
-          <ArrowDownToLine className="size-3.5" />
-          {hasDeferredLiveEvents ? "有新消息，返回最新" : "返回最新消息"}
+          <ArrowDown className="size-4" />
+          {hasDeferredLiveEvents ? "有新消息" : "返回最新"}
         </Button>
       ) : null}
       {sessionLoading && (
