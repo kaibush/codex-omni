@@ -39,6 +39,7 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("markdown-stream-pre");
     expect(html).not.toContain("markdown-code-block");
     expect(html).not.toContain("markdown-code-language");
+    expect(html).not.toContain("<p>");
   });
 
   it("renders short single-line commands as compact copyable blocks", () => {
@@ -120,6 +121,21 @@ describe("EventCard copy controls", () => {
     );
     expect(html).toContain("katex");
     expect(html).toContain("mc");
+  });
+
+  it("keeps markdown images as deferred previews instead of raw img tags", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "assistant-img",
+          kind: "assistant",
+          text: "![shot](/api/projects/p/files/download?path=shot.png&inline=1)"
+        }}
+      />
+    );
+    expect(html).toContain("data-image-src=");
+    expect(html).toContain("/api/projects/p/files/download?path=shot.png");
+    expect(html).not.toContain("<img");
   });
 
   it("renders mermaid fences as on-demand charts", () => {

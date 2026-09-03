@@ -116,12 +116,12 @@ export function compactTimelineEvents(items: TimelineItem[]): TimelineItem[] {
   return result;
 }
 
-export const LIVE_TIMELINE_TAIL_ITEMS = 120;
-export const LIVE_TIMELINE_MAX_CHARS = 1_200_000;
-export const LIVE_TIMELINE_FLUSH_MS = 80;
-export const LIVE_TIMELINE_FLUSH_MAX_BATCH = 100;
-export const HISTORY_TIMELINE_MAX_ITEMS = 400;
-export const HISTORY_TIMELINE_MAX_CHARS = 4_000_000;
+export const LIVE_TIMELINE_TAIL_ITEMS = 80;
+export const LIVE_TIMELINE_MAX_CHARS = 480_000;
+export const LIVE_TIMELINE_FLUSH_MS = 180;
+export const LIVE_TIMELINE_FLUSH_MAX_BATCH = 40;
+export const HISTORY_TIMELINE_MAX_ITEMS = 180;
+export const HISTORY_TIMELINE_MAX_CHARS = 1_200_000;
 
 function timelineItemSize(item: TimelineItem) {
   return (item.text?.length ?? 0) + payloadSize(item.data);

@@ -1,5 +1,5 @@
 export const TIMELINE_PREVIEW_CHARS = 12_000;
-export const TIMELINE_ASSISTANT_PREVIEW_CHARS = 80_000;
+export const TIMELINE_ASSISTANT_PREVIEW_CHARS = 32_000;
 export const TIMELINE_JSON_STRING_CHARS = 8_000;
 
 const DUPLICATE_CONTENT_FIELDS = ["text", "output", "message"] as const;

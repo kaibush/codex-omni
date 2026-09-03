@@ -588,6 +588,9 @@ app.get("/api/projects/:id/files/download", { preHandler: auth }, async (req, re
     "content-disposition",
     `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`
   );
+  if (inline && file.contentType.startsWith("image/")) {
+    reply.header("cache-control", "no-store");
+  }
   reply.header("x-file-path", encodeURIComponent(file.path));
   return reply.send(file.buffer);
 });

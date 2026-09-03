@@ -70,6 +70,7 @@ import {
   writeStdinDetails
 } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
+import { BoundedImage } from "./BoundedImage";
 import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
 import { VirtualLog } from "./VirtualLog";
@@ -301,9 +302,9 @@ const MarkdownContent = memo(function MarkdownContent({
 }) {
   const components = useMemo<Components>(
     () => ({
-      pre: streaming
-        ? ({ children }) => <pre className="markdown-stream-pre">{children}</pre>
-        : (props) => <MarkdownCodeBlock {...props} onCreateFile={onCreateFile} />,
+      pre: (props) => <MarkdownCodeBlock {...props} onCreateFile={onCreateFile} />,
+      img: ({ src, alt }) =>
+        src ? <BoundedImage src={src} alt={alt ?? ""} className="notice-image" /> : null,
       a: ({ href, children }) => {
         const file = parseCodexFileHref(href);
         if (file && onOpenFile) {
@@ -320,10 +321,13 @@ const MarkdownContent = memo(function MarkdownContent({
         return <a href={href}>{children}</a>;
       }
     }),
-    [onCreateFile, onOpenFile, streaming]
+    [onCreateFile, onOpenFile]
   );
-  const enableMath = !streaming && hasMarkdownMath(text);
-  const source = streaming && text.length > 24_000 ? text.slice(text.length - 24_000) : text;
+  if (streaming) {
+    const source = text.length > 16_000 ? text.slice(text.length - 16_000) : text;
+    return <pre className="markdown-stream-pre">{source}</pre>;
+  }
+  const enableMath = hasMarkdownMath(text);
   return (
     <ReactMarkdown
       remarkPlugins={enableMath ? [remarkGfm, remarkMath] : [remarkGfm]}
@@ -331,7 +335,7 @@ const MarkdownContent = memo(function MarkdownContent({
       urlTransform={(url) => url}
       components={components}
     >
-      {linkFileRefs(source)}
+      {linkFileRefs(text)}
     </ReactMarkdown>
   );
 });
@@ -456,12 +460,10 @@ function ViewImageCard({
   return (
     <div className="plan-card">
       {src && !failed ? (
-        <img
+        <BoundedImage
           src={src}
           alt={name}
           className="notice-image"
-          loading="lazy"
-          decoding="async"
           onError={() => setFailed(true)}
         />
       ) : null}

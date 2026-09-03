@@ -15,10 +15,10 @@ import {
 } from "./virtual-window";
 
 const DEFAULT_THRESHOLD = 8;
-const DEFAULT_OVERSCAN = 4;
-const DEFAULT_OVERSCAN_PX = 900;
+const DEFAULT_OVERSCAN = 2;
+const DEFAULT_OVERSCAN_PX = 480;
 const ITEM_GAP = 12;
-const STICKY_MAX = 18;
+const STICKY_MAX = 12;
 
 export function VirtualTimeline<T extends { id: string; kind: string; text?: string | undefined }>({
   items,

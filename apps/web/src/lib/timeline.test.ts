@@ -5,6 +5,8 @@ import {
   compactTimelineEvents,
   displayTimelineEvents,
   HISTORY_TIMELINE_MAX_ITEMS,
+  LIVE_TIMELINE_MAX_CHARS,
+  LIVE_TIMELINE_TAIL_ITEMS,
   mergeSessionTimeline
 } from "./timeline";
 import type { TimelineItem } from "@/types";
@@ -253,8 +255,8 @@ describe("capTimelineEvents", () => {
   it("keeps the tail of a long live session", () => {
     const items = Array.from({ length: 200 }, (_, index) => item(`m-${index}`, index));
     const result = capTimelineEvents(items);
-    expect(result).toHaveLength(120);
-    expect(result[0]?.id).toBe("m-80");
+    expect(result).toHaveLength(LIVE_TIMELINE_TAIL_ITEMS);
+    expect(result[0]?.id).toBe(`m-${200 - LIVE_TIMELINE_TAIL_ITEMS}`);
     expect(result.at(-1)?.id).toBe("m-199");
   });
 
@@ -274,6 +276,16 @@ describe("capTimelineEvents", () => {
   it("returns the same array when the window already fits", () => {
     const items = [item("a", 1), item("b", 2)];
     expect(capTimelineEvents(items)).toBe(items);
+  });
+
+  it("keeps the default live window small enough for long-running chats", () => {
+    const items = Array.from({ length: LIVE_TIMELINE_TAIL_ITEMS + 40 }, (_, index) =>
+      item(`item-${index}`, index, { kind: "assistant", text: "ok" })
+    );
+    const result = capTimelineEvents(items);
+    expect(result).toHaveLength(LIVE_TIMELINE_TAIL_ITEMS);
+    expect(result[0]?.id).toBe("item-40");
+    expect(LIVE_TIMELINE_MAX_CHARS).toBeLessThanOrEqual(480_000);
   });
 
   it("counts tool payloads so huge outputs cannot keep the whole tail", () => {

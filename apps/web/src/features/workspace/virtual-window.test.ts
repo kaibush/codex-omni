@@ -106,9 +106,9 @@ describe("stickyVisibleRange", () => {
     expect(shrunk.end).toBeGreaterThanOrEqual(50);
   });
 
-  it("defaults to keeping at most 18 sticky cards", () => {
+  it("defaults to keeping at most 12 sticky cards", () => {
     const shrunk = stickyVisibleRange({ start: 40, end: 50 }, { start: 0, end: 80 });
-    expect(shrunk.end - shrunk.start).toBeLessThanOrEqual(18);
+    expect(shrunk.end - shrunk.start).toBeLessThanOrEqual(12);
     expect(shrunk.start).toBeLessThanOrEqual(40);
     expect(shrunk.end).toBeGreaterThanOrEqual(50);
   });

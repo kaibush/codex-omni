@@ -103,6 +103,8 @@ import {
   type LanguageSymbol,
   MAX_EDITABLE_FILE_BYTES
 } from "./file-workspace";
+import { BoundedImage } from "./BoundedImage";
+import { FILE_PREVIEW_IMAGE_MAX_HEIGHT, FILE_PREVIEW_IMAGE_MAX_WIDTH } from "./bounded-image";
 
 type ProjectResourceView = "files" | "git";
 type FileLookupMode = "tree" | "name" | "content";
@@ -284,10 +286,12 @@ function FilePreviewPane({
         {mediaError ? (
           <p className="text-sm text-muted-foreground">图片无法显示</p>
         ) : (
-          <img
+          <BoundedImage
             src={mediaUrl(projectId, tab.path)}
             alt={tab.path}
             className="max-h-full max-w-full rounded-lg border bg-muted object-contain"
+            maxWidth={FILE_PREVIEW_IMAGE_MAX_WIDTH}
+            maxHeight={FILE_PREVIEW_IMAGE_MAX_HEIGHT}
             onError={() => setMediaError(true)}
           />
         )}

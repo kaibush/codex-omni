@@ -260,6 +260,7 @@ export function Workspace() {
   const currentSessionId = useRef(sessionId);
   const clockOffsetRef = useRef(0);
   const liveEventsRef = useRef<TimelineItem[]>([]);
+  const cachedSessionId = useRef(sessionId);
   currentSessionId.current = sessionId;
   const restoreLiveTimeline = useCallback(
     (invalidate = true) => {
@@ -442,6 +443,11 @@ export function Workspace() {
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
   useEffect(() => {
+    const previous = cachedSessionId.current;
+    if (previous && previous !== sessionId) {
+      qc.removeQueries({ queryKey: ["session", previous] });
+    }
+    cachedSessionId.current = sessionId;
     setEvents([]);
     setRunState(null);
     setSendNotice("");
@@ -464,7 +470,7 @@ export function Workspace() {
     historyExpanded.current = false;
     historyScrollSnapshot.current = null;
     liveEventsRef.current = [];
-  }, [projectId, sessionId]);
+  }, [projectId, qc, sessionId]);
   useEffect(() => {
     if (followingLive) liveEventsRef.current = events;
   }, [events, followingLive]);

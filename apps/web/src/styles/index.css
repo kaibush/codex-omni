@@ -1474,8 +1474,17 @@ button.composer-chip:hover,
   padding: 1rem;
   color: var(--background);
 }
-.markdown-stream-pre {
+.markdown .markdown-stream-pre {
   max-height: min(70vh, 36rem);
+  margin: 0;
+  overflow: auto;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .markdown-code-block pre,
 .dark .markdown-code-block pre {
