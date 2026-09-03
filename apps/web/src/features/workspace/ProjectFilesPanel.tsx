@@ -141,6 +141,19 @@ const fileIcon = (name: string) =>
     <File className="size-4 text-muted-foreground" />
   );
 
+function deleteConfirmDescription(paths: string[], directories: Record<string, FileEntry[]>) {
+  if (paths.length === 1) {
+    const path = paths[0]!;
+    const kind =
+      directories[parentProjectPath(path)]?.find((entry) => entry.path === path)?.type ===
+      "directory"
+        ? "目录及其全部内容"
+        : "文件";
+    return `确定删除${kind} ${path}？此操作不可恢复。`;
+  }
+  return `确定删除选中的 ${paths.length} 个文件或目录？此操作不可恢复。`;
+}
+
 function NameDialog({
   action,
   onClose,
@@ -389,6 +402,7 @@ function FilesWorkspace({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [checkedPaths, setCheckedPaths] = useState<Set<string>>(new Set());
   const [multiSelect, setMultiSelect] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
   const [fileLookupMode, setFileLookupMode] = useState<FileLookupMode>("tree");
   const [fileLookup, setFileLookup] = useState("");
   const [treeFilterHits, setTreeFilterHits] = useState<string[] | null>(null);
@@ -505,6 +519,7 @@ function FilesWorkspace({
     setCheckedPaths(new Set());
     lastCheckedPath.current = null;
     setMultiSelect(false);
+    setPendingDelete(null);
     setTabs([]);
     setActivePath(null);
     setSearchResult(null);
@@ -912,17 +927,15 @@ function FilesWorkspace({
     lastCheckedPath.current = path;
   };
 
-  const deleteEntries = async (paths: Iterable<string>) => {
+  const deleteEntries = (paths: Iterable<string>) => {
     const compact = compactSelectedPaths(paths);
     if (!compact.length) return;
-    const only = compact.length === 1 ? compact[0]! : null;
-    const onlyType = only
-      ? directories[parentProjectPath(only)]?.find((entry) => entry.path === only)?.type
-      : null;
-    const message = only
-      ? `确定删除${onlyType === "directory" ? "目录及其全部内容" : "文件"} ${only} ？此操作不可恢复。`
-      : `确定删除选中的 ${compact.length} 个文件或目录？此操作不可恢复。`;
-    if (!window.confirm(message)) return;
+    setPendingDelete(compact);
+  };
+
+  const confirmDelete = async () => {
+    const compact = pendingDelete;
+    if (!compact?.length) return;
     setWorking("delete");
     setError("");
     try {
@@ -948,6 +961,7 @@ function FilesWorkspace({
       }
       setCheckedPaths(new Set());
       lastCheckedPath.current = null;
+      setPendingDelete(null);
       toast.success(`已删除 ${deleted.length} 项`);
       if (result.failed?.length) {
         setError(result.failed.map((item) => `${item.path}: ${item.message}`).join("\n"));
@@ -959,8 +973,8 @@ function FilesWorkspace({
     }
   };
 
-  const deleteEntry = async (entry: FileEntry) => {
-    await deleteEntries([entry.path]);
+  const deleteEntry = (entry: FileEntry) => {
+    deleteEntries([entry.path]);
   };
 
   const uploadFiles = async (
@@ -1926,6 +1940,40 @@ function FilesWorkspace({
         onClose={() => setAction(null)}
         onSubmit={(value) => action && void applyAction(action, value)}
       />
+      <Dialog
+        open={Boolean(pendingDelete?.length)}
+        onOpenChange={(open) => {
+          if (!open && working !== "delete") setPendingDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-sm" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>
+              {pendingDelete ? deleteConfirmDescription(pendingDelete, directories) : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={working === "delete"}
+              onClick={() => setPendingDelete(null)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={working === "delete"}
+              onClick={() => void confirmDelete()}
+            >
+              {working === "delete" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={goToLineOpen} onOpenChange={setGoToLineOpen}>
         <DialogContent className="max-w-sm" showCloseButton>
           <form
