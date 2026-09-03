@@ -9,6 +9,7 @@ import {
   type RefObject
 } from "react";
 import {
+  ArrowDownToLine,
   CircleAlert,
   Clock3,
   LoaderCircle,
@@ -18,6 +19,12 @@ import {
   TerminalSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  liveFollowActionFromScroll,
+  shouldPauseLiveFollowFromKey,
+  shouldPauseLiveFollowFromPointer,
+  shouldPauseLiveFollowFromWheel
+} from "@/lib/live-follow";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import type { Session, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
@@ -76,6 +83,10 @@ export function WorkspaceTimeline({
   setHighlightMessageId,
   chatScroll,
   stickToBottom,
+  followingLive,
+  hasDeferredLiveEvents,
+  pauseLiveTimeline,
+  resumeLiveTimeline,
   loadOlderMessages,
   hasOlderMessages,
   historyLoading,
@@ -127,6 +138,10 @@ export function WorkspaceTimeline({
   setHighlightMessageId: (id: string) => void;
   chatScroll: RefObject<HTMLElement | null>;
   stickToBottom: { current: boolean };
+  followingLive: boolean;
+  hasDeferredLiveEvents: boolean;
+  pauseLiveTimeline: () => void;
+  resumeLiveTimeline: () => void;
   loadOlderMessages: () => void;
   hasOlderMessages: boolean;
   historyLoading: boolean;
@@ -186,6 +201,16 @@ export function WorkspaceTimeline({
   const outlineEvents = timelineItems;
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
+  const pointerScroll = useRef<{
+    id: number;
+    clientY: number;
+    scrollTop: number;
+  } | null>(null);
+  const lastScrollTop = useRef(0);
+  useEffect(() => {
+    pointerScroll.current = null;
+    lastScrollTop.current = 0;
+  }, [sessionId]);
   const onOpenFile = useCallback(
     (path: string, line: number | null) => {
       setWorkspaceView("files");
@@ -286,6 +311,18 @@ export function WorkspaceTimeline({
         activeId={highlightMessageId}
         onJump={(id) => setHighlightMessageId(id)}
       />
+      {sessionId && !followingLive ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="absolute right-4 bottom-3 z-20 h-8 rounded-lg border border-border shadow-lg"
+          onClick={resumeLiveTimeline}
+        >
+          <ArrowDownToLine className="size-3.5" />
+          {hasDeferredLiveEvents ? "有新消息，返回最新" : "返回最新消息"}
+        </Button>
+      ) : null}
       {sessionLoading && (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 backdrop-blur-[2px]">
           <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-lg">
@@ -317,20 +354,65 @@ export function WorkspaceTimeline({
           // Mark the gesture before the browser emits its scroll event. This
           // prevents a same-frame message/run update from snapping the first
           // upward wheel tick back to the bottom.
-          if (event.deltaY < 0) stickToBottom.current = false;
+          if (shouldPauseLiveFollowFromWheel(event.deltaY)) pauseLiveTimeline();
           viewToggle.reveal();
         }}
-        onPointerMove={viewToggle.reveal}
-        onPointerDown={viewToggle.reveal}
+        onPointerDown={(event) => {
+          viewToggle.reveal();
+          pointerScroll.current = {
+            id: event.pointerId,
+            clientY: event.clientY,
+            scrollTop: chatScroll.current?.scrollTop ?? 0
+          };
+        }}
+        onPointerMove={(event) => {
+          viewToggle.reveal();
+          const gesture = pointerScroll.current;
+          if (!gesture || gesture.id !== event.pointerId) return;
+          const currentTop = chatScroll.current?.scrollTop ?? gesture.scrollTop;
+          if (
+            shouldPauseLiveFollowFromPointer({
+              clientY: event.clientY,
+              startClientY: gesture.clientY,
+              scrollTop: currentTop,
+              startScrollTop: gesture.scrollTop
+            })
+          ) {
+            pauseLiveTimeline();
+          }
+        }}
+        onPointerUp={() => {
+          pointerScroll.current = null;
+        }}
+        onPointerCancel={() => {
+          pointerScroll.current = null;
+        }}
+        onKeyDownCapture={(event) => {
+          if (shouldPauseLiveFollowFromKey(event.key)) pauseLiveTimeline();
+        }}
         onScroll={() => {
           const container = chatScroll.current;
           if (!container) return;
           // A mouse-wheel tick in Chrome can move less than 96px.  Treating
           // that whole range as "at bottom" makes the layout effect below
           // snap the first upward scroll back to the bottom.
-          stickToBottom.current = isScrolledToBottom(container, 12);
+          const previousTop = lastScrollTop.current;
+          const nextTop = container.scrollTop;
+          const atBottom = isScrolledToBottom(container, 12);
+          const followAction = liveFollowActionFromScroll({
+            atBottom,
+            following: stickToBottom.current,
+            previousTop,
+            nextTop,
+            pointerActive: Boolean(pointerScroll.current)
+          });
+          if (followAction === "resume") resumeLiveTimeline();
+          else if (followAction === "pause") pauseLiveTimeline();
+          lastScrollTop.current = nextTop;
           const overflow = container.scrollHeight - container.clientHeight;
-          if (overflow > 48 && container.scrollTop < 72) void loadOlderMessages();
+          if (!stickToBottom.current && overflow > 48 && container.scrollTop < 72) {
+            void loadOlderMessages();
+          }
         }}
         className="chat-scroll absolute inset-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 sm:px-5 lg:px-8"
       >

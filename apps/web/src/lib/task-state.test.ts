@@ -160,6 +160,18 @@ describe("beginRunningTaskState", () => {
   });
 });
 
+describe("patchTaskState", () => {
+  it("preserves object identity for repeated visible stream progress", () => {
+    const current = {
+      startedAt: 1000,
+      firstResponseAt: 1200,
+      status: "running" as const,
+      runId: "run-1"
+    };
+    expect(patchTaskState(current, { status: "running", reconnecting: null })).toBe(current);
+  });
+});
+
 describe("reconcileTaskState", () => {
   it("does not let a stale HTTP result erase realtime timing for the same run", () => {
     expect(

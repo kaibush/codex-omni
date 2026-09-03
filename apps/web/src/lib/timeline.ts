@@ -118,6 +118,10 @@ export function compactTimelineEvents(items: TimelineItem[]): TimelineItem[] {
 
 export const LIVE_TIMELINE_TAIL_ITEMS = 120;
 export const LIVE_TIMELINE_MAX_CHARS = 1_200_000;
+export const LIVE_TIMELINE_FLUSH_MS = 80;
+export const LIVE_TIMELINE_FLUSH_MAX_BATCH = 100;
+export const HISTORY_TIMELINE_MAX_ITEMS = 400;
+export const HISTORY_TIMELINE_MAX_CHARS = 4_000_000;
 
 function timelineItemSize(item: TimelineItem) {
   return (item.text?.length ?? 0) + payloadSize(item.data);
@@ -180,6 +184,15 @@ export function capTimelineEvents(
     }
   }
   return start <= 0 ? items : items.slice(start);
+}
+
+/** Keep the oldest loaded edge stable while the user is browsing history. */
+export function capHistoryTimelineEvents(items: TimelineItem[]): TimelineItem[] {
+  return capTimelineEvents(items, {
+    keep: "head",
+    maxItems: HISTORY_TIMELINE_MAX_ITEMS,
+    maxChars: HISTORY_TIMELINE_MAX_CHARS
+  });
 }
 
 export function displayTimelineEvents(

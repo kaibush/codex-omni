@@ -456,7 +456,14 @@ function ViewImageCard({
   return (
     <div className="plan-card">
       {src && !failed ? (
-        <img src={src} alt={name} className="notice-image" onError={() => setFailed(true)} />
+        <img
+          src={src}
+          alt={name}
+          className="notice-image"
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
       ) : null}
       <p className="plan-card-prompt font-mono text-xs text-muted-foreground">{path}</p>
       {onOpenFile ? (

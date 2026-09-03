@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  capHistoryTimelineEvents,
   capTimelineEvents,
   compactTimelineEvents,
   displayTimelineEvents,
+  HISTORY_TIMELINE_MAX_ITEMS,
   mergeSessionTimeline
 } from "./timeline";
 import type { TimelineItem } from "@/types";
@@ -285,5 +287,17 @@ describe("capTimelineEvents", () => {
     const result = capTimelineEvents(items, { maxItems: 40, maxChars: 200_000 });
     expect(result.length).toBeLessThan(items.length);
     expect(result.at(-1)?.id).toBe("tool-39");
+  });
+});
+
+describe("capHistoryTimelineEvents", () => {
+  it("keeps a bounded oldest edge while live updates are paused", () => {
+    const items = Array.from({ length: HISTORY_TIMELINE_MAX_ITEMS + 80 }, (_, index) =>
+      item(`item-${index}`, index, { kind: "tool", text: `output-${index}` })
+    );
+    const result = capHistoryTimelineEvents(items);
+    expect(result).toHaveLength(HISTORY_TIMELINE_MAX_ITEMS);
+    expect(result[0]?.id).toBe("item-0");
+    expect(result.at(-1)?.id).toBe(`item-${HISTORY_TIMELINE_MAX_ITEMS - 1}`);
   });
 });

@@ -42,7 +42,15 @@ import {
   reconcileTaskState,
   resolveTaskState
 } from "@/lib/task-state";
-import { capTimelineEvents, LIVE_TIMELINE_TAIL_ITEMS, mergeSessionTimeline } from "@/lib/timeline";
+import { isDeferredLiveTimelineEvent, isStreamProgressEvent } from "@/lib/live-follow";
+import {
+  capHistoryTimelineEvents,
+  capTimelineEvents,
+  LIVE_TIMELINE_FLUSH_MAX_BATCH,
+  LIVE_TIMELINE_FLUSH_MS,
+  LIVE_TIMELINE_TAIL_ITEMS,
+  mergeSessionTimeline
+} from "@/lib/timeline";
 import { createId } from "@/lib/utils";
 import type {
   Message,
@@ -231,6 +239,8 @@ export function Workspace() {
   const [historyCursor, setHistoryCursor] = useState<MessageCursor | null>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [followingLive, setFollowingLive] = useState(true);
+  const [hasDeferredLiveEvents, setHasDeferredLiveEvents] = useState(false);
   const socket = useRef<WebSocket | null>(null);
   const queuedCommands = useRef<QueuedCommand[]>(loadOutboundCommands());
   const replayCursors = useRef(new Map<string, ReplayCursor>());
@@ -249,7 +259,32 @@ export function Workspace() {
   const historyScrollSnapshot = useRef<{ height: number; top: number } | null>(null);
   const currentSessionId = useRef(sessionId);
   const clockOffsetRef = useRef(0);
+  const liveEventsRef = useRef<TimelineItem[]>([]);
   currentSessionId.current = sessionId;
+  const restoreLiveTimeline = useCallback(
+    (invalidate = true) => {
+      stickToBottom.current = true;
+      historyExpanded.current = false;
+      historyScrollSnapshot.current = null;
+      setFollowingLive(true);
+      setHasDeferredLiveEvents(false);
+      setEvents(capTimelineEvents(liveEventsRef.current));
+      if (invalidate && sessionId) void qc.invalidateQueries({ queryKey: ["session", sessionId] });
+      window.requestAnimationFrame(() => {
+        const container = chatScroll.current;
+        if (container && stickToBottom.current) container.scrollTop = container.scrollHeight;
+      });
+    },
+    [qc, sessionId]
+  );
+  const pauseLiveTimeline = useCallback(() => {
+    if (!stickToBottom.current) return;
+    stickToBottom.current = false;
+    setFollowingLive(false);
+  }, []);
+  const resumeLiveTimeline = useCallback(() => {
+    restoreLiveTimeline(true);
+  }, [restoreLiveTimeline]);
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api<Project[]>("/api/projects")
@@ -422,11 +457,17 @@ export function Workspace() {
     setHistoryCursor(null);
     setHasOlderMessages(false);
     setHistoryLoading(false);
+    setFollowingLive(true);
+    setHasDeferredLiveEvents(false);
     historyRequestId.current += 1;
     historyLoadingRef.current = false;
     historyExpanded.current = false;
     historyScrollSnapshot.current = null;
+    liveEventsRef.current = [];
   }, [projectId, sessionId]);
+  useEffect(() => {
+    if (followingLive) liveEventsRef.current = events;
+  }, [events, followingLive]);
   useEffect(() => {
     const key = sessionId ? `codex-omni:draft:${projectId}:${sessionId}` : "";
     draftSessionKey.current = key;
@@ -457,7 +498,9 @@ export function Workspace() {
   useEffect(() => {
     if (!detail.data || detail.data.session.id !== sessionId) return;
     const messages = detail.data.messages;
-    const historical = messages.filter(isVisibleTimelineMessage).map((message) => fromMessage(message));
+    const historical = messages
+      .filter(isVisibleTimelineMessage)
+      .map((message) => fromMessage(message));
     const expanded = historyExpanded.current;
     setEvents((current) => {
       const merged = mergeSessionTimeline({
@@ -465,7 +508,7 @@ export function Workspace() {
         current,
         historyExpanded: expanded
       });
-      return stickToBottom.current ? capTimelineEvents(merged) : merged;
+      return stickToBottom.current ? capTimelineEvents(merged) : capHistoryTimelineEvents(merged);
     });
     if (!expanded) {
       setHistoryCursor(detail.data.nextCursor);
@@ -508,6 +551,29 @@ export function Workspace() {
   useEffect(() => {
     let disposed = false;
     let reconnectTimer: number | undefined;
+    let timelineFlushTimer: number | undefined;
+    let timelineUpdates: Array<(current: TimelineItem[]) => TimelineItem[]> = [];
+    const flushTimelineUpdates = () => {
+      if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
+      timelineFlushTimer = undefined;
+      if (!timelineUpdates.length || disposed) {
+        timelineUpdates = [];
+        return;
+      }
+      const updates = timelineUpdates;
+      timelineUpdates = [];
+      setEvents((current) => updates.reduce((next, update) => update(next), current));
+    };
+    const enqueueTimelineUpdate = (update: (current: TimelineItem[]) => TimelineItem[]) => {
+      timelineUpdates.push(update);
+      if (timelineUpdates.length >= LIVE_TIMELINE_FLUSH_MAX_BATCH) {
+        flushTimelineUpdates();
+        return;
+      }
+      if (!timelineFlushTimer) {
+        timelineFlushTimer = window.setTimeout(flushTimelineUpdates, LIVE_TIMELINE_FLUSH_MS);
+      }
+    };
     setConnection(reconnectAttempts.current ? "reconnecting" : "connecting");
     const ws = new WebSocket(wsUrl());
     socket.current = ws;
@@ -647,13 +713,15 @@ export function Workspace() {
         }
         if (!event.sessionId || event.sessionId === sessionId) {
           setSendNotice(text);
-          setEvents((current) =>
-            upsert(current, `server-error-${Date.now()}`, {
-              kind: "error",
-              text,
-              providerId: providerIdRef.current,
-              createdAt: Date.now()
-            })
+          enqueueTimelineUpdate((current) =>
+            (stickToBottom.current ? capTimelineEvents : capHistoryTimelineEvents)(
+              upsert(current, `server-error-${Date.now()}`, {
+                kind: "error",
+                text,
+                providerId: providerIdRef.current,
+                createdAt: Date.now()
+              })
+            )
           );
         }
         return;
@@ -711,24 +779,30 @@ export function Workspace() {
         } else {
           setRunState(null);
         }
-        setEvents((current) =>
-          (snapshot.approvals ?? []).reduce(
-            (items, approval) =>
-              upsert(items, `approval-${approval.id}`, {
-                kind: "approval",
-                text: approval.command,
-                data: {
-                  ...(approval.payload ?? {}),
-                  approvalId: approval.id,
-                  command: approval.command,
-                  status: "pending"
-                },
-                providerId: providerIdRef.current,
-                createdAt: approval.createdAt
-              }),
-            current
-          )
-        );
+        if (!stickToBottom.current && snapshot.approvals?.length) {
+          setHasDeferredLiveEvents(true);
+        } else {
+          enqueueTimelineUpdate((current) =>
+            capTimelineEvents(
+              (snapshot.approvals ?? []).reduce(
+                (items, approval) =>
+                  upsert(items, `approval-${approval.id}`, {
+                    kind: "approval",
+                    text: approval.command,
+                    data: {
+                      ...(approval.payload ?? {}),
+                      approvalId: approval.id,
+                      command: approval.command,
+                      status: "pending"
+                    },
+                    providerId: providerIdRef.current,
+                    createdAt: approval.createdAt
+                  }),
+                current
+              )
+            )
+          );
+        }
         if (snapshot.replayTruncated) {
           recordCursor(event.requestId, event.seq);
           setSendNotice("实时事件较多，已从持久记录恢复最新状态");
@@ -743,7 +817,7 @@ export function Workspace() {
         return;
       }
       if (event.type === "approval.resolved") {
-        setEvents((current) =>
+        enqueueTimelineUpdate((current) =>
           current.map((item) =>
             item.id === `approval-${payload.approvalId}`
               ? {
@@ -762,14 +836,20 @@ export function Workspace() {
         return;
       }
       if (event.type === "user.message") {
-        setEvents((current) =>
-          upsert(current, String(payload.id ?? `user-${event.requestId}`), {
-            kind: "user",
-            text: String(payload.message ?? ""),
-            providerId: payload.providerId ?? providerIdRef.current,
-            createdAt: payload.createdAt ?? Date.now()
-          })
-        );
+        if (stickToBottom.current) {
+          enqueueTimelineUpdate((current) =>
+            capTimelineEvents(
+              upsert(current, String(payload.id ?? `user-${event.requestId}`), {
+                kind: "user",
+                text: String(payload.message ?? ""),
+                providerId: payload.providerId ?? providerIdRef.current,
+                createdAt: payload.createdAt ?? Date.now()
+              })
+            )
+          );
+        } else {
+          setHasDeferredLiveEvents(true);
+        }
         void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
         return;
       }
@@ -838,20 +918,12 @@ export function Workspace() {
           })
         );
         refreshSession();
-      } else if (
-        [
-          "reasoning.delta",
-          "assistant.delta",
-          "assistant.completed",
-          "tool.started",
-          "tool.output",
-          "file.change",
-          "approval.requested"
-        ].includes(event.type)
-      ) {
+      } else if (isStreamProgressEvent(event.type)) {
         setRunState((current) =>
-          current
-            ? patchTaskState(current, {
+          !current ||
+          (current.status === "running" && current.firstResponseAt && !current.reconnecting)
+            ? current
+            : patchTaskState(current, {
                 status: "running",
                 reconnecting: null,
                 ...(!current.firstResponseAt
@@ -863,13 +935,16 @@ export function Workspace() {
                     }
                   : {})
               })
-            : current
         );
       }
-      setEvents((current) => {
+      if (!stickToBottom.current && isDeferredLiveTimelineEvent(event.type)) {
+        setHasDeferredLiveEvents(true);
+        return;
+      }
+      enqueueTimelineUpdate((current) => {
         const put = (id: string, next: Omit<TimelineItem, "id">) => {
           const updated = upsert(current, id, compactTimelineItem(next));
-          return stickToBottom.current ? capTimelineEvents(updated) : updated;
+          return capTimelineEvents(updated);
         };
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
@@ -915,25 +990,31 @@ export function Workspace() {
             providerId: providerIdRef.current
           });
         if (event.type === "approval.requested")
-          return upsert(current, `approval-${payload.approvalId}`, {
-            kind: "approval",
-            data: { ...payload, status: "pending" },
-            text: payload.command,
-            providerId: providerIdRef.current
-          });
+          return capTimelineEvents(
+            upsert(current, `approval-${payload.approvalId}`, {
+              kind: "approval",
+              data: { ...payload, status: "pending" },
+              text: payload.command,
+              providerId: providerIdRef.current
+            })
+          );
         if (event.type === "run.failed")
-          return upsert(current, `error-${event.requestId}-run.failed`, {
-            kind: "error",
-            text: payload.message ?? payload.reason ?? "Codex 运行失败",
-            providerId: providerIdRef.current,
-            createdAt: Date.now()
-          });
+          return capTimelineEvents(
+            upsert(current, `error-${event.requestId}-run.failed`, {
+              kind: "error",
+              text: payload.message ?? payload.reason ?? "Codex 运行失败",
+              providerId: providerIdRef.current,
+              createdAt: Date.now()
+            })
+          );
         return current;
       });
     };
     return () => {
       disposed = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
+      timelineUpdates = [];
       socket.current = null;
       if (ws.readyState === WebSocket.CONNECTING) {
         ws.onopen = () => ws.close();
@@ -957,6 +1038,7 @@ export function Workspace() {
     const requestId = ++historyRequestId.current;
     historyLoadingRef.current = true;
     stickToBottom.current = false;
+    setFollowingLive(false);
     setHistoryLoading(true);
     try {
       const params = new URLSearchParams({
@@ -966,7 +1048,9 @@ export function Workspace() {
       });
       const older = await api<SessionDetailPage>(`/api/sessions/${sessionId}?${params}`);
       if (currentSessionId.current !== sessionId) return;
-      const olderEvents = older.messages.filter(isVisibleTimelineMessage).map((message) => fromMessage(message));
+      const olderEvents = older.messages
+        .filter(isVisibleTimelineMessage)
+        .map((message) => fromMessage(message));
       const container = chatScroll.current;
       if (container) {
         historyScrollSnapshot.current = {
@@ -978,7 +1062,7 @@ export function Workspace() {
         const known = new Set(current.map((item) => item.id));
         const prepend = olderEvents.filter((item) => !known.has(item.id));
         if (!prepend.length) historyScrollSnapshot.current = null;
-        return [...prepend, ...current];
+        return capHistoryTimelineEvents([...prepend, ...current]);
       });
       setHistoryCursor(older.nextCursor);
       setHasOlderMessages(older.hasMore);
@@ -1421,7 +1505,7 @@ export function Workspace() {
           current ? { ...current, session: { ...current.session, title } } : current
         );
       }
-      stickToBottom.current = true;
+      restoreLiveTimeline(false);
       const clientId = createId();
       const now = Date.now();
       const command = JSON.stringify({
@@ -1964,6 +2048,10 @@ export function Workspace() {
               setHighlightMessageId={setHighlightMessageId}
               chatScroll={chatScroll}
               stickToBottom={stickToBottom}
+              followingLive={followingLive}
+              hasDeferredLiveEvents={hasDeferredLiveEvents}
+              pauseLiveTimeline={pauseLiveTimeline}
+              resumeLiveTimeline={resumeLiveTimeline}
               loadOlderMessages={loadOlderMessages}
               hasOlderMessages={hasOlderMessages}
               historyLoading={historyLoading}

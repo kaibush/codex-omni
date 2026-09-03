@@ -193,7 +193,7 @@ export function patchTaskState(
       : patch.reconnecting === null
         ? undefined
         : (patch.reconnecting ?? current?.reconnecting);
-  return buildTaskState({
+  const next = buildTaskState({
     startedAt: patch.startedAt ?? current?.startedAt ?? Date.now(),
     status: patch.status,
     ...(typeof firstResponseAt === "number" ? { firstResponseAt } : {}),
@@ -203,6 +203,20 @@ export function patchTaskState(
     ...(reconnecting ? { reconnecting } : {}),
     ...(runId ? { runId } : {})
   });
+  if (
+    current &&
+    current.startedAt === next.startedAt &&
+    current.firstResponseAt === next.firstResponseAt &&
+    current.endedAt === next.endedAt &&
+    current.status === next.status &&
+    current.reason === next.reason &&
+    current.runId === next.runId &&
+    current.usage === next.usage &&
+    current.reconnecting === next.reconnecting
+  ) {
+    return current;
+  }
+  return next;
 }
 
 export function beginRunningTaskState(
