@@ -39,6 +39,7 @@ import {
   Save,
   Search,
   TextSearch,
+  Trash2,
   Upload,
   X
 } from "lucide-react";
@@ -74,7 +75,9 @@ import { GitDiffView } from "./GitDiffView";
 import { GitPanel } from "./GitPanel";
 import {
   ancestorPaths,
+  compactSelectedPaths,
   fileName,
+  flattenVisibleFileEntries,
   isMarkdownFile,
   isMediaPreview,
   joinProjectPath,
@@ -375,6 +378,7 @@ function FilesWorkspace({
   const uploadRef = useRef<HTMLInputElement>(null);
   const tabsRef = useRef<EditorTab[]>([]);
   const skipClickRef = useRef(false);
+  const lastCheckedPath = useRef<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [directories, setDirectories] = useState<Record<string, FileEntry[]>>({});
   const [loading, setLoading] = useState<Set<string>>(new Set());
@@ -382,6 +386,7 @@ function FilesWorkspace({
   const [openingPath, setOpeningPath] = useState<string | null>(null);
   const [activeDirectory, setActiveDirectory] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [checkedPaths, setCheckedPaths] = useState<Set<string>>(new Set());
   const [fileLookupMode, setFileLookupMode] = useState<FileLookupMode>("tree");
   const [fileLookup, setFileLookup] = useState("");
   const [treeFilterHits, setTreeFilterHits] = useState<string[] | null>(null);
@@ -439,6 +444,17 @@ function FilesWorkspace({
     if (!filter.trim()) return null;
     return treeFilterPaths([...(treeFilterHits ?? []), ...localFilterHits]);
   }, [filter, localFilterHits, treeFilterHits]);
+  const visibleEntries = useMemo(
+    () =>
+      flattenVisibleFileEntries(directories, {
+        expanded,
+        query: filter,
+        showHidden,
+        sort,
+        keepPaths: visibleTreePaths
+      }),
+    [directories, expanded, filter, showHidden, sort, visibleTreePaths]
+  );
 
   useEffect(() => {
     onDirtyCount?.(dirtyPaths.size);
@@ -484,6 +500,8 @@ function FilesWorkspace({
     setOpeningPath(null);
     setActiveDirectory("");
     setSelectedPath(null);
+    setCheckedPaths(new Set());
+    lastCheckedPath.current = null;
     setTabs([]);
     setActivePath(null);
     setSearchResult(null);
@@ -867,32 +885,79 @@ function FilesWorkspace({
     }
   };
 
-  const deleteEntry = async (entry: FileEntry) => {
-    const kind = entry.type === "directory" ? "目录及其全部内容" : "文件";
-    if (!window.confirm(`确定删除${kind} ${entry.path} ？此操作不可恢复。`)) return;
-    setWorking(`delete:${entry.path}`);
+  const toggleCheckedPath = (path: string, options?: { range?: boolean }) => {
+    setCheckedPaths((current) => {
+      const next = new Set(current);
+      if (options?.range && lastCheckedPath.current) {
+        const order = visibleEntries.map((entry) => entry.path);
+        const from = order.indexOf(lastCheckedPath.current);
+        const to = order.indexOf(path);
+        if (from >= 0 && to >= 0) {
+          const start = Math.min(from, to);
+          const end = Math.max(from, to);
+          for (let index = start; index <= end; index += 1) {
+            const item = order[index];
+            if (item) next.add(item);
+          }
+          return next;
+        }
+      }
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    lastCheckedPath.current = path;
+  };
+
+  const deleteEntries = async (paths: Iterable<string>) => {
+    const compact = compactSelectedPaths(paths);
+    if (!compact.length) return;
+    const only = compact.length === 1 ? compact[0]! : null;
+    const onlyType = only
+      ? directories[parentProjectPath(only)]?.find((entry) => entry.path === only)?.type
+      : null;
+    const message = only
+      ? `确定删除${onlyType === "directory" ? "目录及其全部内容" : "文件"} ${only} ？此操作不可恢复。`
+      : `确定删除选中的 ${compact.length} 个文件或目录？此操作不可恢复。`;
+    if (!window.confirm(message)) return;
+    setWorking("delete");
     setError("");
     try {
-      await api(`/api/projects/${project.id}/files?path=${encodeURIComponent(entry.path)}`, {
-        method: "DELETE"
+      const result = await api<{
+        deleted: string[];
+        failed: Array<{ path: string; message: string }>;
+      }>(`/api/projects/${project.id}/files/delete`, {
+        method: "POST",
+        body: JSON.stringify({ paths: compact })
       });
-      await loadDirectory(parentProjectPath(entry.path), true);
-      const remaining = tabsRef.current.filter((tab) =>
-        entry.type === "directory"
-          ? tab.path !== entry.path && !tab.path.startsWith(`${entry.path}/`)
-          : tab.path !== entry.path
+      await refreshTree();
+      const deleted = result.deleted ?? compact;
+      const remaining = tabsRef.current.filter(
+        (tab) => !deleted.some((path) => tab.path === path || tab.path.startsWith(`${path}/`))
       );
       setTabs(remaining);
-      if (activePath === entry.path || activePath?.startsWith(`${entry.path}/`)) {
+      if (
+        activePath &&
+        deleted.some((path) => activePath === path || activePath.startsWith(`${path}/`))
+      ) {
         setActivePath(remaining.at(-1)?.path ?? null);
         if (remaining.length === 0) setMobilePane("tree");
       }
-      toast.success("已删除", { description: entry.path });
+      setCheckedPaths(new Set());
+      lastCheckedPath.current = null;
+      toast.success(`已删除 ${deleted.length} 项`);
+      if (result.failed?.length) {
+        setError(result.failed.map((item) => `${item.path}: ${item.message}`).join("\n"));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setWorking(null);
     }
+  };
+
+  const deleteEntry = async (entry: FileEntry) => {
+    await deleteEntries([entry.path]);
   };
 
   const uploadFiles = async (
@@ -1083,10 +1148,11 @@ function FilesWorkspace({
       const isOpen = tabs.some((tab) => tab.path === entry.path);
       const isDirty = dirtyPaths.has(entry.path);
       const isActive = selectedPath === entry.path || activePath === entry.path;
+      const isChecked = checkedPaths.has(entry.path);
       return (
         <div key={entry.path}>
           <div
-            className={`file-tree-row ${isActive ? "active" : ""}`}
+            className={`file-tree-row ${isActive ? "active" : ""} ${isChecked ? "is-checked" : ""}`}
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -1095,6 +1161,19 @@ function FilesWorkspace({
               trigger?.click();
             }}
           >
+            <input
+              type="checkbox"
+              className="file-tree-check"
+              checked={isChecked}
+              aria-label={`选择 ${entry.name}`}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => {
+                toggleCheckedPath(entry.path, {
+                  range: Boolean((event.nativeEvent as MouseEvent).shiftKey)
+                });
+              }}
+            />
             <button
               type="button"
               className="file-tree-main"
@@ -1112,9 +1191,19 @@ function FilesWorkspace({
                 event.currentTarget.addEventListener("pointerup", clear, { once: true });
                 event.currentTarget.addEventListener("pointercancel", clear, { once: true });
               }}
-              onClick={() => {
+              onClick={(event) => {
                 if (skipClickRef.current) {
                   skipClickRef.current = false;
+                  return;
+                }
+                if (event.shiftKey) {
+                  toggleCheckedPath(entry.path, { range: true });
+                  setSelectedPath(entry.path);
+                  return;
+                }
+                if (event.metaKey || event.ctrlKey) {
+                  toggleCheckedPath(entry.path);
+                  setSelectedPath(entry.path);
                   return;
                 }
                 setSelectedPath(entry.path);
@@ -1134,7 +1223,7 @@ function FilesWorkspace({
                 }
                 if (event.key === "Delete") {
                   event.preventDefault();
-                  void deleteEntry(entry);
+                  void deleteEntries(checkedPaths.size ? checkedPaths : [entry.path]);
                 }
               }}
               title={isDirectory ? entry.path : "双击打开文件"}
@@ -1364,10 +1453,38 @@ function FilesWorkspace({
             )}
           </div>
         </div>
+        {checkedPaths.size ? (
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              已选 {checkedPaths.size} 项
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8"
+              onClick={() => {
+                setCheckedPaths(new Set());
+                lastCheckedPath.current = null;
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-8"
+              disabled={Boolean(working)}
+              onClick={() => void deleteEntries(checkedPaths)}
+            >
+              <Trash2 className="size-3.5" />
+              删除
+            </Button>
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {searchQuery.trim() ? (
             <div className="px-1">
-              {searching && !(searchResult?.matches.length) && (
+              {searching && !searchResult?.matches.length && (
                 <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                   <LoaderCircle className="size-3.5 animate-spin" /> 搜索中
                 </div>

@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 import {
   MAX_EDITABLE_FILE_BYTES,
+  compactDeletePaths,
   copyProjectEntry,
   createProjectEntry,
+  deleteProjectEntries,
   deleteProjectEntry,
   listProjectDirectory,
   readProjectBinaryFile,
@@ -259,6 +261,29 @@ describe("project file workspace operations", () => {
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
+  it("deletes multiple files and skips nested paths under a selected folder", async () => {
+    const root = await fixture();
+    await createProjectEntry({ rootPath: root, relativePath: "docs", type: "directory" });
+    await createProjectEntry({
+      rootPath: root,
+      relativePath: "docs/a.ts",
+      type: "file",
+      content: "a\n"
+    });
+    await createProjectEntry({
+      rootPath: root,
+      relativePath: "keep.ts",
+      type: "file",
+      content: "keep\n"
+    });
+    expect(compactDeletePaths(["docs/a.ts", "docs", "keep.ts"])).toEqual(["docs", "keep.ts"]);
+    const result = await deleteProjectEntries(root, ["docs/a.ts", "docs", "keep.ts"]);
+    expect(result).toMatchObject({ ok: true, deleted: ["docs", "keep.ts"] });
+    await expect(access(path.join(root, "docs"))).rejects.toBeTruthy();
+    await expect(access(path.join(root, "keep.ts"))).rejects.toBeTruthy();
+    expect((await listProjectDirectory(root, "src")).entries.length).toBeGreaterThan(0);
+  });
+
   it("searches file names and UTF-8 contents with scan limits", async () => {
     const root = await fixture();
     await mkdir(path.join(root, "docs"));
@@ -291,8 +316,13 @@ describe("project file workspace operations", () => {
   it("finds nested source files and skips gitignored directories", async () => {
     const root = await fixture();
     await mkdir(path.join(root, ".reference", "huge"), { recursive: true });
-    await writeFile(path.join(root, ".reference", "huge", "ProjectFilesPanel.tsx"), "ignored copy\n");
-    await mkdir(path.join(root, "apps", "web", "src", "features", "workspace"), { recursive: true });
+    await writeFile(
+      path.join(root, ".reference", "huge", "ProjectFilesPanel.tsx"),
+      "ignored copy\n"
+    );
+    await mkdir(path.join(root, "apps", "web", "src", "features", "workspace"), {
+      recursive: true
+    });
     await writeFile(
       path.join(root, "apps", "web", "src", "features", "workspace", "ProjectFilesPanel.tsx"),
       "export const panel = 1;\n"

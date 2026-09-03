@@ -565,6 +565,44 @@ export async function copyProjectEntry(input: { rootPath: string; from: string; 
   return listEntry(destination.canonicalRoot, destination.targetPath, destination.normalized);
 }
 
+export function compactDeletePaths(paths: string[]) {
+  const normalized = [
+    ...new Set(paths.map((item) => normalizeProjectRelativePath(item)).filter(Boolean))
+  ].sort();
+  const compact: string[] = [];
+  for (const path of normalized) {
+    if (compact.some((parent) => path.startsWith(`${parent}/`))) continue;
+    compact.push(path);
+  }
+  return compact;
+}
+
+export async function deleteProjectEntries(rootPath: string, relativePaths: string[]) {
+  if (!Array.isArray(relativePaths) || relativePaths.length === 0) {
+    throw httpError(400, "请选择要删除的文件或目录");
+  }
+  if (relativePaths.length > 200) throw httpError(400, "一次最多删除 200 项");
+  const compact = compactDeletePaths(relativePaths);
+  if (!compact.length) throw httpError(400, "请选择要删除的文件或目录");
+  const deleted: string[] = [];
+  const failed: Array<{ path: string; message: string }> = [];
+  for (const path of compact) {
+    try {
+      await deleteProjectEntry(rootPath, path);
+      deleted.push(path);
+    } catch (reason) {
+      failed.push({
+        path,
+        message: reason instanceof Error ? reason.message : String(reason)
+      });
+    }
+  }
+  if (!deleted.length) {
+    throw httpError(400, failed[0]?.message ?? "删除失败");
+  }
+  return { ok: failed.length === 0, deleted, failed };
+}
+
 export async function deleteProjectEntry(rootPath: string, relativePath: string) {
   const location = await resolveEntryLocation(rootPath, relativePath);
   let info;
@@ -695,7 +733,10 @@ async function searchGitProjectFiles(input: {
   ]);
   if (listed === null) return null;
   const needle = input.query.toLowerCase();
-  const files = listed.split("\0").filter(Boolean).map((item) => item.replaceAll("\\", "/"));
+  const files = listed
+    .split("\0")
+    .filter(Boolean)
+    .map((item) => item.replaceAll("\\", "/"));
   const matches: ProjectSearchMatch[] = [];
   const seen = new Set<string>();
   for (const relative of files) {

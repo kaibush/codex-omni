@@ -454,9 +454,21 @@ button.composer-chip:hover,
   text-align: left;
 }
 .file-tree-row:hover,
-.file-tree-row.active {
+.file-tree-row.active,
+.file-tree-row.is-checked {
   background: var(--muted);
   color: var(--foreground);
+}
+.file-tree-row.is-checked {
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.file-tree-check {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: none;
+  margin: 0 0.15rem 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 .file-tree-main {
   display: flex;

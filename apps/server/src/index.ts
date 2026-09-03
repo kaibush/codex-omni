@@ -74,6 +74,7 @@ import {
   MAX_UPLOAD_BYTES,
   copyProjectEntry,
   createProjectEntry,
+  deleteProjectEntries,
   deleteProjectEntry,
   listProjectDirectory,
   readProjectBinaryFile,
@@ -620,6 +621,11 @@ app.delete("/api/projects/:id/files", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));
   const relativePath = z.string().min(1).parse(queryValue(req, "path"));
   return deleteProjectEntry(rootPath, relativePath);
+});
+app.post("/api/projects/:id/files/delete", { preHandler: auth }, async (req) => {
+  const { rootPath } = await getProjectRoot(routeId(req));
+  const body = z.object({ paths: z.array(z.string().min(1)).min(1).max(200) }).parse(req.body);
+  return deleteProjectEntries(rootPath, body.paths);
 });
 app.put(
   "/api/projects/:id/files/upload",

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ancestorPaths,
+  compactSelectedPaths,
+  flattenVisibleFileEntries,
   joinProjectPath,
   parentProjectPath,
   previewKindFor,
@@ -61,6 +63,35 @@ describe("file workspace helpers", () => {
         keepPaths
       }).map((entry) => entry.name)
     ).toEqual(["apps"]);
+  });
+
+  it("drops nested paths when a parent folder is already selected", () => {
+    expect(compactSelectedPaths(["src/a.ts", "src", "src/lib/b.ts", "README.md"])).toEqual([
+      "README.md",
+      "src"
+    ]);
+  });
+
+  it("flattens expanded tree rows in display order", () => {
+    const directories = {
+      "": [
+        { name: "src", path: "src", type: "directory" as const },
+        { name: "README.md", path: "README.md", type: "file" as const }
+      ],
+      src: [
+        { name: "lib", path: "src/lib", type: "directory" as const },
+        { name: "index.ts", path: "src/index.ts", type: "file" as const }
+      ],
+      "src/lib": [{ name: "util.ts", path: "src/lib/util.ts", type: "file" as const }]
+    };
+    expect(
+      flattenVisibleFileEntries(directories, {
+        expanded: ["", "src"],
+        query: "",
+        showHidden: false,
+        sort: "name"
+      }).map((entry) => entry.path)
+    ).toEqual(["src", "src/lib", "src/index.ts", "README.md"]);
   });
 
   it("classifies media and markdown preview kinds", () => {

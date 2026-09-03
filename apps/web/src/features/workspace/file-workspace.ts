@@ -143,6 +143,49 @@ export function treeFilterPaths(matchedPaths: string[]) {
   return visible;
 }
 
+/** Drop nested paths when a parent folder is already selected. */
+export function compactSelectedPaths(paths: Iterable<string>) {
+  const normalized = [
+    ...new Set(
+      [...paths].map((item) => item.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")).filter(Boolean)
+    )
+  ].sort();
+  const compact: string[] = [];
+  for (const path of normalized) {
+    if (compact.some((parent) => path.startsWith(`${parent}/`))) continue;
+    compact.push(path);
+  }
+  return compact;
+}
+
+export function flattenVisibleFileEntries(
+  directories: Record<string, FileEntry[]>,
+  options: {
+    expanded: Iterable<string>;
+    query: string;
+    showHidden: boolean;
+    sort: FileSort;
+    keepPaths?: Set<string> | null;
+  }
+) {
+  const expanded = new Set(options.expanded);
+  const result: FileEntry[] = [];
+  const walk = (directory: string) => {
+    const entries = visibleFileEntries(directories[directory] ?? [], {
+      query: options.query,
+      showHidden: options.showHidden,
+      sort: options.sort,
+      keepPaths: options.keepPaths ?? null
+    });
+    for (const entry of entries) {
+      result.push(entry);
+      if (entry.type === "directory" && expanded.has(entry.path)) walk(entry.path);
+    }
+  };
+  walk("");
+  return result;
+}
+
 export function fileName(relativePath: string) {
   const parts = relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts.at(-1) ?? relativePath;
