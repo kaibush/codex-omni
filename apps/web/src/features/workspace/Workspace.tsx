@@ -241,6 +241,7 @@ export function Workspace() {
   const [historyCursor, setHistoryCursor] = useState<MessageCursor | null>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [timelineLockId, setTimelineLockId] = useState<string | undefined>();
   const [followingLive, setFollowingLive] = useState(true);
   const [hasDeferredLiveEvents, setHasDeferredLiveEvents] = useState(false);
   const socket = useRef<WebSocket | null>(null);
@@ -263,13 +264,16 @@ export function Workspace() {
   const currentSessionId = useRef(sessionId);
   const clockOffsetRef = useRef(0);
   const liveEventsRef = useRef<TimelineItem[]>([]);
+  const eventsRef = useRef<TimelineItem[]>([]);
   const cachedSessionId = useRef(sessionId);
   currentSessionId.current = sessionId;
+  eventsRef.current = events;
   const restoreLiveTimeline = useCallback(
     (invalidate = true) => {
       stickToBottom.current = true;
       historyExpanded.current = false;
       historyScrollSnapshot.current = null;
+      setTimelineLockId(undefined);
       setFollowingLive(true);
       setHasDeferredLiveEvents(false);
       setEvents(capTimelineEvents(liveEventsRef.current));
@@ -484,6 +488,8 @@ export function Workspace() {
     historyExpanded.current = false;
     historyScrollSnapshot.current = null;
     liveEventsRef.current = [];
+    eventsRef.current = [];
+    setTimelineLockId(undefined);
   }, [projectId, qc, sessionId]);
   useEffect(() => {
     if (followingLive) liveEventsRef.current = events;
@@ -559,6 +565,7 @@ export function Workspace() {
     if (snapshot) {
       container.scrollTop = snapshot.top + (container.scrollHeight - snapshot.height);
       historyScrollSnapshot.current = null;
+      setTimelineLockId((current) => (current ? undefined : current));
       return;
     }
     if (!stickToBottom.current || historyLoadingRef.current) return;
@@ -1075,25 +1082,31 @@ export function Workspace() {
       const olderEvents = older.messages
         .filter(isVisibleTimelineMessage)
         .map((message) => fromMessage(message));
-      const container = chatScroll.current;
-      if (container) {
-        historyScrollSnapshot.current = {
-          height: container.scrollHeight,
-          top: container.scrollTop
-        };
+      const currentEvents = eventsRef.current;
+      const known = new Set(currentEvents.map((item) => item.id));
+      const prepend = olderEvents.filter((item) => !known.has(item.id));
+      if (!prepend.length) {
+        historyScrollSnapshot.current = null;
+      } else {
+        const container = chatScroll.current;
+        if (container) {
+          historyScrollSnapshot.current = {
+            height: container.scrollHeight,
+            top: container.scrollTop
+          };
+        }
+        const next = capHistoryTimelineEvents([...prepend, ...currentEvents]);
+        const anchorId = currentEvents[0]?.id;
+        if (anchorId) setTimelineLockId(anchorId);
+        setEvents(next);
       }
-      setEvents((current) => {
-        const known = new Set(current.map((item) => item.id));
-        const prepend = olderEvents.filter((item) => !known.has(item.id));
-        if (!prepend.length) historyScrollSnapshot.current = null;
-        return capHistoryTimelineEvents([...prepend, ...current]);
-      });
       setHistoryCursor(older.nextCursor);
       setHasOlderMessages(older.hasMore);
       historyExpanded.current = true;
     } catch (error) {
       if (currentSessionId.current === sessionId) {
         historyScrollSnapshot.current = null;
+        setTimelineLockId(undefined);
         setSendNotice(error instanceof Error ? error.message : "更早的历史加载失败");
       }
     } finally {
@@ -2081,6 +2094,7 @@ export function Workspace() {
               loadOlderMessages={loadOlderMessages}
               hasOlderMessages={hasOlderMessages}
               historyLoading={historyLoading}
+              timelineLockId={timelineLockId}
               activeSession={activeSession ?? undefined}
               projectPath={activeProject?.realPath}
               sessionLoading={sessionLoading}

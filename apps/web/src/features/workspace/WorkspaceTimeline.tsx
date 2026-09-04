@@ -29,6 +29,7 @@ import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import type { Session, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
 import { VirtualTimeline } from "./VirtualTimeline";
+import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
 import { TimelineOutline } from "./TimelineOutline";
 import { RunStatusBubble } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
@@ -90,6 +91,7 @@ export function WorkspaceTimeline({
   loadOlderMessages,
   hasOlderMessages,
   historyLoading,
+  timelineLockId,
   activeSession,
   projectPath,
   sessionLoading,
@@ -145,6 +147,7 @@ export function WorkspaceTimeline({
   loadOlderMessages: () => void;
   hasOlderMessages: boolean;
   historyLoading: boolean;
+  timelineLockId?: string | undefined;
   activeSession: Session | undefined;
   projectPath?: string | undefined;
   sessionLoading: boolean;
@@ -480,12 +483,26 @@ export function WorkspaceTimeline({
             {sessionLoading ? (
               <div className="min-h-[45dvh] sm:min-h-[55vh]" />
             ) : timelineItems.length ? (
+              <TimelineErrorBoundary
+                resetKey={`${timelineView}:${timelineItems[0]?.id}:${timelineItems.length}`}
+                fallback={
+                  <div className="grid min-h-[45dvh] place-items-center px-4 text-center sm:min-h-[55vh]">
+                    <div>
+                      <p className="font-medium">对话渲染失败</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        加载更早记录时出错了，刷新页面可以恢复。
+                      </p>
+                    </div>
+                  </div>
+                }
+              >
               <VirtualTimeline
                 key={timelineView}
                 items={timelineItems}
                 scrollRef={chatScroll}
                 stickToBottom={stickToBottom}
                 scrollToId={highlightMessageId || undefined}
+                lockItemId={timelineLockId}
                 renderItem={(item, _index, meta) => (
                   <EventCard
                     item={item}
@@ -547,6 +564,7 @@ export function WorkspaceTimeline({
                   />
                 )}
               />
+              </TimelineErrorBoundary>
             ) : !activeSession ? (
               <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-1 py-8 sm:py-12">
                 <div className="text-center">

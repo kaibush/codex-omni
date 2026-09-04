@@ -64,6 +64,21 @@ export function visibleWindow(input: {
   };
 }
 
+export function shouldUpdateMeasuredHeight(previous: number | undefined, next: number) {
+  if (!Number.isFinite(next) || next <= 0) return false;
+  if (previous == null) return true;
+  return Math.abs(previous - next) >= 1;
+}
+
+export function itemContainsId(
+  item: { id: string; data?: unknown },
+  id: string
+) {
+  if (item.id === id) return true;
+  const grouped = (item.data as { items?: Array<{ id?: string }> } | undefined)?.items;
+  return Array.isArray(grouped) && grouped.some((entry) => entry?.id === id);
+}
+
 export function estimateTimelineItemSize(item: { kind: string; text?: string | undefined }) {
   if (item.kind === "user" || item.kind === "assistant") {
     const text = item.text ?? "";

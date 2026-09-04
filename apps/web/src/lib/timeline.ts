@@ -127,17 +127,19 @@ function timelineItemSize(item: TimelineItem) {
   return (item.text?.length ?? 0) + payloadSize(item.data);
 }
 
-function payloadSize(value: unknown): number {
-  if (value == null) return 0;
+function payloadSize(value: unknown, depth = 0): number {
+  if (value == null || depth > 24) return 0;
   if (typeof value === "string") return value.length;
   if (typeof value !== "object") return 8;
   if (Array.isArray(value)) {
     let size = 0;
-    for (const entry of value) size += payloadSize(entry);
+    for (const entry of value) size += payloadSize(entry, depth + 1);
     return size;
   }
   let size = 0;
-  for (const entry of Object.values(value as Record<string, unknown>)) size += payloadSize(entry);
+  for (const entry of Object.values(value as Record<string, unknown>)) {
+    size += payloadSize(entry, depth + 1);
+  }
   return size;
 }
 

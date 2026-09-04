@@ -9,10 +9,13 @@ import {
 } from "react";
 import {
   estimateTimelineItemSize,
+  itemContainsId,
+  shouldUpdateMeasuredHeight,
   shouldVirtualizeTimeline,
   stickyVisibleRange,
   visibleWindow
 } from "./virtual-window";
+import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
 
 const DEFAULT_THRESHOLD = 8;
 const DEFAULT_OVERSCAN = 2;
@@ -20,11 +23,14 @@ const DEFAULT_OVERSCAN_PX = 480;
 const ITEM_GAP = 12;
 const STICKY_MAX = 12;
 
-export function VirtualTimeline<T extends { id: string; kind: string; text?: string | undefined }>({
+export function VirtualTimeline<
+  T extends { id: string; kind: string; text?: string | undefined; data?: unknown }
+>({
   items,
   scrollRef,
   stickToBottom,
   scrollToId,
+  lockItemId,
   renderItem,
   overscan = DEFAULT_OVERSCAN,
   overscanPx = DEFAULT_OVERSCAN_PX,
@@ -34,6 +40,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   scrollRef: RefObject<HTMLElement | null>;
   stickToBottom?: { current: boolean } | undefined;
   scrollToId?: string | undefined;
+  lockItemId?: string | undefined;
   renderItem: (
     item: T,
     index: number,
@@ -51,7 +58,7 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
   const headId = items[0]?.id;
   const headIdRef = useRef(headId);
   if (headIdRef.current !== headId) {
-    stickyRef.current = { start: 0, end: 0 };
+    if (!lockItemId) stickyRef.current = { start: 0, end: 0 };
     headIdRef.current = headId;
   }
   const frameRef = useRef<number | null>(null);
@@ -92,8 +99,9 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
 
   const measure = useCallback(
     (id: string, height: number) => {
+      const next = Math.round(height);
       const previous = sizeMap.current.get(id);
-      if (previous === height || height <= 0) return;
+      if (!shouldUpdateMeasuredHeight(previous, next)) return;
       const index = itemsRef.current.findIndex((item) => item.id === id);
       const scroller = scrollRef.current;
       const listTop = listRef.current?.offsetTop ?? 0;
@@ -102,16 +110,17 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
         index >= 0 &&
         previous &&
         !stickToBottom?.current &&
+        !lockItemId &&
         scroller.scrollTop + listTop > 0
       ) {
         let offset = listTop;
         for (let cursor = 0; cursor < index; cursor += 1) offset += sizeOf(cursor);
-        if (offset < scroller.scrollTop) scroller.scrollTop += height - previous;
+        if (offset < scroller.scrollTop) scroller.scrollTop += next - previous;
       }
-      sizeMap.current.set(id, height);
-      bump(true);
+      sizeMap.current.set(id, next);
+      bump();
     },
-    [bump, scrollRef, sizeOf, stickToBottom]
+    [bump, lockItemId, scrollRef, sizeOf, stickToBottom]
   );
 
   const virtualized = shouldVirtualizeTimeline(items, { threshold });
@@ -135,9 +144,17 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
     // Pinning to the bottom must not wait for scrollTop. The first paint (and
     // the first 折叠/平铺/展开 remount) still has scrollTop=0, which would
     // window the oldest cards and leave a huge empty padding below.
-    const scrollTop = stickToBottom?.current
+    let scrollTop = stickToBottom?.current
       ? Number.MAX_SAFE_INTEGER
       : Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
+    if (lockItemId) {
+      const index = items.findIndex((item) => itemContainsId(item, lockItemId));
+      if (index >= 0) {
+        let offset = 0;
+        for (let cursor = 0; cursor < index; cursor += 1) offset += sizeOf(cursor);
+        scrollTop = offset;
+      }
+    }
     const nextWindow = visibleWindow({
       itemCount: items.length,
       itemSize: sizeOf,
@@ -217,10 +234,12 @@ export function VirtualTimeline<T extends { id: string; kind: string; text?: str
             last={index === items.length - 1}
             onMeasure={measure}
           >
-            {renderItem(item, index, {
-              lite: range.virtualized && (index < range.tightStart || index >= range.tightEnd),
-              height: sizeMap.current.get(item.id)
-            })}
+            <TimelineErrorBoundary resetKey={item.id}>
+              {renderItem(item, index, {
+                lite: range.virtualized && (index < range.tightStart || index >= range.tightEnd),
+                height: sizeMap.current.get(item.id)
+              })}
+            </TimelineErrorBoundary>
           </VirtualTimelineItem>
         );
       })}

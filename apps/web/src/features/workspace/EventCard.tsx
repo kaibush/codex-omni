@@ -84,10 +84,12 @@ import {
 } from "./markdown-refs";
 
 function EventTime({ value, className }: { value: number; className?: string }) {
+  const date = new Date(value);
+  if (!Number.isFinite(value) || Number.isNaN(date.getTime())) return null;
   return (
     <time
       className={["event-time", className].filter(Boolean).join(" ")}
-      dateTime={new Date(value).toISOString()}
+      dateTime={date.toISOString()}
       title={formatDateTime(value)}
     >
       {formatMessageTime(value)}
@@ -331,7 +333,7 @@ const MarkdownContent = memo(function MarkdownContent({
   return (
     <ReactMarkdown
       remarkPlugins={enableMath ? [remarkGfm, remarkMath] : [remarkGfm]}
-      rehypePlugins={enableMath ? [rehypeKatex] : []}
+      rehypePlugins={enableMath ? [[rehypeKatex, { throwOnError: false, strict: "ignore" }]] : []}
       urlTransform={(url) => url}
       components={components}
     >

@@ -123,6 +123,20 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("mc");
   });
 
+  it("does not crash the timeline on broken latex", () => {
+    expect(() =>
+      renderToStaticMarkup(
+        <EventCard
+          item={{
+            id: "assistant-bad-math",
+            kind: "assistant",
+            text: "broken $$\\notACommand{$$ and $HOME"
+          }}
+        />
+      )
+    ).not.toThrow();
+  });
+
   it("keeps markdown images as deferred previews instead of raw img tags", () => {
     const html = renderToStaticMarkup(
       <EventCard

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { estimateTimelineItemSize, shouldVirtualizeTimeline, stickyVisibleRange, visibleWindow } from "./virtual-window";
+import {
+  estimateTimelineItemSize,
+  itemContainsId,
+  shouldUpdateMeasuredHeight,
+  shouldVirtualizeTimeline,
+  stickyVisibleRange,
+  visibleWindow
+} from "./virtual-window";
 
 describe("visibleWindow", () => {
   it("returns an empty range for no items", () => {
@@ -111,5 +118,25 @@ describe("stickyVisibleRange", () => {
     expect(shrunk.end - shrunk.start).toBeLessThanOrEqual(12);
     expect(shrunk.start).toBeLessThanOrEqual(40);
     expect(shrunk.end).toBeGreaterThanOrEqual(50);
+  });
+});
+
+describe("shouldUpdateMeasuredHeight", () => {
+  it("ignores subpixel jitter and invalid heights", () => {
+    expect(shouldUpdateMeasuredHeight(undefined, 120)).toBe(true);
+    expect(shouldUpdateMeasuredHeight(120, 120.4)).toBe(false);
+    expect(shouldUpdateMeasuredHeight(120, 122)).toBe(true);
+    expect(shouldUpdateMeasuredHeight(120, 0)).toBe(false);
+    expect(shouldUpdateMeasuredHeight(120, Number.NaN)).toBe(false);
+  });
+});
+
+describe("itemContainsId", () => {
+  it("matches grouped timeline cards by child id", () => {
+    expect(itemContainsId({ id: "activity-group-a", data: { items: [{ id: "tool-a" }] } }, "tool-a")).toBe(
+      true
+    );
+    expect(itemContainsId({ id: "assistant-1" }, "assistant-1")).toBe(true);
+    expect(itemContainsId({ id: "assistant-1" }, "other")).toBe(false);
   });
 });

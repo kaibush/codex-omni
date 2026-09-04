@@ -57,3 +57,49 @@ describe("VirtualTimeline", () => {
     expect(html).not.toContain("m-0");
   });
 });
+
+  it("keeps the locked card in the window after older messages are prepended", () => {
+    const items = Array.from({ length: 40 }, (_, index) => ({
+      id: `m-${index}`,
+      kind: "assistant" as const,
+      text: "hi"
+    }));
+    const html = renderToStaticMarkup(
+      <VirtualTimeline
+        items={items}
+        scrollRef={{ current: null }}
+        lockItemId="m-20"
+        renderItem={(item) => <div>{item.id}</div>}
+      />
+    );
+    expect(html).toContain("m-20");
+    expect(html).not.toContain("m-0");
+    expect(html).not.toContain("m-39");
+  });
+
+  it("locks onto a grouped activity child after history prepend", () => {
+    const items = [
+      { id: "activity-group-old", kind: "activity", data: { items: [{ id: "tool-old" }] } },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `m-${index}`,
+        kind: "assistant" as const,
+        text: "hi"
+      })),
+      {
+        id: "activity-group-live",
+        kind: "activity",
+        data: { items: [{ id: "tool-live-1" }, { id: "tool-live-2" }] }
+      }
+    ];
+    const html = renderToStaticMarkup(
+      <VirtualTimeline
+        items={items}
+        scrollRef={{ current: null }}
+        lockItemId="tool-live-1"
+        renderItem={(item) => <div>{item.id}</div>}
+      />
+    );
+    expect(html).toContain("activity-group-live");
+    expect(html).not.toContain("activity-group-old");
+  });
+
