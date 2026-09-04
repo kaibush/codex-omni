@@ -249,9 +249,17 @@ export function mergeSessionTimeline(input: {
   );
   const inFlight = extras.filter((item) => {
     if (olderIds.has(item.id)) return false;
+    // A terminal error that predates the fetched page is historical, even if
+    // it was appended to the live stream after the page's newest item.
+    if (
+      item.kind === "error" &&
+      newestCreatedAt > 0 &&
+      (item.createdAt ?? 0) <= newestCreatedAt
+    ) {
+      return false;
+    }
     if (afterHistoricalIds.has(item.id)) return true;
     if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
-    if (item.kind === "error") return true;
     return (item.createdAt ?? 0) > newestCreatedAt;
   });
   return [...older, ...historical, ...inFlight];

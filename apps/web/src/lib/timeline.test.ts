@@ -59,7 +59,7 @@ describe("mergeSessionTimeline", () => {
     ).toEqual(["m3", "m4", "live"]);
   });
 
-  it("keeps streaming and error items that are not in the fetched page", () => {
+  it("keeps active streaming items but drops terminal errors older than the fetched page", () => {
     expect(
       mergeSessionTimeline({
         historical: [item("m3", 30)],
@@ -67,6 +67,17 @@ describe("mergeSessionTimeline", () => {
           item("m3", 30),
           item("stream", 31, { kind: "assistant", streaming: true }),
           item("error", 20, { kind: "error" })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["m3", "stream"]);
+    expect(
+      mergeSessionTimeline({
+        historical: [item("m3", 30)],
+        current: [
+          item("m3", 30),
+          item("stream", 31, { kind: "assistant", streaming: true }),
+          item("error", 32, { kind: "error" })
         ],
         historyExpanded: false
       }).map((entry) => entry.id)
