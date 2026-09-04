@@ -61,6 +61,25 @@ type GitCommitDetail = GitCommitSummary & {
 };
 type GitTab = "changes" | "branches" | "history" | "timeline";
 
+const MAX_HISTORY_DIFF_CACHE_ENTRIES = 12;
+const MAX_HISTORY_DIFF_CACHE_CHARS = 4_000_000;
+
+function cacheHistoryDiff(cache: Record<string, string>, key: string, diff: string) {
+  const entries = Object.entries(cache).filter(([entryKey]) => entryKey !== key);
+  entries.push([key, diff]);
+  let total = 0;
+  const kept: Array<[string, string]> = [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (kept.length >= MAX_HISTORY_DIFF_CACHE_ENTRIES) break;
+    if (kept.length > 0 && total + entry[1].length > MAX_HISTORY_DIFF_CACHE_CHARS) break;
+    kept.push(entry);
+    total += entry[1].length;
+  }
+  kept.reverse();
+  return Object.fromEntries(kept);
+}
+
 function GitSection({
   title,
   action,
@@ -175,7 +194,7 @@ export function GitPanel({
         `/api/projects/${project.id}/git/diff?path=${encodeURIComponent(filePath)}&commit=${encodeURIComponent(hash)}`
       );
       const nextDiff = result.diff || "暂无文本差异";
-      const nextCache = { ...cache, [key]: nextDiff };
+      const nextCache = cacheHistoryDiff(cache, key, nextDiff);
       setHistoryDiffs(nextCache);
       setHistoryDiff(nextDiff);
       return nextCache;

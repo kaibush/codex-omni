@@ -247,6 +247,7 @@ export function Workspace() {
   const replayCursors = useRef(new Map<string, ReplayCursor>());
   const reconnectAttempts = useRef(0);
   const draftSessionKey = useRef("");
+  const cachedProjectId = useRef(projectId);
   const pendingContinuationSend = useRef<{
     sessionId: string;
     message: string;
@@ -453,7 +454,13 @@ export function Workspace() {
     if (previous && previous !== sessionId) {
       qc.removeQueries({ queryKey: ["session", previous] });
     }
+    const previousProject = cachedProjectId.current;
+    if (previousProject && previousProject !== projectId) {
+      qc.removeQueries({ queryKey: ["sessions", previousProject] });
+      qc.removeQueries({ queryKey: ["terminals", previousProject] });
+    }
     cachedSessionId.current = sessionId;
+    cachedProjectId.current = projectId;
     setEvents([]);
     setRunState(null);
     setSendNotice("");
@@ -2055,6 +2062,7 @@ export function Workspace() {
               setSendNotice={setSendNotice}
             />
             <WorkspaceTimeline
+              key={`${projectId}:${sessionId}`}
               workspaceView={workspaceView}
               messageHits={messageHits}
               highlightMessageId={highlightMessageId}
