@@ -64,7 +64,7 @@ type GitTab = "changes" | "branches" | "history" | "timeline";
 const MAX_HISTORY_DIFF_CACHE_ENTRIES = 12;
 const MAX_HISTORY_DIFF_CACHE_CHARS = 4_000_000;
 
-function cacheHistoryDiff(cache: Record<string, string>, key: string, diff: string) {
+function cacheDiff(cache: Record<string, string>, key: string, diff: string) {
   const entries = Object.entries(cache).filter(([entryKey]) => entryKey !== key);
   entries.push([key, diff]);
   let total = 0;
@@ -194,7 +194,7 @@ export function GitPanel({
         `/api/projects/${project.id}/git/diff?path=${encodeURIComponent(filePath)}&commit=${encodeURIComponent(hash)}`
       );
       const nextDiff = result.diff || "暂无文本差异";
-      const nextCache = cacheHistoryDiff(cache, key, nextDiff);
+      const nextCache = cacheDiff(cache, key, nextDiff);
       setHistoryDiffs(nextCache);
       setHistoryDiff(nextDiff);
       return nextCache;
@@ -291,7 +291,7 @@ export function GitPanel({
           kind === "staged" ? "true" : "false"
         }`
       );
-      setExpanded((current) => ({ ...current, [key]: result.diff || "暂无文本差异" }));
+      setExpanded((current) => cacheDiff(current, key, result.diff || "暂无文本差异"));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
