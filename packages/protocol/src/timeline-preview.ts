@@ -1,6 +1,8 @@
 export const TIMELINE_PREVIEW_CHARS = 12_000;
 export const TIMELINE_ASSISTANT_PREVIEW_CHARS = 32_000;
 export const TIMELINE_JSON_STRING_CHARS = 8_000;
+export const TIMELINE_JSON_TOTAL_CHARS = 64_000;
+export const TIMELINE_JSON_MAX_ARRAY_ITEMS = 200;
 
 const DUPLICATE_CONTENT_FIELDS = ["text", "output", "message"] as const;
 const DIFF_KEYS = new Set(["diff", "patch", "unifiedDiff"]);
@@ -54,18 +56,33 @@ export function compactJsonData(
   const skip = new Set(options?.skipKeys ?? []);
   let truncated = false;
   let originalLength = 0;
+  let remaining = TIMELINE_JSON_TOTAL_CHARS;
   const walk = (input: unknown, key?: string): unknown => {
     if (key && skip.has(key)) return input;
     if (typeof input === "string") {
-      if (input.length <= limit) return input;
+      const allowed = Math.min(limit, Math.max(0, remaining));
+      if (input.length <= allowed) {
+        remaining -= input.length;
+        return input;
+      }
       truncated = true;
       originalLength = Math.max(originalLength, input.length);
       if (key && DIFF_KEYS.has(key)) return "";
-      return previewText(input, limit).text;
+      const preview = previewText(input, Math.max(1, allowed)).text;
+      remaining = Math.max(0, remaining - preview.length);
+      return preview;
     }
     if (Array.isArray(input)) {
       let changed = false;
-      const next = input.map((item) => {
+      const source = input.length > TIMELINE_JSON_MAX_ARRAY_ITEMS
+        ? input.slice(0, TIMELINE_JSON_MAX_ARRAY_ITEMS)
+        : input;
+      if (source.length !== input.length) {
+        changed = true;
+        truncated = true;
+        originalLength = Math.max(originalLength, input.length);
+      }
+      const next = source.map((item) => {
         const value = walk(item);
         if (value !== item) changed = true;
         return value;
@@ -137,7 +154,7 @@ export function compactTimelineItem<T extends TimelinePreviewItem>(
   }
 
   if (data !== undefined) {
-    const compacted = compactJsonData(data, TIMELINE_JSON_STRING_CHARS, { skipKeys: ["items"] });
+    const compacted = compactJsonData(data, TIMELINE_JSON_STRING_CHARS);
     if (compacted.truncated) {
       data = compacted.value;
       dataChanged = true;

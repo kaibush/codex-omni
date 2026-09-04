@@ -10,6 +10,8 @@ export type ReplayCursor = { requestId: string; lastSeq: number };
 
 export const SESSION_PAGE_SIZE = 50;
 export const OUTBOUND_TURNS_STORAGE_KEY = "codex-omni:outbound-turns:v1";
+export const MAX_OUTBOUND_COMMANDS = 32;
+export const MAX_OUTBOUND_COMMAND_BYTES = 4 * 1024 * 1024;
 export const SIDEBAR_WIDTH_KEY = "codex-omni:sidebar-width";
 export const SIDEBAR_WIDTH_MIN = 240;
 export const SIDEBAR_WIDTH_MAX = 420;
@@ -40,7 +42,7 @@ export const loadOutboundCommands = (): QueuedCommand[] => {
   try {
     const value = JSON.parse(localStorage.getItem(OUTBOUND_TURNS_STORAGE_KEY) ?? "[]");
     if (!Array.isArray(value)) return [];
-    return value.filter(
+    const valid = value.filter(
       (item): item is QueuedCommand =>
         item &&
         typeof item.id === "string" &&
@@ -48,6 +50,7 @@ export const loadOutboundCommands = (): QueuedCommand[] => {
         typeof item.data === "string" &&
         typeof item.message === "string"
     );
+    return boundOutboundCommands(valid);
   } catch {
     return [];
   }
@@ -55,11 +58,27 @@ export const loadOutboundCommands = (): QueuedCommand[] => {
 
 export const persistOutboundCommands = (commands: QueuedCommand[]) => {
   try {
-    if (commands.length) localStorage.setItem(OUTBOUND_TURNS_STORAGE_KEY, JSON.stringify(commands));
+    const bounded = boundOutboundCommands(commands);
+    if (bounded.length)
+      localStorage.setItem(OUTBOUND_TURNS_STORAGE_KEY, JSON.stringify(bounded));
     else localStorage.removeItem(OUTBOUND_TURNS_STORAGE_KEY);
   } catch {
     // localStorage can be unavailable in private browsing; server-side queue remains authoritative.
   }
+};
+
+export const boundOutboundCommands = (commands: QueuedCommand[]) => {
+  const result: QueuedCommand[] = [];
+  let bytes = 2;
+  for (let index = commands.length - 1; index >= 0; index -= 1) {
+    const command = commands[index]!;
+    const size = command.data.length + command.message.length;
+    if (result.length >= MAX_OUTBOUND_COMMANDS) break;
+    if (result.length > 0 && bytes + size > MAX_OUTBOUND_COMMAND_BYTES) break;
+    result.push(command);
+    bytes += size;
+  }
+  return result.reverse();
 };
 
 export const formatDuration = (milliseconds: number) => {

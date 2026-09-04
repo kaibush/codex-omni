@@ -61,6 +61,19 @@ describe("timeline previews", () => {
     expect(value.items).toBe(items);
   });
 
+  it("bounds nested arrays and the total payload preview", () => {
+    const result = compactJsonData({
+      items: Array.from({ length: 500 }, (_, index) => ({
+        id: index,
+        output: "x".repeat(2_000)
+      }))
+    });
+    expect(result.truncated).toBe(true);
+    const value = result.value as { items: Array<{ output: string }> };
+    expect(value.items.length).toBeLessThanOrEqual(200);
+    expect(JSON.stringify(value).length).toBeLessThan(70_000);
+  });
+
   it("strips duplicated tool output and flags truncated timeline items", () => {
     const output = `${"line\n".repeat(4000)}tail`;
     const item = {

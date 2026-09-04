@@ -109,6 +109,7 @@ import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
 import {
   SESSION_PAGE_SIZE,
+  boundOutboundCommands,
   formatDuration,
   formatTokens,
   fromMessage,
@@ -669,7 +670,7 @@ export function Workspace() {
             networkAccessEnabled: workspaceSettingsRef.current.networkAccessEnabled
           })
         );
-        queuedCommands.current = [
+        queuedCommands.current = boundOutboundCommands([
           ...queuedCommands.current.filter((item) => item.id !== clientId),
           {
             id: clientId,
@@ -687,7 +688,7 @@ export function Workspace() {
             }),
             message: pending.message
           }
-        ];
+        ]);
         persistOutboundCommands(queuedCommands.current);
         setQueuedTurns((current) => [
           ...current,
@@ -1546,10 +1547,10 @@ export function Workspace() {
         networkAccessEnabled: workspaceSettings.networkAccessEnabled,
         mode: workspaceSettings.executionMode
       });
-      queuedCommands.current = [
+      queuedCommands.current = boundOutboundCommands([
         ...queuedCommands.current.filter((item) => item.id !== clientId),
         { id: clientId, sessionId, data: command, message: composed.displayMessage }
-      ];
+      ]);
       persistOutboundCommands(queuedCommands.current);
       setQueuedTurns((current) => [
         ...current.filter((item) => item.id !== clientId),
@@ -1599,7 +1600,7 @@ export function Workspace() {
   const removeQueuedTurn = (queueId: string) => {
     const pending = queuedCommands.current.find((command) => command.id === queueId);
     if (pending) {
-      queuedCommands.current = [
+      queuedCommands.current = boundOutboundCommands([
         ...queuedCommands.current.filter((command) => command.id !== queueId),
         {
           id: queueId,
@@ -1607,7 +1608,7 @@ export function Workspace() {
           data: JSON.stringify({ type: "queue.remove", sessionId, queueId }),
           message: ""
         }
-      ];
+      ]);
       persistOutboundCommands(queuedCommands.current);
       setQueuedTurns((current) => current.filter((item) => item.id !== queueId));
       if (socket.current?.readyState === WebSocket.OPEN) {
@@ -1645,6 +1646,7 @@ export function Workspace() {
         message: composedMessage,
         displayMessage: trimmed
       });
+      queuedCommands.current = boundOutboundCommands(queuedCommands.current);
       persistOutboundCommands(queuedCommands.current);
       setQueuedTurns((current) =>
         current.map((item) =>
