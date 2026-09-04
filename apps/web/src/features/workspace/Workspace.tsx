@@ -171,6 +171,7 @@ export function Workspace() {
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [continuation, setContinuation] = useState<Provider | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState === "visible");
   const [runState, setRunState] = useState<RunState | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [sendNotice, setSendNotice] = useState("");
@@ -314,6 +315,11 @@ export function Workspace() {
     refetchInterval: 4000
   });
   const workspaceSettings = { ...defaultWorkspaceSettings, ...(settings.data ?? {}) };
+  useEffect(() => {
+    const onVisibilityChange = () => setPageVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
@@ -555,6 +561,10 @@ export function Workspace() {
   const workspaceSettingsRef = useRef(workspaceSettings);
   workspaceSettingsRef.current = workspaceSettings;
   useEffect(() => {
+    if (!pageVisible) {
+      setConnection("disconnected");
+      return;
+    }
     let disposed = false;
     let reconnectTimer: number | undefined;
     let timelineFlushTimer: number | undefined;
@@ -1028,7 +1038,7 @@ export function Workspace() {
       }
       if (ws.readyState === WebSocket.OPEN) ws.close();
     };
-  }, [sessionId, projectId, qc, reconnectNonce]);
+  }, [pageVisible, sessionId, projectId, qc, reconnectNonce]);
   const activeProject = projects.data?.find((p) => p.id === projectId);
   const activeSession =
     (detail.data?.session?.id === sessionId && detail.data.session.projectId === projectId

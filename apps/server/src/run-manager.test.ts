@@ -113,6 +113,51 @@ function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: numbe
 }
 
 describe("RunManager reconnect state", () => {
+  it("drops oversized stream events for a backed-up socket but keeps terminal events", async () => {
+    const { project, provider, session, sent } = fixture();
+    const socket = {
+      readyState: 1,
+      OPEN: 1,
+      bufferedAmount: 3 * 1024 * 1024,
+      send(data: string) {
+        sent.push(JSON.parse(data));
+      }
+    };
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "assistant.delta",
+            payload: { itemId: "answer-1", delta: "should be recovered from history" }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "turn.completed",
+            payload: { status: "completed", startedAt: 1, endedAt: 2, usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "hello"
+      },
+      socket
+    );
+
+    expect(sent.some((event) => event.type === "assistant.delta")).toBe(false);
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
   it("keeps the run active while Codex reconnects and clears the notice on progress", async () => {
     const { project, provider, session, socket, sent } = fixture();
     runtimeMocks.run.mockImplementation(

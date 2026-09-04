@@ -30,7 +30,21 @@ import { backfillSessionRolloutTools, rolloutToolPayload } from "./session-rollo
 import { mergeToolPayload } from "./tool-payload.js";
 import { applyPlanMode, applyProjectRules } from "./workspace-loop.js";
 
-type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
+type WebSocket = {
+  readyState: number;
+  OPEN: number;
+  send(data: string): void;
+  bufferedAmount?: number;
+};
+
+// A slow/background browser must not accumulate an unbounded ws send queue.
+// Stream deltas are recoverable from the persisted session snapshot, so they
+// can be skipped when the socket is already backed up.
+const MAX_SOCKET_BUFFERED_BYTES = 2 * 1024 * 1024;
+const MAX_STREAM_EVENT_BYTES = 256 * 1024;
+
+const isDroppableStreamEvent = (type: string) =>
+  type === "assistant.delta" || type === "reasoning.delta" || type === "tool.output";
 
 const runtimeDefaults = {
   sandbox: "workspace-write" as const,
@@ -178,8 +192,13 @@ export class RunManager {
 
   private broadcast(sessionId: string, event: ClientEvent | BridgeEvent) {
     const body = JSON.stringify({ ...event, sessionId });
+    const bodyBytes = Buffer.byteLength(body);
+    const droppable = isDroppableStreamEvent(event.type);
+    if (droppable && bodyBytes > MAX_STREAM_EVENT_BYTES) return;
     for (const socket of this.subscribers.get(sessionId) ?? []) {
-      if (socket.readyState === socket.OPEN) socket.send(body);
+      if (socket.readyState !== socket.OPEN) continue;
+      if (droppable && (socket.bufferedAmount ?? 0) > MAX_SOCKET_BUFFERED_BYTES) continue;
+      socket.send(body);
     }
   }
 
