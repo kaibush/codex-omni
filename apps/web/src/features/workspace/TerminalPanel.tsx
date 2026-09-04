@@ -62,6 +62,7 @@ function TerminalViewport({
   const pendingInput = useRef("");
   const reconnectTimer = useRef<number | null>(null);
   const reconnectAttempt = useRef(0);
+  const pageVisibleRef = useRef(document.visibilityState === "visible");
   const ctrlRef = useRef(false);
   const altRef = useRef(false);
   const shiftRef = useRef(false);
@@ -199,7 +200,7 @@ function TerminalViewport({
 
     let disposed = false;
     const connect = () => {
-      if (disposed) return;
+      if (disposed || !pageVisibleRef.current) return;
       setConnection(reconnectAttempt.current ? "reconnecting" : "connecting");
       const ws = new WebSocket(terminalWsUrl());
       socket.current = ws;
@@ -257,7 +258,7 @@ function TerminalViewport({
         }
       };
       ws.onclose = () => {
-        if (disposed) return;
+        if (disposed || !pageVisibleRef.current) return;
         socket.current = null;
         reconnectAttempt.current += 1;
         setConnection(reconnectAttempt.current >= 5 ? "disconnected" : "reconnecting");
@@ -270,9 +271,26 @@ function TerminalViewport({
         if (!disposed) setConnection("reconnecting");
       };
     };
+    const onVisibilityChange = () => {
+      const visible = document.visibilityState === "visible";
+      pageVisibleRef.current = visible;
+      if (!visible) {
+        if (reconnectTimer.current !== null) window.clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+        const ws = socket.current;
+        socket.current = null;
+        if (ws?.readyState === WebSocket.OPEN) ws.close();
+        else if (ws?.readyState === WebSocket.CONNECTING) ws.onopen = () => ws.close();
+        setConnection("disconnected");
+      } else if (!disposed && !socket.current) {
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     connect();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (reconnectTimer.current !== null) window.clearTimeout(reconnectTimer.current);
       resizeObserver.disconnect();
       dataSubscription.dispose();
