@@ -44,13 +44,15 @@ import {
 } from "@/lib/task-state";
 import { isDeferredLiveTimelineEvent, isStreamProgressEvent } from "@/lib/live-follow";
 import {
-  capHistoryTimelineEvents,
+  capHistoryPreserveVisible,
+  capPausedTimelineEvents,
   capTimelineEvents,
   LIVE_TIMELINE_FLUSH_MAX_BATCH,
   LIVE_TIMELINE_FLUSH_MS,
   LIVE_TIMELINE_TAIL_ITEMS,
   mergeSessionTimeline
 } from "@/lib/timeline";
+import { existingPlanTimelineId, isPlanTool, mergeToolEventData } from "@/lib/tool-event";
 import { createId } from "@/lib/utils";
 import type {
   Message,
@@ -529,12 +531,20 @@ export function Workspace() {
       .map((message) => fromMessage(message));
     const expanded = historyExpanded.current;
     setEvents((current) => {
+      const following = stickToBottom.current;
+      liveEventsRef.current = capTimelineEvents(
+        mergeSessionTimeline({
+          historical,
+          current: liveEventsRef.current,
+          historyExpanded: false
+        })
+      );
       const merged = mergeSessionTimeline({
         historical,
-        current,
+        current: following ? liveEventsRef.current : current,
         historyExpanded: expanded
       });
-      return stickToBottom.current ? capTimelineEvents(merged) : capHistoryTimelineEvents(merged);
+      return following ? capTimelineEvents(merged) : capPausedTimelineEvents(merged, historical);
     });
     if (!expanded) {
       setHistoryCursor(detail.data.nextCursor);
@@ -596,7 +606,13 @@ export function Workspace() {
       setEvents((current) => updates.reduce((next, update) => update(next), current));
     };
     const enqueueTimelineUpdate = (update: (current: TimelineItem[]) => TimelineItem[]) => {
-      timelineUpdates.push(update);
+      timelineUpdates.push((displayed) => {
+        const following = stickToBottom.current;
+        const base = following ? displayed : liveEventsRef.current;
+        const next = capTimelineEvents(update(base));
+        liveEventsRef.current = next;
+        return following ? next : displayed;
+      });
       if (timelineUpdates.length >= LIVE_TIMELINE_FLUSH_MAX_BATCH) {
         flushTimelineUpdates();
         return;
@@ -745,14 +761,12 @@ export function Workspace() {
         if (!event.sessionId || event.sessionId === sessionId) {
           setSendNotice(text);
           enqueueTimelineUpdate((current) =>
-            (stickToBottom.current ? capTimelineEvents : capHistoryTimelineEvents)(
-              upsert(current, `server-error-${Date.now()}`, {
-                kind: "error",
-                text,
-                providerId: providerIdRef.current,
-                createdAt: Date.now()
-              })
-            )
+            upsert(current, `server-error-${Date.now()}`, {
+              kind: "error",
+              text,
+              providerId: providerIdRef.current,
+              createdAt: Date.now()
+            })
           );
         }
         return;
@@ -812,28 +826,25 @@ export function Workspace() {
         }
         if (!stickToBottom.current && snapshot.approvals?.length) {
           setHasDeferredLiveEvents(true);
-        } else {
-          enqueueTimelineUpdate((current) =>
-            capTimelineEvents(
-              (snapshot.approvals ?? []).reduce(
-                (items, approval) =>
-                  upsert(items, `approval-${approval.id}`, {
-                    kind: "approval",
-                    text: approval.command,
-                    data: {
-                      ...(approval.payload ?? {}),
-                      approvalId: approval.id,
-                      command: approval.command,
-                      status: "pending"
-                    },
-                    providerId: providerIdRef.current,
-                    createdAt: approval.createdAt
-                  }),
-                current
-              )
-            )
-          );
         }
+        enqueueTimelineUpdate((current) =>
+          (snapshot.approvals ?? []).reduce(
+            (items, approval) =>
+              upsert(items, `approval-${approval.id}`, {
+                kind: "approval",
+                text: approval.command,
+                data: {
+                  ...(approval.payload ?? {}),
+                  approvalId: approval.id,
+                  command: approval.command,
+                  status: "pending"
+                },
+                providerId: providerIdRef.current,
+                createdAt: approval.createdAt
+              }),
+            current
+          )
+        );
         if (snapshot.replayTruncated) {
           recordCursor(event.requestId, event.seq);
           setSendNotice("实时事件较多，已从持久记录恢复最新状态");
@@ -867,20 +878,15 @@ export function Workspace() {
         return;
       }
       if (event.type === "user.message") {
-        if (stickToBottom.current) {
-          enqueueTimelineUpdate((current) =>
-            capTimelineEvents(
-              upsert(current, String(payload.id ?? `user-${event.requestId}`), {
-                kind: "user",
-                text: String(payload.message ?? ""),
-                providerId: payload.providerId ?? providerIdRef.current,
-                createdAt: payload.createdAt ?? Date.now()
-              })
-            )
-          );
-        } else {
-          setHasDeferredLiveEvents(true);
-        }
+        if (!stickToBottom.current) setHasDeferredLiveEvents(true);
+        enqueueTimelineUpdate((current) =>
+          upsert(current, String(payload.id ?? `user-${event.requestId}`), {
+            kind: "user",
+            text: String(payload.message ?? ""),
+            providerId: payload.providerId ?? providerIdRef.current,
+            createdAt: payload.createdAt ?? Date.now()
+          })
+        );
         void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
         return;
       }
@@ -970,13 +976,10 @@ export function Workspace() {
       }
       if (!stickToBottom.current && isDeferredLiveTimelineEvent(event.type)) {
         setHasDeferredLiveEvents(true);
-        return;
       }
       enqueueTimelineUpdate((current) => {
-        const put = (id: string, next: Omit<TimelineItem, "id">) => {
-          const updated = upsert(current, id, compactTimelineItem(next));
-          return capTimelineEvents(updated);
-        };
+        const put = (id: string, next: Omit<TimelineItem, "id">) =>
+          upsert(current, id, compactTimelineItem(next));
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
           const previous = current.find((item) => item.id === id);
@@ -997,8 +1000,16 @@ export function Workspace() {
             providerId: providerIdRef.current
           });
         }
+        if (event.type === "turn.completed") {
+          return current.filter((item) => item.id !== `error-${event.requestId}-run.failed`);
+        }
         if (event.type === "tool.started" || event.type === "tool.output") {
-          const id = `tool-${event.requestId}-${payload.itemId}`;
+          const itemId = String(payload.itemId ?? "").trim();
+          const fallbackId = `tool-${event.requestId}-${itemId}`;
+          const id =
+            (isPlanTool(payload)
+              ? existingPlanTimelineId(current, String(event.requestId ?? ""), payload)
+              : undefined) ?? fallbackId;
           const previous = current.find((item) => item.id === id);
           const output = applyTextPatch(previous?.text ?? String(previous?.data?.output ?? ""), {
             text: payload.output,
@@ -1006,9 +1017,15 @@ export function Workspace() {
           });
           const rest = { ...(payload as Record<string, unknown>) };
           delete rest.outputDelta;
+          const data = {
+            ...(isPlanTool(payload) || isPlanTool(previous?.data)
+              ? mergeToolEventData(previous?.data, rest)
+              : { ...previous?.data, ...rest }),
+            output
+          };
           return put(id, {
             kind: "tool",
-            data: { ...previous?.data, ...rest, output },
+            data,
             text: output,
             providerId: providerIdRef.current,
             streaming: event.type === "tool.started" || rest.status === "in_progress"
@@ -1021,23 +1038,24 @@ export function Workspace() {
             providerId: providerIdRef.current
           });
         if (event.type === "approval.requested")
-          return capTimelineEvents(
-            upsert(current, `approval-${payload.approvalId}`, {
-              kind: "approval",
-              data: { ...payload, status: "pending" },
-              text: payload.command,
-              providerId: providerIdRef.current
-            })
-          );
+          return upsert(current, `approval-${payload.approvalId}`, {
+            kind: "approval",
+            data: { ...payload, status: "pending" },
+            text: payload.command,
+            providerId: providerIdRef.current
+          });
         if (event.type === "run.failed")
-          return capTimelineEvents(
-            upsert(current, `error-${event.requestId}-run.failed`, {
-              kind: "error",
-              text: payload.message ?? payload.reason ?? "Codex 运行失败",
-              providerId: providerIdRef.current,
-              createdAt: Date.now()
-            })
-          );
+          return upsert(current, `error-${event.requestId}-run.failed`, {
+            kind: "error",
+            text: payload.message ?? payload.reason ?? "Codex 运行失败",
+            providerId: providerIdRef.current,
+            createdAt:
+              typeof payload.endedAt === "number"
+                ? payload.endedAt
+                : typeof payload.startedAt === "number"
+                  ? payload.startedAt
+                  : Date.now()
+          });
         return current;
       });
     };
@@ -1095,7 +1113,7 @@ export function Workspace() {
             top: container.scrollTop
           };
         }
-        const next = capHistoryTimelineEvents([...prepend, ...currentEvents]);
+        const next = capHistoryPreserveVisible(prepend, currentEvents);
         const anchorId = currentEvents[0]?.id;
         if (anchorId) setTimelineLockId(anchorId);
         setEvents(next);

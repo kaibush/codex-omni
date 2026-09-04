@@ -56,7 +56,6 @@ describe("VirtualTimeline", () => {
     expect(html).toContain("m-39");
     expect(html).not.toContain("m-0");
   });
-});
 
   it("keeps the locked card in the window after older messages are prepended", () => {
     const items = Array.from({ length: 40 }, (_, index) => ({
@@ -102,4 +101,4 @@ describe("VirtualTimeline", () => {
     expect(html).toContain("activity-group-live");
     expect(html).not.toContain("activity-group-old");
   });
-
+});

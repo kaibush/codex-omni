@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  capHistoryPreserveVisible,
   capHistoryTimelineEvents,
+  capPausedTimelineEvents,
   capTimelineEvents,
+  coalesceDuplicatePlanItems,
   compactTimelineEvents,
   displayTimelineEvents,
+  hideSupersededStreamErrors,
   HISTORY_TIMELINE_MAX_ITEMS,
   LIVE_TIMELINE_MAX_CHARS,
   LIVE_TIMELINE_TAIL_ITEMS,
@@ -92,6 +96,81 @@ describe("mergeSessionTimeline", () => {
         historyExpanded: false
       }).map((entry) => entry.id)
     ).toEqual(["m3"]);
+  });
+
+  it("drops recovered stream errors that live-append after a later assistant reply", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 41, { kind: "assistant", text: "两边都提交了。" })
+        ],
+        current: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 41, { kind: "assistant", text: "两边都提交了。" }),
+          item("error-old-run.failed", 99, {
+            kind: "error",
+            text: "stream disconnected before completion: stream closed before response.completed"
+          })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-1", "assistant-1"]);
+  });
+
+  it("keeps a current-turn stream error that still has no later assistant", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [item("user-2", 50, { kind: "user", text: "retry" })],
+        current: [
+          item("user-2", 50, { kind: "user", text: "retry" }),
+          item("error-new-run.failed", 60, {
+            kind: "error",
+            text: "stream disconnected before completion: stream closed before response.completed"
+          })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-2", "error-new-run.failed"]);
+  });
+
+  it("coalesces duplicate live and historical plan cards", () => {
+    const merged = mergeSessionTimeline({
+      historical: [
+        item("tool-r1-plan-a", 20, {
+          kind: "tool",
+          data: {
+            tool: "update_plan",
+            status: "in_progress",
+            items: [
+              { text: "Inspect reports", status: "pending" },
+              { text: "Add summary", status: "pending" }
+            ]
+          }
+        })
+      ],
+      current: [
+        item("tool-r1-plan-b", 21, {
+          kind: "tool",
+          data: {
+            tool: "update_plan",
+            status: "in_progress",
+            items: [
+              { text: "Inspect reports", status: "completed" },
+              { text: "Add summary", status: "pending" }
+            ]
+          }
+        })
+      ],
+      historyExpanded: false
+    });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.data).toMatchObject({
+      items: [
+        { text: "Inspect reports", status: "completed" },
+        { text: "Add summary", status: "pending" }
+      ]
+    });
   });
 
   it("keeps view_image input.path when history overwrites a live tool card", () => {
@@ -324,3 +403,89 @@ describe("capHistoryTimelineEvents", () => {
     expect(result.at(-1)?.id).toBe(`item-${HISTORY_TIMELINE_MAX_ITEMS - 1}`);
   });
 });
+
+describe("capPausedTimelineEvents", () => {
+  it("keeps the latest page when older history is already loaded", () => {
+    const older = Array.from({ length: HISTORY_TIMELINE_MAX_ITEMS }, (_, index) =>
+      item(`old-${index}`, index)
+    );
+    const historical = [item("latest-user", 1000, { kind: "user" }), item("latest-assistant", 1001, { kind: "assistant", text: "done" })];
+    const result = capPausedTimelineEvents([...older, ...historical], historical);
+    expect(result.at(-1)?.id).toBe("latest-assistant");
+    expect(result.some((entry) => entry.id === "latest-user")).toBe(true);
+    expect(result[0]?.id).toBe("old-0");
+  });
+});
+
+describe("capHistoryPreserveVisible", () => {
+  it("does not drop the currently visible tail when prepending older pages", () => {
+    const older = Array.from({ length: 40 }, (_, index) => item(`old-${index}`, index));
+    const visible = [item("anchor", 100), item("latest", 101, { kind: "assistant", text: "done" })];
+    const result = capHistoryPreserveVisible(older, visible);
+    expect(result.at(-2)?.id).toBe("anchor");
+    expect(result.at(-1)?.id).toBe("latest");
+    expect(result[0]?.id).toBe("old-0");
+  });
+});
+
+describe("plan and stream-error cleanup", () => {
+  it("merges duplicate plan cards that share the same steps", () => {
+    const result = coalesceDuplicatePlanItems([
+      item("plan-a", 1, {
+        kind: "tool",
+        data: {
+          tool: "update_plan",
+          status: "in_progress",
+          items: [
+            { text: "Inspect reports", status: "completed" },
+            { text: "Add summary", status: "pending" }
+          ]
+        }
+      }),
+      item("plan-b", 2, {
+        kind: "tool",
+        data: {
+          tool: "update_plan",
+          status: "in_progress",
+          items: [
+            { text: "Inspect reports", status: "pending" },
+            { text: "Add summary", status: "pending" }
+          ]
+        }
+      })
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("plan-a");
+    expect(planItemsCompleted(result[0]?.data)).toBe(1);
+  });
+
+  it("hides a recovered stream error that sits after a later assistant card", () => {
+    const result = hideSupersededStreamErrors([
+      item("assistant-1", 41, { kind: "assistant", text: "ok" }),
+      item("error-1", 32, {
+        kind: "error",
+        text: "stream disconnected before completion: stream closed before response.completed"
+      })
+    ]);
+    expect(result.map((entry) => entry.id)).toEqual(["assistant-1"]);
+  });
+
+  it("still shows stream errors in folded view until a later assistant exists", () => {
+    const items = [
+      item("user-1", 10, { kind: "user", text: "go" }),
+      item("error-1", 20, {
+        kind: "error",
+        text: "stream disconnected before completion: stream closed before response.completed"
+      })
+    ];
+    expect(displayTimelineEvents(items, "folded").map((entry) => entry.id)).toEqual([
+      "user-1",
+      "error-1"
+    ]);
+  });
+});
+
+function planItemsCompleted(data: unknown) {
+  const record = data && typeof data === "object" ? (data as { items?: Array<{ status?: string }> }) : null;
+  return record?.items?.filter((item) => item.status === "completed").length ?? 0;
+}

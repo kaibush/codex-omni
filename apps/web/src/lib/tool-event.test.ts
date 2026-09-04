@@ -4,8 +4,10 @@ import {
   cleanCommand,
   collabCardDetails,
   collabToolLabel,
+  existingPlanTimelineId,
   isCollabTool,
   isPlanTool,
+  isRecoverableStreamError,
   isRuntimePlaceholder,
   isUserInputTool,
   isViewImageTool,
@@ -92,6 +94,66 @@ describe("plan and collab tool detection", () => {
   it("detects plan tools", () => {
     expect(isPlanTool({ tool: "update_plan" })).toBe(true);
     expect(isPlanTool({ tool: "command" })).toBe(false);
+  });
+
+  it("reuses the live plan card id for later updates", () => {
+    expect(
+      existingPlanTimelineId(
+        [
+          {
+            id: "tool-req-plan-start",
+            kind: "tool",
+            data: {
+              tool: "update_plan",
+              items: [{ text: "Inspect reports", status: "pending" }]
+            }
+          }
+        ],
+        "req",
+        {
+          tool: "update_plan",
+          items: [{ text: "Inspect reports", status: "completed" }]
+        }
+      )
+    ).toBe("tool-req-plan-start");
+  });
+
+  it("keeps the richer plan checklist when history overwrites a live card", () => {
+    expect(
+      mergeToolEventData(
+        {
+          tool: "update_plan",
+          status: "in_progress",
+          items: [
+            { text: "Inspect reports", status: "completed" },
+            { text: "Add summary", status: "pending" }
+          ]
+        },
+        {
+          tool: "update_plan",
+          status: "in_progress",
+          items: [
+            { text: "Inspect reports", status: "pending" },
+            { text: "Add summary", status: "pending" }
+          ]
+        }
+      )
+    ).toMatchObject({
+      items: [
+        { text: "Inspect reports", status: "completed" },
+        { text: "Add summary", status: "pending" }
+      ]
+    });
+  });
+
+  it("recognizes recovered stream disconnect errors", () => {
+    expect(
+      isRecoverableStreamError({
+        kind: "error",
+        text: "stream disconnected before completion: stream closed before response.completed"
+      })
+    ).toBe(true);
+    expect(isRecoverableStreamError({ kind: "error", text: "invalid api key" })).toBe(false);
   });
 
   it("detects collab tools including mcp names", () => {

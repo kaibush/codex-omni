@@ -67,6 +67,35 @@ export function isPlanTool(data: unknown) {
   );
 }
 
+export function planItemSignature(data: unknown) {
+  return parsePlanItems(data)
+    .map((item) => item.text)
+    .join("\n");
+}
+
+export function planItemProgress(data: unknown) {
+  return parsePlanItems(data).reduce((sum, item) => {
+    if (item.status === "completed") return sum + 2;
+    if (item.status === "in_progress") return sum + 1;
+    return sum;
+  }, 0);
+}
+
+export function existingPlanTimelineId(
+  items: Array<{ id: string; kind: string; data?: unknown }>,
+  requestId: string,
+  data: unknown
+) {
+  const plans = items.filter((item) => item.kind === "tool" && isPlanTool(item.data));
+  if (!plans.length) return undefined;
+  const prefix = `tool-${requestId}-`;
+  const sameRequest = plans.find((item) => item.id.startsWith(prefix));
+  if (sameRequest) return sameRequest.id;
+  const signature = planItemSignature(data);
+  if (!signature) return undefined;
+  return plans.find((item) => planItemSignature(item.data) === signature)?.id;
+}
+
 export function parsePlanItems(data: unknown): PlanItem[] {
   return planSource(data).map((item, index) => {
     const row = asRecord(item);
@@ -255,6 +284,18 @@ export function runtimeNoticeMessage(data: unknown, text?: string): string {
   return firstString([record?.message, record?.output, text]);
 }
 
+export function isRecoverableStreamError(item: {
+  kind?: string;
+  text?: string;
+  data?: unknown;
+}) {
+  if (item.kind !== "error" && toolName(item.data) !== "runtimeerror") return false;
+  const message = runtimeNoticeMessage(item.data, item.text);
+  return /stream disconnected before completion|stream closed before response\.completed|socket closed/i.test(
+    message
+  );
+}
+
 export function isRuntimePlaceholder(data: unknown, text?: string): boolean {
   if (toolName(data) !== "runtimeerror") return false;
   const message = runtimeNoticeMessage(data, text);
@@ -374,12 +415,27 @@ export function mergeToolEventData(base: unknown, extra: unknown) {
     ...(parseJsonRecord(next.input) ?? {})
   };
   const path = firstString([next.path, previous.path, input.path]);
-  return {
+  const merged: Record<string, unknown> = {
     ...previous,
     ...next,
     ...(Object.keys(input).length ? { input } : {}),
     ...(path ? { path } : {})
   };
+  if (isPlanTool(previous) || isPlanTool(next) || isPlanTool(merged)) {
+    const nextProgress = planItemProgress(next);
+    const previousProgress = planItemProgress(previous);
+    const source = nextProgress > previousProgress ? next : previous;
+    const items = planSource(source);
+    if (items.length) merged.items = items;
+    const status = String(
+      (nextProgress > previousProgress ? next.status : previous.status) ??
+        next.status ??
+        previous.status ??
+        ""
+    );
+    if (status) merged.status = status;
+  }
+  return merged;
 }
 
 export function viewImagePath(data: unknown): string {

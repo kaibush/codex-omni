@@ -155,7 +155,7 @@ export function VirtualTimeline<
         scrollTop = offset;
       }
     }
-    const nextWindow = visibleWindow({
+    let nextWindow = visibleWindow({
       itemCount: items.length,
       itemSize: sizeOf,
       scrollTop,
@@ -163,6 +163,29 @@ export function VirtualTimeline<
       overscan,
       overscanPx
     });
+    if (nextWindow.end <= nextWindow.start && items.length) {
+      const fallback = Math.max(
+        0,
+        lockItemId
+          ? Math.max(0, items.findIndex((item) => itemContainsId(item, lockItemId)))
+          : stickToBottom?.current
+            ? items.length - 1
+            : 0
+      );
+      const start = Math.max(0, fallback - overscan);
+      const end = Math.min(items.length, fallback + 1 + overscan);
+      let paddingTop = 0;
+      for (let index = 0; index < start; index += 1) paddingTop += sizeOf(index);
+      let rendered = 0;
+      for (let index = start; index < end; index += 1) rendered += sizeOf(index);
+      nextWindow = {
+        start,
+        end,
+        paddingTop,
+        paddingBottom: Math.max(0, nextWindow.totalHeight - paddingTop - rendered),
+        totalHeight: nextWindow.totalHeight
+      };
+    }
     const sticky = stickyVisibleRange(nextWindow, stickyRef.current, STICKY_MAX);
     stickyRef.current = sticky;
     let paddingTop = 0;
