@@ -715,6 +715,11 @@ function EventCardComponent({
         <header className="event-title message-event-title min-w-0">
           <User className="size-4" />
           <span>你</span>
+          {item.data?.continuation === true ? (
+            <span className="provider-pill" title="本轮已应用继续执行指令">
+              继续执行
+            </span>
+          ) : null}
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}

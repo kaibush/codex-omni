@@ -141,6 +141,8 @@ describe("RunManager reconnect state", () => {
       socket
     );
     expect(store?.getSession(session.id)?.status).toBe("idle");
+    const message = store?.listMessages(session.id).find((item) => item.role === "user");
+    expect(JSON.parse(message?.dataJson ?? "{}")).toMatchObject({ continuation: true });
   });
 
   it("uses configured continuation triggers and directive", async () => {

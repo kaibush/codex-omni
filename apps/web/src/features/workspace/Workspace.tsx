@@ -905,6 +905,7 @@ export function Workspace() {
             kind: "user",
             text: String(payload.message ?? ""),
             providerId: payload.providerId ?? providerIdRef.current,
+            ...(payload.continuation === true ? { data: { continuation: true } } : {}),
             createdAt: payload.createdAt ?? Date.now()
           })
         );

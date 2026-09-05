@@ -624,6 +624,7 @@ export class RunManager {
       settings.continuationDirective.trim()
         ? `\n\n${settings.continuationDirective.trim()}`
         : "";
+    const continuationApplied = Boolean(continuationDirective);
     const runtimeBody = projectRules
       ? `${projectRules}\n\n${userMessageText}${continuationDirective}`
       : `${userMessageText}${continuationDirective}`;
@@ -685,7 +686,8 @@ export class RunManager {
       role: "user",
       content: userMessageText,
       providerId: provider.id,
-      eventType: "user.message"
+      eventType: "user.message",
+      ...(continuationApplied ? { dataJson: JSON.stringify({ continuation: true }) } : {})
     });
     this.broadcast(session.id, {
       type: "user.message",
@@ -695,7 +697,8 @@ export class RunManager {
         id: userMessage.id,
         message: userMessage.content,
         providerId: userMessage.providerId,
-        createdAt: userMessage.createdAt
+        createdAt: userMessage.createdAt,
+        ...(continuationApplied ? { continuation: true } : {})
       }
     });
     if (isFirstUserMessage && isPlaceholderSessionTitle(session.title)) {
