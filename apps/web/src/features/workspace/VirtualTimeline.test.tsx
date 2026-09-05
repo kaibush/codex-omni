@@ -76,6 +76,31 @@ describe("VirtualTimeline", () => {
     expect(html).not.toContain("m-39");
   });
 
+  it("keeps a later assistant visible when the raw lock is a hidden reasoning event", () => {
+    const items = [
+      { id: "assistant-old", kind: "assistant", text: "older" },
+      ...Array.from({ length: 24 }, (_, index) => ({
+        id: `tool-${index}`,
+        kind: "activity" as const
+      })),
+      { id: "assistant-item_88", kind: "assistant", text: "anchor" },
+      ...Array.from({ length: 16 }, (_, index) => ({
+        id: `tail-${index}`,
+        kind: "activity" as const
+      }))
+    ];
+    const html = renderToStaticMarkup(
+      <VirtualTimeline
+        items={items}
+        scrollRef={{ current: null }}
+        lockItemId="assistant-item_88"
+        renderItem={(item) => <div>{item.id}</div>}
+      />
+    );
+    expect(html).toContain("assistant-item_88");
+    expect(html).not.toContain("assistant-old");
+  });
+
   it("locks onto a grouped activity child after history prepend", () => {
     const items = [
       { id: "activity-group-old", kind: "activity", data: { items: [{ id: "tool-old" }] } },

@@ -9,7 +9,7 @@ import {
 } from "react";
 import {
   estimateTimelineItemSize,
-  itemContainsId,
+  findTimelineAnchorIndex,
   shouldUpdateMeasuredHeight,
   shouldVirtualizeTimeline,
   stickyVisibleRange,
@@ -31,6 +31,7 @@ export function VirtualTimeline<
   stickToBottom,
   scrollToId,
   lockItemId,
+  onLockHandled,
   renderItem,
   overscan = DEFAULT_OVERSCAN,
   overscanPx = DEFAULT_OVERSCAN_PX,
@@ -41,6 +42,7 @@ export function VirtualTimeline<
   stickToBottom?: { current: boolean } | undefined;
   scrollToId?: string | undefined;
   lockItemId?: string | undefined;
+  onLockHandled?: (() => void) | undefined;
   renderItem: (
     item: T,
     index: number,
@@ -55,12 +57,16 @@ export function VirtualTimeline<
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const stickyRef = useRef({ start: 0, end: 0 });
-  const headId = items[0]?.id;
-  const headIdRef = useRef(headId);
-  if (headIdRef.current !== headId) {
-    if (!lockItemId) stickyRef.current = { start: 0, end: 0 };
-    headIdRef.current = headId;
-  }
+  const previousItemsRef = useRef(items);
+  const previousItems = previousItemsRef.current;
+  const headChanged = previousItems[0]?.id !== items[0]?.id;
+  const anchorIndex = findTimelineAnchorIndex(items, {
+    lockItemId,
+    ...(lockItemId || headChanged ? { previousItems } : {})
+  });
+  const pinToAnchor =
+    anchorIndex >= 0 && (Boolean(lockItemId) || (headChanged && !stickToBottom?.current));
+  if (headChanged) stickyRef.current = { start: 0, end: 0 };
   const frameRef = useRef<number | null>(null);
   const [version, setVersion] = useState(0);
 
@@ -110,7 +116,7 @@ export function VirtualTimeline<
         index >= 0 &&
         previous &&
         !stickToBottom?.current &&
-        !lockItemId &&
+        !pinToAnchor &&
         scroller.scrollTop + listTop > 0
       ) {
         let offset = listTop;
@@ -120,7 +126,7 @@ export function VirtualTimeline<
       sizeMap.current.set(id, next);
       bump();
     },
-    [bump, lockItemId, scrollRef, sizeOf, stickToBottom]
+    [bump, pinToAnchor, scrollRef, sizeOf, stickToBottom]
   );
 
   const virtualized = shouldVirtualizeTimeline(items, { threshold });
@@ -141,19 +147,19 @@ export function VirtualTimeline<
     const scroller = scrollRef.current;
     const viewportHeight = scroller?.clientHeight ?? 800;
     const listTop = listRef.current?.offsetTop ?? 0;
+    const realScrollTop = Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
     // Pinning to the bottom must not wait for scrollTop. The first paint (and
     // the first 折叠/平铺/展开 remount) still has scrollTop=0, which would
     // window the oldest cards and leave a huge empty padding below.
-    let scrollTop = stickToBottom?.current
-      ? Number.MAX_SAFE_INTEGER
-      : Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
-    if (lockItemId) {
-      const index = items.findIndex((item) => itemContainsId(item, lockItemId));
-      if (index >= 0) {
-        let offset = 0;
-        for (let cursor = 0; cursor < index; cursor += 1) offset += sizeOf(cursor);
-        scrollTop = offset;
-      }
+    // History prepend is the opposite: keep the previous card even if live
+    // follow is still true or the lock id was grouped/filtered away.
+    let scrollTop = realScrollTop;
+    if (pinToAnchor) {
+      let offset = 0;
+      for (let cursor = 0; cursor < anchorIndex; cursor += 1) offset += sizeOf(cursor);
+      scrollTop = offset;
+    } else if (stickToBottom?.current) {
+      scrollTop = Number.MAX_SAFE_INTEGER;
     }
     let nextWindow = visibleWindow({
       itemCount: items.length,
@@ -163,11 +169,26 @@ export function VirtualTimeline<
       overscan,
       overscanPx
     });
+    if (
+      !pinToAnchor &&
+      !stickToBottom?.current &&
+      realScrollTop < 8 &&
+      nextWindow.paddingTop > viewportHeight
+    ) {
+      nextWindow = visibleWindow({
+        itemCount: items.length,
+        itemSize: sizeOf,
+        scrollTop: 0,
+        viewportHeight,
+        overscan,
+        overscanPx
+      });
+    }
     if (nextWindow.end <= nextWindow.start && items.length) {
       const fallback = Math.max(
         0,
-        lockItemId
-          ? Math.max(0, items.findIndex((item) => itemContainsId(item, lockItemId)))
+        pinToAnchor
+          ? anchorIndex
           : stickToBottom?.current
             ? items.length - 1
             : 0
@@ -218,12 +239,21 @@ export function VirtualTimeline<
   }, [bump, scrollRef]);
 
   useLayoutEffect(() => {
+    previousItemsRef.current = items;
     const scroller = scrollRef.current;
+    if (pinToAnchor) {
+      if (!scroller) return;
+      let offset = listRef.current?.offsetTop ?? 0;
+      for (let cursor = 0; cursor < anchorIndex; cursor += 1) offset += sizeOf(cursor);
+      if (Math.abs(scroller.scrollTop - offset) >= 2) scroller.scrollTop = offset;
+      onLockHandled?.();
+      return;
+    }
     if (!scroller || !stickToBottom?.current) return;
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     if (Math.abs(scroller.scrollTop - maxScroll) < 2) return;
     scroller.scrollTop = maxScroll;
-  }, [items, range.totalHeight, scrollRef, stickToBottom]);
+  }, [anchorIndex, items, onLockHandled, pinToAnchor, range.totalHeight, scrollRef, sizeOf, stickToBottom]);
 
   useEffect(() => {
     if (!scrollToId) return;

@@ -92,6 +92,7 @@ export function WorkspaceTimeline({
   hasOlderMessages,
   historyLoading,
   timelineLockId,
+  onTimelineLockHandled,
   activeSession,
   projectPath,
   sessionLoading,
@@ -148,6 +149,7 @@ export function WorkspaceTimeline({
   hasOlderMessages: boolean;
   historyLoading: boolean;
   timelineLockId?: string | undefined;
+  onTimelineLockHandled?: (() => void) | undefined;
   activeSession: Session | undefined;
   projectPath?: string | undefined;
   sessionLoading: boolean;
@@ -408,11 +410,18 @@ export function WorkspaceTimeline({
             nextTop,
             pointerActive: Boolean(pointerScroll.current)
           });
-          if (followAction === "resume") resumeLiveTimeline();
-          else if (followAction === "pause") pauseLiveTimeline();
+          if (followAction === "resume" && !historyLoading && !timelineLockId) {
+            resumeLiveTimeline();
+          } else if (followAction === "pause") pauseLiveTimeline();
           lastScrollTop.current = nextTop;
           const overflow = container.scrollHeight - container.clientHeight;
-          if (!stickToBottom.current && overflow > 48 && container.scrollTop < 72) {
+          if (
+            !stickToBottom.current &&
+            !historyLoading &&
+            !timelineLockId &&
+            overflow > 48 &&
+            container.scrollTop < 72
+          ) {
             void loadOlderMessages();
           }
         }}
@@ -503,6 +512,7 @@ export function WorkspaceTimeline({
                 stickToBottom={stickToBottom}
                 scrollToId={highlightMessageId || undefined}
                 lockItemId={timelineLockId}
+                onLockHandled={onTimelineLockHandled}
                 renderItem={(item, _index, meta) => (
                   <EventCard
                     item={item}

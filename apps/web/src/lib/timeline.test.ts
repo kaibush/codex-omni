@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   capHistoryPreserveVisible,
   capHistoryTimelineEvents,
+  historyAnchorId,
   capPausedTimelineEvents,
   capTimelineEvents,
   coalesceDuplicatePlanItems,
@@ -414,6 +415,22 @@ describe("capPausedTimelineEvents", () => {
     expect(result.at(-1)?.id).toBe("latest-assistant");
     expect(result.some((entry) => entry.id === "latest-user")).toBe(true);
     expect(result[0]?.id).toBe("old-0");
+  });
+});
+
+describe("historyAnchorId", () => {
+  it("skips hidden reasoning so folded history can lock onto a visible card", () => {
+    expect(
+      historyAnchorId([
+        item("reasoning-1", 1, { kind: "reasoning" }),
+        item("tool-1", 2, { kind: "tool" }),
+        item("assistant-1", 3, { kind: "assistant", text: "ok" })
+      ])
+    ).toBe("tool-1");
+  });
+
+  it("does not lock onto reasoning when no visible card exists yet", () => {
+    expect(historyAnchorId([item("reasoning-1", 1, { kind: "reasoning" })])).toBeUndefined();
   });
 });
 

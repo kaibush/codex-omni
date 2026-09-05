@@ -283,6 +283,11 @@ export function capHistoryTimelineEvents(items: TimelineItem[]): TimelineItem[] 
   });
 }
 
+/** Prefer a card that remains visible after folded view hides reasoning. */
+export function historyAnchorId(items: TimelineItem[]): string | undefined {
+  return items.find((item) => item.kind !== "reasoning")?.id;
+}
+
 /** Bound older pages without dropping the latest page or the visible anchor. */
 export function capHistoryPreserveVisible(older: TimelineItem[], visible: TimelineItem[]): TimelineItem[] {
   if (!older.length) return visible;

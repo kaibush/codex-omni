@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   estimateTimelineItemSize,
+  findTimelineAnchorIndex,
   itemContainsId,
+  itemsShareIdentity,
   shouldUpdateMeasuredHeight,
   shouldVirtualizeTimeline,
   stickyVisibleRange,
@@ -138,5 +140,79 @@ describe("itemContainsId", () => {
     );
     expect(itemContainsId({ id: "assistant-1" }, "assistant-1")).toBe(true);
     expect(itemContainsId({ id: "assistant-1" }, "other")).toBe(false);
+  });
+});
+
+describe("findTimelineAnchorIndex", () => {
+  it("locks onto a visible assistant after older tool cards are prepended", () => {
+    const items = [
+      ...Array.from({ length: 10 }, (_, index) => ({ id: `old-${index}`, kind: "activity" })),
+      {
+        id: "activity-group-item_20",
+        kind: "activity",
+        data: { items: [{ id: "tool-item_50" }, { id: "tool-item_86" }] }
+      },
+      { id: "assistant-item_88", kind: "assistant" }
+    ];
+    expect(findTimelineAnchorIndex(items, { lockItemId: "assistant-item_88" })).toBe(11);
+  });
+
+  it("finds a regrouped activity card when the lock is a hidden reasoning event", () => {
+    const previous = [
+      {
+        id: "activity-group-item_50",
+        kind: "activity",
+        data: { items: [{ id: "tool-item_50" }, { id: "tool-item_86" }] }
+      },
+      { id: "assistant-item_88", kind: "assistant" }
+    ];
+    const items = [
+      { id: "assistant-item_3", kind: "assistant" },
+      ...Array.from({ length: 9 }, (_, index) => ({ id: `old-${index}`, kind: "activity" })),
+      {
+        id: "activity-group-item_20",
+        kind: "activity",
+        data: { items: [{ id: "tool-item_20" }, { id: "tool-item_50" }, { id: "tool-item_86" }] }
+      },
+      { id: "assistant-item_88", kind: "assistant" }
+    ];
+    expect(
+      findTimelineAnchorIndex(items, {
+        lockItemId: "reasoning-item_49",
+        previousItems: previous
+      })
+    ).toBe(10);
+    expect(
+      itemsShareIdentity(previous[0]!, {
+        id: "activity-group-item_20",
+        data: { items: [{ id: "tool-item_50" }] }
+      })
+    ).toBe(true);
+  });
+
+  it("does not pin to a reasoning row even when that lock id is still in the list", () => {
+    const previous = [
+      { id: "reasoning-item_49", kind: "reasoning" },
+      {
+        id: "activity-group-item_50",
+        kind: "activity",
+        data: { items: [{ id: "tool-item_50" }] }
+      }
+    ];
+    const items = [
+      { id: "assistant-old", kind: "assistant" },
+      { id: "reasoning-item_49", kind: "reasoning" },
+      {
+        id: "activity-group-item_20",
+        kind: "activity",
+        data: { items: [{ id: "tool-item_20" }, { id: "tool-item_50" }] }
+      }
+    ];
+    expect(
+      findTimelineAnchorIndex(items, {
+        lockItemId: "reasoning-item_49",
+        previousItems: previous
+      })
+    ).toBe(2);
   });
 });

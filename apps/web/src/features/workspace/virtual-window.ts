@@ -79,6 +79,46 @@ export function itemContainsId(
   return Array.isArray(grouped) && grouped.some((entry) => entry?.id === id);
 }
 
+function groupedItemIds(item: { id: string; data?: unknown }) {
+  const ids = [item.id];
+  const grouped = (item.data as { items?: Array<{ id?: string }> } | undefined)?.items;
+  if (Array.isArray(grouped)) {
+    for (const entry of grouped) {
+      if (entry?.id) ids.push(entry.id);
+    }
+  }
+  return ids;
+}
+
+export function itemsShareIdentity(
+  left: { id: string; data?: unknown },
+  right: { id: string; data?: unknown }
+) {
+  const rightIds = new Set(groupedItemIds(right));
+  return groupedItemIds(left).some((id) => rightIds.has(id));
+}
+
+export function findTimelineAnchorIndex<T extends { id: string; kind?: string; data?: unknown }>(
+  items: T[],
+  options?: { lockItemId?: string | undefined; previousItems?: T[] | undefined }
+) {
+  const lockItemId = options?.lockItemId;
+  if (lockItemId) {
+    const locked = items.findIndex(
+      (item) => item.kind !== "reasoning" && itemContainsId(item, lockItemId)
+    );
+    if (locked >= 0) return locked;
+  }
+  for (const previous of options?.previousItems ?? []) {
+    if (previous.kind === "reasoning") continue;
+    const index = items.findIndex(
+      (item) => item.kind !== "reasoning" && itemsShareIdentity(item, previous)
+    );
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
 export function estimateTimelineItemSize(item: { kind: string; text?: string | undefined }) {
   if (item.kind === "user" || item.kind === "assistant") {
     const text = item.text ?? "";

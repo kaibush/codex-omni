@@ -47,6 +47,7 @@ import {
   capHistoryPreserveVisible,
   capPausedTimelineEvents,
   capTimelineEvents,
+  historyAnchorId,
   LIVE_TIMELINE_FLUSH_MAX_BATCH,
   LIVE_TIMELINE_FLUSH_MS,
   LIVE_TIMELINE_TAIL_ITEMS,
@@ -295,6 +296,9 @@ export function Workspace() {
   const resumeLiveTimeline = useCallback(() => {
     restoreLiveTimeline(true);
   }, [restoreLiveTimeline]);
+  const handleTimelineLockHandled = useCallback(() => {
+    setTimelineLockId((current) => (current ? undefined : current));
+  }, []);
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api<Project[]>("/api/projects")
@@ -571,16 +575,19 @@ export function Workspace() {
   useLayoutEffect(() => {
     const container = chatScroll.current;
     if (!container) return;
+    if (timelineLockId) {
+      historyScrollSnapshot.current = null;
+      return;
+    }
     const snapshot = historyScrollSnapshot.current;
     if (snapshot) {
       container.scrollTop = snapshot.top + (container.scrollHeight - snapshot.height);
       historyScrollSnapshot.current = null;
-      setTimelineLockId((current) => (current ? undefined : current));
       return;
     }
     if (!stickToBottom.current || historyLoadingRef.current) return;
     container.scrollTop = container.scrollHeight;
-  }, [events, runState]);
+  }, [events, runState, timelineLockId]);
   const providerIdRef = useRef(providerId);
   providerIdRef.current = providerId;
   const workspaceSettingsRef = useRef(workspaceSettings);
@@ -1103,19 +1110,22 @@ export function Workspace() {
       const currentEvents = eventsRef.current;
       const known = new Set(currentEvents.map((item) => item.id));
       const prepend = olderEvents.filter((item) => !known.has(item.id));
+      stickToBottom.current = false;
+      setFollowingLive(false);
       if (!prepend.length) {
         historyScrollSnapshot.current = null;
       } else {
-        const container = chatScroll.current;
-        if (container) {
-          historyScrollSnapshot.current = {
-            height: container.scrollHeight,
-            top: container.scrollTop
-          };
-        }
         const next = capHistoryPreserveVisible(prepend, currentEvents);
-        const anchorId = currentEvents[0]?.id;
-        if (anchorId) setTimelineLockId(anchorId);
+        const anchorId = historyAnchorId(currentEvents);
+        if (anchorId) {
+          historyScrollSnapshot.current = null;
+          setTimelineLockId(anchorId);
+        } else {
+          const container = chatScroll.current;
+          historyScrollSnapshot.current = container
+            ? { height: container.scrollHeight, top: container.scrollTop }
+            : null;
+        }
         setEvents(next);
       }
       setHistoryCursor(older.nextCursor);
@@ -2113,6 +2123,7 @@ export function Workspace() {
               hasOlderMessages={hasOlderMessages}
               historyLoading={historyLoading}
               timelineLockId={timelineLockId}
+              onTimelineLockHandled={handleTimelineLockHandled}
               activeSession={activeSession ?? undefined}
               projectPath={activeProject?.realPath}
               sessionLoading={sessionLoading}
