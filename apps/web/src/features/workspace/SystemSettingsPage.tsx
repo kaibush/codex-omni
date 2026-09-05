@@ -456,6 +456,40 @@ export function SystemSettingsPage() {
                       setDraft({ ...draft, networkAccessEnabled: checked })
                     }
                   />
+                  <SettingsField
+                    label="继续执行触发词"
+                    hint="每行一个短语。用户消息完整匹配时，会追加下方指令并要求模型立即继续实际工作。"
+                    span="full"
+                  >
+                    <Textarea
+                      className="min-h-24"
+                      value={draft.continuationTriggers.join("\n")}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          continuationTriggers: event.target.value
+                            .split(/\r?\n/)
+                            .map((item) => item.trim())
+                            .filter(Boolean)
+                        })
+                      }
+                      placeholder="继续\n继续完成"
+                    />
+                  </SettingsField>
+                  <SettingsField
+                    label="继续执行指令"
+                    hint="留空可关闭追加指令。建议保持为明确要求调用工具并完成工作的短文本。"
+                    span="full"
+                  >
+                    <Textarea
+                      className="min-h-28"
+                      value={draft.continuationDirective}
+                      onChange={(event) =>
+                        setDraft({ ...draft, continuationDirective: event.target.value })
+                      }
+                      placeholder="要求模型立即调用工具并完成未完成的工作"
+                    />
+                  </SettingsField>
                 </SettingsFormGrid>
               </SettingsCard>
             ) : null}

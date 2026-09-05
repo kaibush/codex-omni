@@ -113,6 +113,97 @@ function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: numbe
 }
 
 describe("RunManager reconnect state", () => {
+  it("adds an execution directive to continuation requests", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        expect(request.message).toContain("这是一个继续执行请求");
+        expect(request.message).toContain("不要只回复计划");
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续完成"
+      },
+      socket
+    );
+    expect(store?.getSession(session.id)?.status).toBe("idle");
+  });
+
+  it("uses configured continuation triggers and directive", async () => {
+    const { project, provider, session, socket } = fixture();
+    store?.updateSettings({
+      continuationTriggers: ["继续我的工作"],
+      continuationDirective: "请直接执行，不要只汇报计划。"
+    });
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        expect(request.message).toContain("请直接执行，不要只汇报计划。");
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续我的工作"
+      },
+      socket
+    );
+  });
+
+  it("does not append a directive when the trigger list or directive is empty", async () => {
+    const { project, provider, session, socket } = fixture();
+    store?.updateSettings({ continuationTriggers: ["继续"], continuationDirective: "" });
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        expect(request.message).toBe("继续");
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+  });
+
   it("drops oversized stream events for a backed-up socket but keeps terminal events", async () => {
     const { project, provider, session, sent } = fixture();
     const socket = {
@@ -286,7 +377,8 @@ describe("RunManager reconnect state", () => {
             type: "run.failed",
             payload: {
               status: "failed",
-              message: "stream disconnected before completion: stream closed before response.completed"
+              message:
+                "stream disconnected before completion: stream closed before response.completed"
             }
           })
         );
@@ -322,8 +414,7 @@ describe("RunManager reconnect state", () => {
       store?.listMessages(session.id).filter((message) => message.role === "error")
     ).toMatchObject([
       {
-        content:
-          "stream disconnected before completion: stream closed before response.completed"
+        content: "stream disconnected before completion: stream closed before response.completed"
       }
     ]);
     expect(store?.getLatestRun(session.id)?.reason).toBe(
@@ -345,7 +436,8 @@ describe("RunManager reconnect state", () => {
                 "Reconnecting... 4/5 (stream disconnected before completion: stream closed before response.completed)",
               attempt: 4,
               maxAttempts: 5,
-              reason: "stream disconnected before completion: stream closed before response.completed"
+              reason:
+                "stream disconnected before completion: stream closed before response.completed"
             }
           })
         );

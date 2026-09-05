@@ -49,8 +49,17 @@ const isDroppableStreamEvent = (type: string) =>
 const runtimeDefaults = {
   sandbox: "workspace-write" as const,
   approvalPolicy: "on-request" as const,
-  networkAccessEnabled: true
+  networkAccessEnabled: true,
+  continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
+  continuationDirective:
+    "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。"
 };
+
+function isContinuationRequest(message: string, triggers: unknown) {
+  const normalized = message.trim();
+  if (!normalized || !Array.isArray(triggers)) return false;
+  return triggers.some((trigger) => typeof trigger === "string" && trigger.trim() === normalized);
+}
 
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }>;
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
@@ -124,7 +133,6 @@ function resolveFailureMessage(
     )
   );
 }
-
 
 export class RunManager {
   private worker = new BridgeWorkerAdapter();
@@ -603,17 +611,25 @@ export class RunManager {
       : null;
     const planMode = command.type === "turn.start" && command.mode === "plan";
     const userMessageText = planMode ? applyPlanMode(command.message) : command.message;
+    const settings = this.store.getSettings(runtimeDefaults);
     const projectRules = applyProjectRules(
       "",
       (this.store.listProjectNotes?.(project.id) ?? [])
         .filter((note) => note.enabled)
         .map((note) => ({ title: note.title, content: note.content }))
     );
-    const runtimeBody = projectRules ? `${projectRules}\n\n${userMessageText}` : userMessageText;
+    const continuationDirective =
+      isContinuationRequest(userMessageText, settings.continuationTriggers) &&
+      typeof settings.continuationDirective === "string" &&
+      settings.continuationDirective.trim()
+        ? `\n\n${settings.continuationDirective.trim()}`
+        : "";
+    const runtimeBody = projectRules
+      ? `${projectRules}\n\n${userMessageText}${continuationDirective}`
+      : `${userMessageText}${continuationDirective}`;
     const runtimeMessage = portableContext
       ? `${portableContext}\n\nContinue from that context and answer this new user request:\n\n${runtimeBody}`
       : runtimeBody;
-    const settings = this.store.getSettings(runtimeDefaults);
     this.cancelling.delete(session.id);
     this.reconnecting.delete(session.id);
     const startedAt = Date.now();
@@ -704,12 +720,7 @@ export class RunManager {
         ) {
           return;
         }
-        const sanitized = resolveFailureMessage(
-          this.store,
-          requestId,
-          incoming,
-          previous?.content
-        );
+        const sanitized = resolveFailureMessage(this.store, requestId, incoming, previous?.content);
         if (sanitized && sanitized !== incoming) payload.message = sanitized;
       }
       const terminalEvent = event.type === "turn.completed" || event.type === "run.failed";
@@ -785,7 +796,7 @@ export class RunManager {
           requestId,
           projectId: project.id,
           sessionId: session.id,
-          message: command.message,
+          message: runtimeMessage,
           onEvent: onRuntimeEvent
         });
       } else {
@@ -850,12 +861,7 @@ export class RunManager {
       if (current?.status === "running") {
         const incoming = error instanceof Error ? error.message : String(error);
         const previous = this.store.getMessageByItemId(session.id, `${requestId}:run.failed`);
-        const reason = resolveFailureMessage(
-          this.store,
-          requestId,
-          incoming,
-          previous?.content
-        );
+        const reason = resolveFailureMessage(this.store, requestId, incoming, previous?.content);
         if (!previous?.content || isGenericCodexExecError(previous.content)) {
           this.store.upsertEventMessage({
             sessionId: session.id,

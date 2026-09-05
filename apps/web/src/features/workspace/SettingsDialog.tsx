@@ -12,6 +12,8 @@ export type WorkspaceSettings = {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy: "untrusted" | "on-request" | "never";
   networkAccessEnabled: boolean;
+  continuationTriggers: string[];
+  continuationDirective: string;
   showReasoning: boolean;
   expandToolCalls: boolean;
   timelineView: TimelineView;
@@ -25,6 +27,9 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   sandbox: "workspace-write",
   approvalPolicy: "on-request",
   networkAccessEnabled: true,
+  continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
+  continuationDirective:
+    "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
   showReasoning: false,
   expandToolCalls: true,
   timelineView: "folded",
@@ -182,6 +187,42 @@ export function SettingsDialog({
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               平衡模式允许在工作区内正常编辑和运行；需要离开沙箱、访问受限位置或提升权限时才请求确认。全自动仍受上方文件权限限制。
             </p>
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              <label className="field-label">
+                继续执行触发词
+                <textarea
+                  className="field min-h-20"
+                  value={draft.continuationTriggers.join("\n")}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      continuationTriggers: event.target.value
+                        .split(/\r?\n/)
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                    })
+                  }
+                  placeholder="继续\n继续完成"
+                />
+                <span className="text-xs font-normal text-muted-foreground">
+                  每行一个短语，整条消息匹配时会要求模型立即继续实际工作。
+                </span>
+              </label>
+              <label className="field-label">
+                继续执行指令
+                <textarea
+                  className="field min-h-24"
+                  value={draft.continuationDirective}
+                  onChange={(event) =>
+                    setDraft({ ...draft, continuationDirective: event.target.value })
+                  }
+                  placeholder="要求模型立即调用工具并完成未完成的工作"
+                />
+                <span className="text-xs font-normal text-muted-foreground">
+                  会追加到匹配触发词的消息中；留空则只发送原始消息。
+                </span>
+              </label>
+            </div>
           </section>
 
           <section>
