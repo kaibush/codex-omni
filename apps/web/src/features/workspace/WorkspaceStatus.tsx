@@ -337,6 +337,18 @@ export function RuntimeOptionsPanel({
           }
         />
       </label>
+      <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
+        启用继续执行提示词
+        <Switch
+          checked={settings.continuationEnabled}
+          onCheckedChange={(checked) =>
+            void onChange({ ...settings, continuationEnabled: checked })
+          }
+        />
+      </label>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。
+      </p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">
         Plan 只做只读规划；平衡模式仅在需要提升权限时确认。修改后立即保存，并用于下一次发送。
       </p>

@@ -66,7 +66,9 @@ export function VirtualTimeline<
   });
   const pinToAnchor =
     anchorIndex >= 0 && (Boolean(lockItemId) || (headChanged && !stickToBottom?.current));
-  if (headChanged) stickyRef.current = { start: 0, end: 0 };
+  // Keep the previous visible window during a history prepend. Clearing it
+  // immediately can leave one blank frame while the new measurements settle.
+  if (headChanged && !pinToAnchor) stickyRef.current = { start: 0, end: 0 };
   const frameRef = useRef<number | null>(null);
   const [version, setVersion] = useState(0);
 
@@ -146,6 +148,9 @@ export function VirtualTimeline<
     }
     const scroller = scrollRef.current;
     const viewportHeight = scroller?.clientHeight ?? 800;
+    const effectiveOverscanPx = scroller
+      ? Math.max(DEFAULT_OVERSCAN_PX, viewportHeight * 1.5)
+      : overscanPx;
     const listTop = listRef.current?.offsetTop ?? 0;
     const realScrollTop = Math.max(0, (scroller?.scrollTop ?? 0) - listTop);
     // Pinning to the bottom must not wait for scrollTop. The first paint (and
@@ -167,7 +172,7 @@ export function VirtualTimeline<
       scrollTop,
       viewportHeight,
       overscan,
-      overscanPx
+      overscanPx: effectiveOverscanPx
     });
     if (
       !pinToAnchor &&
@@ -181,17 +186,13 @@ export function VirtualTimeline<
         scrollTop: 0,
         viewportHeight,
         overscan,
-        overscanPx
+        overscanPx: effectiveOverscanPx
       });
     }
     if (nextWindow.end <= nextWindow.start && items.length) {
       const fallback = Math.max(
         0,
-        pinToAnchor
-          ? anchorIndex
-          : stickToBottom?.current
-            ? items.length - 1
-            : 0
+        pinToAnchor ? anchorIndex : stickToBottom?.current ? items.length - 1 : 0
       );
       const start = Math.max(0, fallback - overscan);
       const end = Math.min(items.length, fallback + 1 + overscan);
@@ -253,7 +254,16 @@ export function VirtualTimeline<
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     if (Math.abs(scroller.scrollTop - maxScroll) < 2) return;
     scroller.scrollTop = maxScroll;
-  }, [anchorIndex, items, onLockHandled, pinToAnchor, range.totalHeight, scrollRef, sizeOf, stickToBottom]);
+  }, [
+    anchorIndex,
+    items,
+    onLockHandled,
+    pinToAnchor,
+    range.totalHeight,
+    scrollRef,
+    sizeOf,
+    stickToBottom
+  ]);
 
   useEffect(() => {
     if (!scrollToId) return;

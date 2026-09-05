@@ -12,6 +12,7 @@ export type WorkspaceSettings = {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy: "untrusted" | "on-request" | "never";
   networkAccessEnabled: boolean;
+  continuationEnabled: boolean;
   continuationTriggers: string[];
   continuationDirective: string;
   showReasoning: boolean;
@@ -27,6 +28,7 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   sandbox: "workspace-write",
   approvalPolicy: "on-request",
   networkAccessEnabled: true,
+  continuationEnabled: true,
   continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
   continuationDirective:
     "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",

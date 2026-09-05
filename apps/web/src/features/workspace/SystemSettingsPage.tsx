@@ -456,6 +456,14 @@ export function SystemSettingsPage() {
                       setDraft({ ...draft, networkAccessEnabled: checked })
                     }
                   />
+                  <SettingsSwitchField
+                    label="启用继续执行提示词"
+                    description="输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。"
+                    checked={draft.continuationEnabled}
+                    onCheckedChange={(checked) =>
+                      setDraft({ ...draft, continuationEnabled: checked })
+                    }
+                  />
                   <SettingsField
                     label="继续执行触发词"
                     hint="每行一个短语。用户消息完整匹配时，会追加下方指令并要求模型立即继续实际工作。"

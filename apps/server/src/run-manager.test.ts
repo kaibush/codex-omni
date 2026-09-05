@@ -206,6 +206,35 @@ describe("RunManager reconnect state", () => {
     );
   });
 
+  it("does not append a continuation directive when continuation is disabled", async () => {
+    const { project, provider, session, socket } = fixture();
+    store?.updateSettings({ continuationEnabled: false });
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        expect(request.message).toBe("继续");
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+  });
+
   it("drops oversized stream events for a backed-up socket but keeps terminal events", async () => {
     const { project, provider, session, sent } = fixture();
     const socket = {
