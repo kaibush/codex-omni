@@ -160,7 +160,11 @@ export function hideSupersededStreamErrors(items: TimelineItem[]): TimelineItem[
   });
 }
 
-function isStaleInFlightError(item: TimelineItem, current: TimelineItem[], newestCreatedAt: number) {
+function isStaleInFlightError(
+  item: TimelineItem,
+  current: TimelineItem[],
+  newestCreatedAt: number
+) {
   if (item.kind !== "error") return false;
   const errorIndex = current.findIndex((entry) => entry.id === item.id);
   const lastUserIndex = findLastIndex(current, (entry) => entry.kind === "user");
@@ -208,6 +212,7 @@ export const LIVE_TIMELINE_FLUSH_MS = 180;
 export const LIVE_TIMELINE_FLUSH_MAX_BATCH = 40;
 export const HISTORY_TIMELINE_MAX_ITEMS = 180;
 export const HISTORY_TIMELINE_MAX_CHARS = 1_200_000;
+const HISTORY_VISIBLE_CONTEXT_ITEMS = 24;
 
 function timelineItemSize(item: TimelineItem) {
   return (item.text?.length ?? 0) + payloadSize(item.data);
@@ -289,18 +294,38 @@ export function historyAnchorId(items: TimelineItem[]): string | undefined {
 }
 
 /** Bound older pages without dropping the latest page or the visible anchor. */
-export function capHistoryPreserveVisible(older: TimelineItem[], visible: TimelineItem[]): TimelineItem[] {
+export function capHistoryPreserveVisible(
+  older: TimelineItem[],
+  visible: TimelineItem[]
+): TimelineItem[] {
   if (!older.length) return visible;
-  const cappedOlder = capTimelineEvents(older, {
-    keep: "head",
-    maxItems: HISTORY_TIMELINE_MAX_ITEMS,
-    maxChars: HISTORY_TIMELINE_MAX_CHARS
+  // Keep a small tail context so the user can still scroll back toward the
+  // newest loaded messages, while bounding the combined history window. The
+  // previous implementation capped only the newly fetched page, allowing
+  // repeated paging to grow the React state without limit.
+  const contextStart = Math.max(0, visible.length - HISTORY_VISIBLE_CONTEXT_ITEMS);
+  const context = capTimelineEvents(visible.slice(contextStart), {
+    keep: "tail",
+    maxItems: HISTORY_VISIBLE_CONTEXT_ITEMS,
+    maxChars: Math.floor(HISTORY_TIMELINE_MAX_CHARS / 4)
   });
-  return [...cappedOlder, ...visible];
+  const olderWindow = capTimelineEvents([...older, ...visible.slice(0, contextStart)], {
+    keep: "head",
+    maxItems: Math.max(1, HISTORY_TIMELINE_MAX_ITEMS - context.length),
+    maxChars: Math.max(
+      1,
+      HISTORY_TIMELINE_MAX_CHARS -
+        context.reduce((total, item) => total + timelineItemSize(item), 0)
+    )
+  });
+  return [...olderWindow, ...context];
 }
 
 /** While live follow is paused, never cap away the newest historical page. */
-export function capPausedTimelineEvents(items: TimelineItem[], historical: TimelineItem[]): TimelineItem[] {
+export function capPausedTimelineEvents(
+  items: TimelineItem[],
+  historical: TimelineItem[]
+): TimelineItem[] {
   const firstLatestId = historical[0]?.id;
   const split = firstLatestId ? items.findIndex((item) => item.id === firstLatestId) : -1;
   if (split <= 0) {

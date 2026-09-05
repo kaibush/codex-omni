@@ -410,7 +410,10 @@ describe("capPausedTimelineEvents", () => {
     const older = Array.from({ length: HISTORY_TIMELINE_MAX_ITEMS }, (_, index) =>
       item(`old-${index}`, index)
     );
-    const historical = [item("latest-user", 1000, { kind: "user" }), item("latest-assistant", 1001, { kind: "assistant", text: "done" })];
+    const historical = [
+      item("latest-user", 1000, { kind: "user" }),
+      item("latest-assistant", 1001, { kind: "assistant", text: "done" })
+    ];
     const result = capPausedTimelineEvents([...older, ...historical], historical);
     expect(result.at(-1)?.id).toBe("latest-assistant");
     expect(result.some((entry) => entry.id === "latest-user")).toBe(true);
@@ -442,6 +445,16 @@ describe("capHistoryPreserveVisible", () => {
     expect(result.at(-2)?.id).toBe("anchor");
     expect(result.at(-1)?.id).toBe("latest");
     expect(result[0]?.id).toBe("old-0");
+  });
+
+  it("bounds repeated history prepends while retaining a newest context", () => {
+    const older = Array.from({ length: 120 }, (_, index) => item(`old-${index}`, index));
+    const visible = Array.from({ length: 180 }, (_, index) => item(`loaded-${index}`, 200 + index));
+    const result = capHistoryPreserveVisible(older, visible);
+    expect(result.length).toBeLessThanOrEqual(180);
+    expect(result[0]?.id).toBe("old-0");
+    expect(result.at(-1)?.id).toBe("loaded-179");
+    expect(result.some((entry) => entry.id === "loaded-100")).toBe(false);
   });
 });
 
@@ -503,6 +516,7 @@ describe("plan and stream-error cleanup", () => {
 });
 
 function planItemsCompleted(data: unknown) {
-  const record = data && typeof data === "object" ? (data as { items?: Array<{ status?: string }> }) : null;
+  const record =
+    data && typeof data === "object" ? (data as { items?: Array<{ status?: string }> }) : null;
   return record?.items?.filter((item) => item.status === "completed").length ?? 0;
 }
