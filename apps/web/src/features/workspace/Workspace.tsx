@@ -533,7 +533,11 @@ export function Workspace() {
     const historical = messages
       .filter(isVisibleTimelineMessage)
       .map((message) => fromMessage(message));
-    const expanded = historyExpanded.current;
+    // Keep already loaded older pages while a paging request is in flight.
+    // React Query may refresh the latest page during that request; treating
+    // the timeline as collapsed here would briefly rebuild it from only the
+    // newest page and make the newly loaded rows disappear.
+    const expanded = historyExpanded.current || historyLoadingRef.current;
     setEvents((current) => {
       const following = stickToBottom.current;
       liveEventsRef.current = capTimelineEvents(
@@ -1093,6 +1097,7 @@ export function Workspace() {
     if (!sessionId || !hasOlderMessages || !cursor || historyLoadingRef.current) return;
     const requestId = ++historyRequestId.current;
     historyLoadingRef.current = true;
+    historyExpanded.current = true;
     stickToBottom.current = false;
     setFollowingLive(false);
     setHistoryLoading(true);
@@ -1130,7 +1135,6 @@ export function Workspace() {
       }
       setHistoryCursor(older.nextCursor);
       setHasOlderMessages(older.hasMore);
-      historyExpanded.current = true;
     } catch (error) {
       if (currentSessionId.current === sessionId) {
         historyScrollSnapshot.current = null;
