@@ -91,6 +91,7 @@ export function WorkspaceTimeline({
   loadOlderMessages,
   hasOlderMessages,
   historyLoading,
+  historyExpanded,
   timelineLockId,
   onTimelineLockHandled,
   activeSession,
@@ -148,6 +149,7 @@ export function WorkspaceTimeline({
   loadOlderMessages: () => void;
   hasOlderMessages: boolean;
   historyLoading: boolean;
+  historyExpanded: boolean;
   timelineLockId?: string | undefined;
   onTimelineLockHandled?: (() => void) | undefined;
   activeSession: Session | undefined;
@@ -410,7 +412,7 @@ export function WorkspaceTimeline({
             nextTop,
             pointerActive: Boolean(pointerScroll.current)
           });
-          if (followAction === "resume" && !historyLoading && !timelineLockId) {
+          if (followAction === "resume" && !historyLoading && !historyExpanded && !timelineLockId) {
             resumeLiveTimeline();
           } else if (followAction === "pause") pauseLiveTimeline();
           lastScrollTop.current = nextTop;

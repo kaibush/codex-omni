@@ -538,8 +538,22 @@ export function Workspace() {
     // the timeline as collapsed here would briefly rebuild it from only the
     // newest page and make the newly loaded rows disappear.
     const expanded = historyExpanded.current || historyLoadingRef.current;
+    const following = stickToBottom.current;
+    const resolved = resolveTaskState({
+      sessionStatus: detail.data.session.status,
+      messages: detail.data.latestRun ? [...messages, detail.data.latestRun] : messages
+    });
+
+    // Once history paging has started, keep the visible timeline stable while
+    // the latest-page query is refreshed in the background. WebSocket events
+    // continue to update liveEventsRef; returning to the latest view will
+    // reconcile them through restoreLiveTimeline().
+    if (!following && expanded) {
+      setRunState((current) => reconcileTaskState(current, resolved));
+      return;
+    }
+
     setEvents((current) => {
-      const following = stickToBottom.current;
       liveEventsRef.current = capTimelineEvents(
         mergeSessionTimeline({
           historical,
@@ -558,10 +572,6 @@ export function Workspace() {
       setHistoryCursor(detail.data.nextCursor);
       setHasOlderMessages(detail.data.hasMore);
     }
-    const resolved = resolveTaskState({
-      sessionStatus: detail.data.session.status,
-      messages: detail.data.latestRun ? [...messages, detail.data.latestRun] : messages
-    });
     setRunState((current) => reconcileTaskState(current, resolved));
   }, [detail.data?.messages, detail.data?.latestRun, detail.data?.session.status, sessionId]);
   useEffect(() => {
@@ -2126,6 +2136,7 @@ export function Workspace() {
               loadOlderMessages={loadOlderMessages}
               hasOlderMessages={hasOlderMessages}
               historyLoading={historyLoading}
+              historyExpanded={historyExpanded.current}
               timelineLockId={timelineLockId}
               onTimelineLockHandled={handleTimelineLockHandled}
               activeSession={activeSession ?? undefined}
