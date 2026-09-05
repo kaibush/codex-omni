@@ -122,6 +122,13 @@ describe("RunManager reconnect state", () => {
         onEvent(
           bridgeEvent({
             seq: 1,
+            type: "assistant.completed",
+            payload: { itemId: "assistant-1", text: "已完成相关工作。" }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
             type: "turn.completed",
             payload: { status: "completed", endedAt: Date.now(), usage: {} }
           })
@@ -233,6 +240,100 @@ describe("RunManager reconnect state", () => {
       },
       socket
     );
+  });
+
+  it("automatically retries a continuation that only returns a plan", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        calls += 1;
+        if (calls === 1) {
+          expect(request.message).toContain("这是一个继续执行请求");
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "assistant.completed",
+              payload: { itemId: "assistant-1", text: "我会先检查相关文件，然后继续处理。" }
+            })
+          );
+        } else {
+          expect(request.message).toContain("上一轮继续执行请求没有观察到工具调用");
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.started",
+              payload: { itemId: "tool-1", tool: "read_file" }
+            })
+          );
+        }
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+
+    expect(calls).toBe(2);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "retrying")
+    ).toBe(true);
+  });
+
+  it("warns and stops after the automatic continuation retry has no execution evidence", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(
+      async (_request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        calls += 1;
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "assistant.completed",
+            payload: { itemId: `assistant-${calls}`, text: "我会继续处理。" }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+
+    expect(calls).toBe(2);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "warning")
+    ).toBe(true);
   });
 
   it("drops oversized stream events for a backed-up socket but keeps terminal events", async () => {

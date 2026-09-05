@@ -62,7 +62,30 @@ function isContinuationRequest(message: string, triggers: unknown) {
   return triggers.some((trigger) => typeof trigger === "string" && trigger.trim() === normalized);
 }
 
-type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }>;
+const continuationExecutionEvents = new Set(["tool.started", "tool.output", "file.change"]);
+const continuationRetryMessage =
+  "自动复核：上一轮继续执行请求没有观察到工具调用或文件变更。请现在立即读取相关文件并完成未完成的工作，不要只解释计划；如果任务确实已经完成，请先用工具验证结果。";
+
+function shouldRetryContinuation(assistantText: string, hasExecutionEvidence: boolean) {
+  if (hasExecutionEvidence) return false;
+  const normalized = assistantText.trim();
+  if (!normalized) return true;
+  if (normalized.length > 1000) return false;
+  if (
+    /(已完成|已经完成|完成了|无需再做|不需要再做|任务完成|already done|nothing left|completed)/i.test(
+      normalized
+    )
+  ) {
+    return false;
+  }
+  return /(我会|我将|我先|接下来|下一步|计划|稍后|正在准备|I'll|I will|next step|plan to|let me)/i.test(
+    normalized
+  );
+}
+
+type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
+  continuationRetry?: boolean;
+};
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
 type ClientEvent = {
   type: string;
@@ -383,6 +406,30 @@ export class RunManager {
     this.activeRuns.delete(sessionId);
   }
 
+  private broadcastContinuationNotice(
+    sessionId: string,
+    providerId: string,
+    requestId: string,
+    message: string,
+    kind: "retrying" | "warning"
+  ) {
+    this.store.upsertEventMessage({
+      sessionId,
+      role: "error",
+      content: message,
+      providerId,
+      eventType: `continuation.${kind}`,
+      itemId: `${requestId}:continuation.${kind}`,
+      dataJson: JSON.stringify({ continuation: true, kind, requestId })
+    });
+    this.broadcast(sessionId, {
+      type: "server.error",
+      sessionId,
+      requestId,
+      payload: { message, continuation: true, kind }
+    });
+  }
+
   private persistEvent(sessionId: string, providerId: string, event: BridgeEvent) {
     if (this.cancelling.has(sessionId) && event.type === "run.failed") return;
     const compact = compactStreamEvent(event);
@@ -610,8 +657,13 @@ export class RunManager {
     const portableContext = !session.threadId
       ? this.store.findMessageByEventType(session.id, "provider.continuation")?.content
       : null;
-    const planMode = command.type === "turn.start" && command.mode === "plan";
-    const userMessageText = planMode ? applyPlanMode(command.message) : command.message;
+    const continuationRetry = command.continuationRetry === true;
+    const planMode = !continuationRetry && command.type === "turn.start" && command.mode === "plan";
+    const userMessageText = continuationRetry
+      ? "自动复核：继续执行上一轮未完成的工作"
+      : planMode
+        ? applyPlanMode(command.message)
+        : command.message;
     const settings = this.store.getSettings(runtimeDefaults);
     const projectRules = applyProjectRules(
       "",
@@ -619,11 +671,12 @@ export class RunManager {
         .filter((note) => note.enabled)
         .map((note) => ({ title: note.title, content: note.content }))
     );
-    const continuationDirective =
-      settings.continuationEnabled === true &&
-      isContinuationRequest(userMessageText, settings.continuationTriggers) &&
-      typeof settings.continuationDirective === "string" &&
-      settings.continuationDirective.trim()
+    const continuationDirective = continuationRetry
+      ? `\n\n${continuationRetryMessage}`
+      : settings.continuationEnabled === true &&
+          isContinuationRequest(userMessageText, settings.continuationTriggers) &&
+          typeof settings.continuationDirective === "string" &&
+          settings.continuationDirective.trim()
         ? `\n\n${settings.continuationDirective.trim()}`
         : "";
     const continuationApplied = Boolean(continuationDirective);
@@ -689,7 +742,14 @@ export class RunManager {
       content: userMessageText,
       providerId: provider.id,
       eventType: "user.message",
-      ...(continuationApplied ? { dataJson: JSON.stringify({ continuation: true }) } : {})
+      ...(continuationApplied
+        ? {
+            dataJson: JSON.stringify({
+              continuation: true,
+              ...(continuationRetry ? { continuationRetry: true } : {})
+            })
+          }
+        : {})
     });
     this.broadcast(session.id, {
       type: "user.message",
@@ -700,13 +760,17 @@ export class RunManager {
         message: userMessage.content,
         providerId: userMessage.providerId,
         createdAt: userMessage.createdAt,
-        ...(continuationApplied ? { continuation: true } : {})
+        ...(continuationApplied
+          ? { continuation: true, ...(continuationRetry ? { continuationRetry: true } : {}) }
+          : {})
       }
     });
     if (isFirstUserMessage && isPlaceholderSessionTitle(session.title)) {
       this.store.updateSession(session.id, { title: titleFromFirstMessage(command.message) });
     }
     let completed = false;
+    let hasExecutionEvidence = false;
+    const assistantTextByItem = new Map<string, string>();
     const onRuntimeEvent = (rawEvent: BridgeEvent) => {
       const event: BridgeEvent = compactStreamEvent({
         ...rawEvent,
@@ -715,6 +779,14 @@ export class RunManager {
         sessionId: session.id
       });
       const payload = (event.payload ?? {}) as Record<string, any>;
+      if (continuationExecutionEvents.has(event.type)) hasExecutionEvidence = true;
+      if (event.type === "assistant.delta" || event.type === "assistant.completed") {
+        const itemId = String(payload.itemId ?? "assistant");
+        assistantTextByItem.set(
+          itemId,
+          applyTextPatch(assistantTextByItem.get(itemId) ?? "", payload)
+        );
+      }
       if (event.type === "run.failed") {
         const incoming = String(payload.message ?? payload.reason ?? "");
         const previous = this.store.getMessageByItemId(session.id, `${requestId}:run.failed`);
@@ -860,6 +932,41 @@ export class RunManager {
       if (current?.status === "running") {
         completed = true;
         this.finishRun(session.id, "completed", { startedAt });
+      }
+      const assistantText = [...assistantTextByItem.values()].join("\n");
+      const needsContinuationRetry =
+        continuationApplied &&
+        !continuationRetry &&
+        shouldRetryContinuation(assistantText, hasExecutionEvidence);
+      if (needsContinuationRetry) {
+        this.broadcastContinuationNotice(
+          session.id,
+          provider.id,
+          requestId,
+          "上游本轮没有观察到工具调用，正在自动复核一次。",
+          "retrying"
+        );
+        completed = false;
+        await this.startTurn({
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: session.id,
+          providerId: provider.id,
+          message: continuationRetryMessage,
+          continuationRetry: true
+        });
+        return;
+      }
+      if (continuationApplied && !hasExecutionEvidence && (continuationRetry || assistantText)) {
+        this.broadcastContinuationNotice(
+          session.id,
+          provider.id,
+          requestId,
+          continuationRetry
+            ? "自动复核后仍未观察到工具调用或文件变更，请检查模型权限或重新发送。"
+            : "本轮继续请求未观察到工具调用或文件变更，请检查模型回复是否真正完成了工作。",
+          "warning"
+        );
       }
     } catch (error) {
       const current = this.store.getSession(session.id);
