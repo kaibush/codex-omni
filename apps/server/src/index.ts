@@ -525,8 +525,9 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       continuationTriggers: z
         .array(z.string().trim().min(1).max(100))
         .max(20)
-        .transform((values) => [...new Set(values)]),
-      continuationDirective: z.string().trim().max(4000),
+        .transform((values) => [...new Set(values)])
+        .optional(),
+      continuationDirective: z.string().trim().max(4000).optional(),
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),
