@@ -59,19 +59,42 @@ docker compose exec server node dist/cli/create-user.js --username admin --passw
 - 静态前端用 `try_files` 回退到 `index.html`。
 - 启用 HSTS，并设置 `frame-ancestors 'none'`。
 
-Caddy 等价配置：
+Caddy 等价配置（本机当前用法：`codex.lvyrix.com` 挂生产前端，`5173` 继续给 Vite dev）：
 
 ```caddy
-codex.example.com {
-  encode gzip
-  reverse_proxy /api/* server:8790
-  root * /usr/share/nginx/html
-  file_server
-  try_files {path} /index.html
+codex.lvyrix.com {
+  @api path /api /api/*
+  handle @api {
+    reverse_proxy 127.0.0.1:8790 {
+      flush_interval -1
+      transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+      }
+    }
+  }
+
+  @immutable_assets path /assets/*
+  header @immutable_assets Cache-Control "public, max-age=31536000, immutable"
+  @html_shell path / /index.html
+  header @html_shell Cache-Control "no-cache"
+
+  handle {
+    encode zstd gzip
+    root * /var/www/codex-omni
+    try_files {path} /index.html
+    file_server
+  }
 }
 ```
 
-Caddy 会自动处理 HTTPS 证书；仍需把 `CODEX_OMNI_ORIGIN` 设为 `https://codex.example.com`。
+仓库里的完整文件是 [`deploy/Caddyfile.codex.lvyrix.com`](../deploy/Caddyfile.codex.lvyrix.com)。发布前端：
+
+```bash
+bash deploy/publish-frontend.sh
+```
+
+Caddy 会自动处理 HTTPS 证书；仍需把 `CODEX_OMNI_ORIGIN` 设为 `https://codex.lvyrix.com`。不要把 `5173` 反代到公网。
 
 ## 安全边界
 
