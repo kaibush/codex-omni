@@ -115,6 +115,7 @@ npm i -g https://github.com/kaibush/codex-omni/releases/latest/download/codex-om
 | `CODEX_OMNI_HOST` | `0.0.0.0` | 监听地址 |
 | `CODEX_OMNI_PORT` | `8790` | 服务端口 |
 | `CODEX_OMNI_DATABASE` | `./data/codex-omni.db` | SQLite 路径 |
+| `CODEX_OMNI_INSTANCE` | 空（随机 id） | 同库多进程时的实例名；`pnpm dev` 设为 `dev` |
 | `CODEX_OMNI_ORIGIN` | 空（回显请求 Origin） | CORS Origin 白名单，逗号分隔；生产应写成明确站点 |
 | `CODEX_OMNI_STATIC` | 打包内的 `public/` | 前端静态目录 |
 | `CODEX_OMNI_FS_ROOTS` | 系统根目录 | 目录浏览范围，逗号分隔 |

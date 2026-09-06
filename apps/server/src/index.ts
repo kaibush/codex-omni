@@ -142,7 +142,8 @@ const runs = new RunManager(store, runtimeRoot);
 const terminals = new TerminalManager();
 const updateCheck = new UpdateCheckService();
 runs.reconcileStartup();
-const stopScheduledJobs = startScheduledJobs(store, runs);
+const stopScheduledJobs =
+  process.env.CODEX_OMNI_INSTANCE === "dev" ? () => undefined : startScheduledJobs(store, runs);
 const getProjectRoot = async (projectId: string) => {
   const project = store.getProject(projectId);
   if (!project) throw new Error("Project not found");
@@ -1746,7 +1747,8 @@ app.log.info(
   {
     url: `http://${host}:${port}`,
     dataPath,
-    staticDir: staticDir || null
+    staticDir: staticDir || null,
+    instance: process.env.CODEX_OMNI_INSTANCE?.trim() || null
   },
   "codex-omni started"
 );

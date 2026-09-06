@@ -1,0 +1,19 @@
+[Unit]
+Description=Codex Omni production API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/project/github/kaibush/codex-omni/apps/server
+Environment=PATH=/root/.nvm/versions/node/v24.18.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=CODEX_OMNI_HOST=127.0.0.1
+Environment=CODEX_OMNI_PORT=8791
+Environment=CODEX_OMNI_ORIGIN=https://codex.lvyrix.com
+Environment=CODEX_OMNI_INSTANCE=prod
+Environment=COOKIE_SECURE=true
+ExecStart=/root/.nvm/versions/node/v24.18.0/bin/node dist/cli/codex-omni.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

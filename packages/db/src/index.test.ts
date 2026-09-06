@@ -121,6 +121,63 @@ describe("Store", () => {
       eventType: "run.interrupted"
     });
   });
+  it("only interrupts sessions for the given service instance", () => {
+    store = new Store(":memory:");
+    const db = store;
+    const project = db.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const mine = db.createSession({ projectId: project.id });
+    const other = db.createSession({ projectId: project.id });
+    db.updateSession(mine.id, { status: "running" });
+    db.updateSession(other.id, { status: "running" });
+    db.createRun({
+      id: "run-prod",
+      sessionId: mine.id,
+      projectId: project.id,
+      serviceInstanceId: "prod",
+      cwd: "/tmp",
+      startedAt: Date.now()
+    });
+    db.createRun({
+      id: "run-dev",
+      sessionId: other.id,
+      projectId: project.id,
+      serviceInstanceId: "dev",
+      cwd: "/tmp",
+      startedAt: Date.now()
+    });
+    expect(db.resetInterruptedSessions("prod")).toBe(1);
+    expect(db.getSession(mine.id)?.status).toBe("interrupted");
+    expect(db.getSession(other.id)?.status).toBe("running");
+    expect(db.getRun("run-prod")?.status).toBe("interrupted");
+    expect(db.getRun("run-dev")?.status).toBe("running");
+  });
+  it("keeps a session running when another instance still has an active run", () => {
+    store = new Store(":memory:");
+    const db = store;
+    const project = db.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = db.createSession({ projectId: project.id });
+    db.updateSession(session.id, { status: "running" });
+    db.createRun({
+      id: "run-prod",
+      sessionId: session.id,
+      projectId: project.id,
+      serviceInstanceId: "prod",
+      cwd: "/tmp",
+      startedAt: Date.now()
+    });
+    db.createRun({
+      id: "run-dev",
+      sessionId: session.id,
+      projectId: project.id,
+      serviceInstanceId: "dev",
+      cwd: "/tmp",
+      startedAt: Date.now()
+    });
+    expect(db.resetInterruptedSessions("prod")).toBe(0);
+    expect(db.getSession(session.id)?.status).toBe("running");
+    expect(db.getRun("run-prod")?.status).toBe("interrupted");
+    expect(db.getRun("run-dev")?.status).toBe("running");
+  });
   it("upserts streamed tool events and preserves structured data", () => {
     store = new Store(":memory:");
     const db = store;

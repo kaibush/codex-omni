@@ -165,7 +165,7 @@ export class RunManager {
   private reconnecting = new Set<string>();
   private activeRuns = new Map<string, ActiveRun>();
   private runtimeMonitor: NodeJS.Timeout;
-  readonly serviceInstanceId = nanoid();
+  readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
 
   constructor(
     private store: Store,
@@ -180,11 +180,13 @@ export class RunManager {
   }
 
   reconcileStartup() {
+    const instance = process.env.CODEX_OMNI_INSTANCE?.trim();
     const running = this.store.listRunningRuns();
     for (const run of running) {
+      if (instance && run.serviceInstanceId !== this.serviceInstanceId) continue;
       if (run.workerPid) terminateRecordedWorker(run.workerPid, run.id);
     }
-    return this.store.resetInterruptedSessions();
+    return this.store.resetInterruptedSessions(instance || undefined);
   }
 
   shutdown() {

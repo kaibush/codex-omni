@@ -232,30 +232,72 @@ export class Store {
   constructor(filename: string) {
     this.db = new Database(filename);
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("foreign_keys = ON");
     this.migrate();
   }
-  resetInterruptedSessions() {
+  resetInterruptedSessions(serviceInstanceId?: string) {
     const now = Date.now();
-    const running = this.db
-      .prepare("SELECT id, provider_id as providerId FROM sessions WHERE status='running'")
-      .all() as Array<{ id: string; providerId: string | null }>;
+    const running = (
+      serviceInstanceId
+        ? this.db
+            .prepare(
+              `SELECT s.id, s.provider_id as providerId
+               FROM sessions s
+               WHERE s.status='running' AND EXISTS (
+                 SELECT 1 FROM runs r
+                 WHERE r.session_id = s.id AND r.status = 'running' AND r.service_instance_id = ?
+               )`
+            )
+            .all(serviceInstanceId)
+        : this.db
+            .prepare("SELECT id, provider_id as providerId FROM sessions WHERE status='running'")
+            .all()
+    ) as Array<{ id: string; providerId: string | null }>;
+    const writeInterrupted = (session: { id: string; providerId: string | null }) => {
+      this.upsertEventMessage({
+        sessionId: session.id,
+        role: "run",
+        content: "任务未完成（已中断）",
+        providerId: session.providerId,
+        eventType: "run.interrupted",
+        itemId: `${session.id}:current-run`,
+        dataJson: JSON.stringify({
+          status: "interrupted",
+          endedAt: now,
+          reason: "server-restart"
+        })
+      });
+    };
     const mark = this.db.transaction(() => {
-      for (const session of running) {
-        this.upsertEventMessage({
-          sessionId: session.id,
-          role: "run",
-          content: "任务未完成（已中断）",
-          providerId: session.providerId,
-          eventType: "run.interrupted",
-          itemId: `${session.id}:current-run`,
-          dataJson: JSON.stringify({
-            status: "interrupted",
-            endedAt: now,
-            reason: "server-restart"
-          })
-        });
+      if (serviceInstanceId) {
+        this.db
+          .prepare(
+            "UPDATE runs SET status='interrupted',ended_at=?,reason='server-restart',updated_at=? WHERE status='running' AND service_instance_id=?"
+          )
+          .run(now, now, serviceInstanceId);
+        const interruptedIds: string[] = [];
+        for (const session of running) {
+          const stillRunning = this.db
+            .prepare("SELECT 1 as ok FROM runs WHERE session_id=? AND status='running' LIMIT 1")
+            .get(session.id) as { ok: number } | undefined;
+          if (stillRunning) continue;
+          writeInterrupted(session);
+          this.db
+            .prepare("UPDATE sessions SET status='interrupted',updated_at=? WHERE id=? AND status='running'")
+            .run(now, session.id);
+          interruptedIds.push(session.id);
+        }
+        if (interruptedIds.length) {
+          this.db
+            .prepare(
+              `UPDATE approval_requests SET status='expired',resolved_at=? WHERE status='pending' AND session_id IN (${interruptedIds.map(() => "?").join(",")})`
+            )
+            .run(now, ...interruptedIds);
+        }
+        return interruptedIds.length;
       }
+      for (const session of running) writeInterrupted(session);
       this.db
         .prepare(
           "UPDATE runs SET status='interrupted',ended_at=?,reason='server-restart',updated_at=? WHERE status='running'"

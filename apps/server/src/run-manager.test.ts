@@ -56,6 +56,7 @@ vi.mock("@codex-omni/codex-runtime", () => ({
   terminateRecordedWorker: vi.fn(() => true)
 }));
 
+import { terminateRecordedWorker } from "@codex-omni/codex-runtime";
 import { RunManager } from "./run-manager.js";
 
 let store: Store | undefined;
@@ -70,6 +71,7 @@ beforeEach(() => {
   runtimeMocks.shutdown.mockReset();
   runtimeMocks.active = false;
   runtimeMocks.runtime = null;
+  vi.mocked(terminateRecordedWorker).mockClear();
 });
 
 afterEach(() => {
@@ -111,6 +113,46 @@ function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: numbe
     payload: input.payload
   };
 }
+
+describe("RunManager startup reconcile", () => {
+  it("only terminates workers for this service instance on startup", () => {
+    const previous = process.env.CODEX_OMNI_INSTANCE;
+    process.env.CODEX_OMNI_INSTANCE = "prod";
+    try {
+      const { project, session } = fixture();
+      const other = store!.createSession({ projectId: project.id });
+      store!.updateSession(session.id, { status: "running" });
+      store!.updateSession(other.id, { status: "running" });
+      store!.createRun({
+        id: "run-prod",
+        sessionId: session.id,
+        projectId: project.id,
+        serviceInstanceId: "prod",
+        cwd: "/tmp/project",
+        startedAt: Date.now()
+      });
+      store!.createRun({
+        id: "run-dev",
+        sessionId: other.id,
+        projectId: project.id,
+        serviceInstanceId: "dev",
+        cwd: "/tmp/project",
+        startedAt: Date.now()
+      });
+      store!.updateRun("run-prod", { workerPid: 4242 });
+      store!.updateRun("run-dev", { workerPid: 4343 });
+      manager = new RunManager(store!, "/tmp/runtime");
+      expect(manager.reconcileStartup()).toBe(1);
+      expect(terminateRecordedWorker).toHaveBeenCalledWith(4242, "run-prod");
+      expect(terminateRecordedWorker).not.toHaveBeenCalledWith(4343, "run-dev");
+      expect(store?.getSession(session.id)?.status).toBe("interrupted");
+      expect(store?.getSession(other.id)?.status).toBe("running");
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_OMNI_INSTANCE;
+      else process.env.CODEX_OMNI_INSTANCE = previous;
+    }
+  });
+});
 
 describe("RunManager reconnect state", () => {
   it("adds an execution directive to continuation requests", async () => {

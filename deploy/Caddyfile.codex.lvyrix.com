@@ -1,12 +1,13 @@
 # Codex Omni production SPA + API.
 # Public pages are the built frontend in /var/www/codex-omni (see deploy/publish-frontend.sh).
-# Vite keeps 5173 for local `pnpm dev`. API/WebSocket go to Fastify on 8790.
+# Vite keeps 5173 for local `pnpm dev`. Dev API stays on 8790 (tsx watch).
+# Domain API goes to the production Fastify on 127.0.0.1:8791, not the watch process.
 # Chat/terminal streams must not pass through encode; gzip waits for EOF.
 codex.lvyrix.com {
 	import access_log
 	@api path /api /api/*
 	handle @api {
-		reverse_proxy 127.0.0.1:8790 {
+		reverse_proxy 127.0.0.1:8791 {
 			flush_interval -1
 			transport http {
 				read_timeout 3600s
