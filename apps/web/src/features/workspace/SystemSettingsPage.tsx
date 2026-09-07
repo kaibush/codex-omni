@@ -448,6 +448,16 @@ export function SystemSettingsPage() {
                       { value: "plan", label: "Plan：只读规划，确认后再执行" }
                     ]}
                   />
+                  <SettingsSelect
+                    label="运行中发送方式"
+                    hint="直接插入会在当前工具调用完成后继续执行；排队等待会在当前任务结束后启动。"
+                    value={draft.sendMode}
+                    onValueChange={(value) => setDraft({ ...draft, sendMode: value })}
+                    options={[
+                      { value: "queue", label: "排队等待" },
+                      { value: "steer", label: "直接插入" }
+                    ]}
+                  />
                   <SettingsSwitchField
                     label="允许命令访问网络"
                     description="关闭后，命令和工具默认不能访问外网。"
@@ -563,16 +573,6 @@ export function SystemSettingsPage() {
                     description="关闭后使用 Ctrl/Cmd + Enter 发送。"
                     checked={draft.sendWithEnter}
                     onCheckedChange={(checked) => setDraft({ ...draft, sendWithEnter: checked })}
-                  />
-                  <SettingsSelect
-                    label="运行中发送方式"
-                    hint="直接插入会在当前工具调用完成后继续执行；排队等待会在当前任务结束后启动。"
-                    value={draft.sendMode}
-                    onValueChange={(value) => setDraft({ ...draft, sendMode: value })}
-                    options={[
-                      { value: "queue", label: "排队等待" },
-                      { value: "steer", label: "直接插入" }
-                    ]}
                   />
                 </SettingsFormGrid>
               </SettingsCard>
