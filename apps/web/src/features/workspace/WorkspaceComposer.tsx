@@ -403,7 +403,7 @@ export function WorkspaceComposer({
               <div className="composer-context">
                 <Select value={providerId} onValueChange={setProviderId}>
                   <SelectTrigger
-                    className="composer-select max-w-[7.5rem] sm:max-w-[11rem]"
+                    className="composer-select w-auto min-w-0 max-w-[7.5rem] overflow-hidden sm:max-w-[11rem]"
                     title={
                       selectedProvider?.name ? `供应商：${selectedProvider.name}` : "选择供应商"
                     }
@@ -421,7 +421,7 @@ export function WorkspaceComposer({
                 </Select>
                 <Select value={model} onValueChange={setModel} disabled={!availableModels.length}>
                   <SelectTrigger
-                    className="composer-select max-w-[8.5rem] sm:max-w-[13rem]"
+                    className="composer-select w-auto min-w-0 max-w-[8.5rem] overflow-hidden sm:max-w-[13rem]"
                     title={model ? `模型：${model}` : "选择模型"}
                   >
                     <Cpu className="size-3.5 shrink-0 text-muted-foreground" />
