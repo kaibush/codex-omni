@@ -414,6 +414,26 @@ export function RuntimeOptionsPanel({
               </SelectContent>
             </Select>
           </label>
+          <label className="field-label">
+            运行中发送方式
+            <Select
+              value={settings.sendMode}
+              onValueChange={(value) =>
+                void onChange({
+                  ...settings,
+                  sendMode: value as WorkspaceSettings["sendMode"]
+                })
+              }
+            >
+              <SelectTrigger className="mt-1.5 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="queue">排队等待</SelectItem>
+                <SelectItem value="steer">直接插入</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
         </div>
         <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
           允许命令访问网络
@@ -437,7 +457,7 @@ export function RuntimeOptionsPanel({
           输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。
         </p>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Plan 只做只读规划；平衡模式仅在需要提升权限时确认。修改后立即保存，并用于下一次发送。
+          Plan 只做只读规划；平衡模式仅在需要提升权限时确认。运行中发送可选排队等待或直接插入当前对话。修改后立即保存，并用于下一次发送。
         </p>
         {homePath ? (
           <p className="mt-2 truncate text-xs text-muted-foreground" title={homePath}>
