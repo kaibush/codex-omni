@@ -281,7 +281,9 @@ describe("normalizer", () => {
         message: "stream disconnected before completion: stream closed before response.completed"
       }
     });
-    expect(n.failure(new Error("Codex Exec exited with code 1: Reading prompt from stdin..."))).toMatchObject({
+    expect(
+      n.failure(new Error("Codex Exec exited with code 1: Reading prompt from stdin..."))
+    ).toMatchObject({
       type: "run.failed",
       payload: { status: "failed", message: "Codex 进程异常退出（code 1），未返回具体错误信息" }
     });
@@ -375,4 +377,19 @@ it("emits incremental assistant and command patches", () => {
   });
   expect(toolFirst?.payload).toMatchObject({ outputDelta: "/t" });
   expect(toolSecond?.payload).toMatchObject({ outputDelta: "mp" });
+});
+
+it("namespaces reused item ids after a steered continuation", () => {
+  const n = createNormalizer(req);
+  const [first] = n.map({
+    type: "item.completed",
+    item: { id: "m1", type: "agent_message", text: "先查北京。" }
+  });
+  n.beginSegment();
+  const [second] = n.map({
+    type: "item.updated",
+    item: { id: "m1", type: "agent_message", text: "西安也下雨。" }
+  });
+  expect(first?.payload).toMatchObject({ itemId: "m1", text: "先查北京。" });
+  expect(second?.payload).toMatchObject({ itemId: "s1:m1", delta: "西安也下雨。" });
 });

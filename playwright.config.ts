@@ -20,7 +20,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_PORT=${apiPort} CODEX_OMNI_DATABASE=${database} CODEX_OMNI_ORIGIN=${webUrl} CODEX_OMNI_FAKE_RUNTIME=1 pnpm --filter @codex-omni/server dev:stable`,
+      command: `pnpm -r --filter './packages/**' build && CODEX_OMNI_INSTANCE=e2e CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_PORT=${apiPort} CODEX_OMNI_DATABASE=${database} CODEX_OMNI_ORIGIN=${webUrl} CODEX_OMNI_FAKE_RUNTIME=1 pnpm --filter @codex-omni/server exec tsx src/index.ts`,
       url: `${apiUrl}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000

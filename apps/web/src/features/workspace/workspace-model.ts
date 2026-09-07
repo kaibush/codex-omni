@@ -1,4 +1,8 @@
-import { compactTimelineItem, parseReconnectNotice, type ReconnectNotice } from "@codex-omni/protocol";
+import {
+  compactTimelineItem,
+  parseReconnectNotice,
+  type ReconnectNotice
+} from "@codex-omni/protocol";
 import type { Message, TimelineItem } from "@/types";
 import type { TaskState } from "@/lib/task-state";
 
@@ -59,8 +63,7 @@ export const loadOutboundCommands = (): QueuedCommand[] => {
 export const persistOutboundCommands = (commands: QueuedCommand[]) => {
   try {
     const bounded = boundOutboundCommands(commands);
-    if (bounded.length)
-      localStorage.setItem(OUTBOUND_TURNS_STORAGE_KEY, JSON.stringify(bounded));
+    if (bounded.length) localStorage.setItem(OUTBOUND_TURNS_STORAGE_KEY, JSON.stringify(bounded));
     else localStorage.removeItem(OUTBOUND_TURNS_STORAGE_KEY);
   } catch {
     // localStorage can be unavailable in private browsing; server-side queue remains authoritative.
@@ -125,7 +128,7 @@ export const timelineMessageId = (message: Message) => {
     const approvalId = data?.approvalId ?? message.itemId?.replace(/^approval:/, "");
     return approvalId ? `approval-${approvalId}` : message.id;
   }
-  if (!message.itemId) return message.id;
+  if (message.role === "user" || !message.itemId) return message.id;
   const [requestId, ...itemParts] = message.itemId.split(":");
   if (
     requestId &&
@@ -141,7 +144,11 @@ export const fromMessage = (m: Message, options?: { preview?: boolean }): Timeli
     id: timelineMessageId(m),
     messageId: m.id,
     kind:
-      m.role === "system" ? "system" : m.role === "run" ? "system" : (m.role as TimelineItem["kind"]),
+      m.role === "system"
+        ? "system"
+        : m.role === "run"
+          ? "system"
+          : (m.role as TimelineItem["kind"]),
     text: m.content,
     data: parseData(m.dataJson),
     providerId: m.providerId,

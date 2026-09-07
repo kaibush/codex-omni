@@ -215,9 +215,11 @@ export function WorkspaceTimeline({
     clientY: number;
     scrollTop: number;
   } | null>(null);
+  const touchScroll = useRef<{ clientY: number; scrollTop: number } | null>(null);
   const lastScrollTop = useRef(0);
   useEffect(() => {
     pointerScroll.current = null;
+    touchScroll.current = null;
     lastScrollTop.current = 0;
   }, [sessionId]);
   const onOpenFile = useCallback(
@@ -395,6 +397,37 @@ export function WorkspaceTimeline({
         onPointerCancel={() => {
           pointerScroll.current = null;
         }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          if (!touch) return;
+          touchScroll.current = {
+            clientY: touch.clientY,
+            scrollTop: chatScroll.current?.scrollTop ?? 0
+          };
+        }}
+        onTouchMove={(event) => {
+          // Native touch scrolling cancels pointer events on mobile browsers.
+          // Keep touch intent independently so live follow is released before
+          // the virtual list can pin the first upward swipe back to the tail.
+          const gesture = touchScroll.current;
+          const touch = event.touches[0];
+          if (!gesture || !touch) return;
+          if (
+            shouldPauseLiveFollowFromPointer({
+              clientY: touch.clientY,
+              startClientY: gesture.clientY,
+              scrollTop: chatScroll.current?.scrollTop ?? gesture.scrollTop,
+              startScrollTop: gesture.scrollTop
+            })
+          )
+            pauseLiveTimeline();
+        }}
+        onTouchEnd={() => {
+          touchScroll.current = null;
+        }}
+        onTouchCancel={() => {
+          touchScroll.current = null;
+        }}
         onKeyDownCapture={(event) => {
           if (shouldPauseLiveFollowFromKey(event.key)) pauseLiveTimeline();
         }}
@@ -412,7 +445,7 @@ export function WorkspaceTimeline({
             following: stickToBottom.current,
             previousTop,
             nextTop,
-            pointerActive: Boolean(pointerScroll.current)
+            pointerActive: Boolean(pointerScroll.current || touchScroll.current)
           });
           if (followAction === "resume" && !historyLoading && !historyExpanded && !timelineLockId) {
             resumeLiveTimeline();
@@ -478,6 +511,7 @@ export function WorkspaceTimeline({
                   type="button"
                   size="sm"
                   variant="ghost"
+                  onPointerDown={pauseLiveTimeline}
                   onClick={() => void loadOlderMessages()}
                   className="text-xs text-muted-foreground"
                 >
@@ -509,75 +543,77 @@ export function WorkspaceTimeline({
                   </div>
                 }
               >
-              <VirtualTimeline
-                key={timelineView}
-                items={timelineItems}
-                scrollRef={chatScroll}
-                stickToBottom={stickToBottom}
-                scrollToId={highlightMessageId || undefined}
-                lockItemId={timelineLockId}
-                onLockHandled={onTimelineLockHandled}
-                renderItem={(item, _index, meta) => (
-                  <EventCard
-                    item={item}
-                    lite={meta.lite}
-                    liteHeight={meta.height}
-                    onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
-                    highlighted={highlightMessageId === item.id}
-                    defaultOpen={
-                      timelineView === "expanded" ||
-                      (item.kind !== "reasoning" &&
-                        workspaceSettings.expandToolCalls &&
-                        item.streaming !== false)
-                    }
-                    hidden={item.kind === "reasoning" && !showReasoning}
-                    showProviderLabel={workspaceSettings.showProviderLabels}
-                    providerName={item.providerId ? providerNames.get(item.providerId) : undefined}
-                    projectId={activeSession?.projectId}
-                    projectPath={projectPath}
-                    onReply={onReply}
-                    onOpenThread={onOpenThread}
-                    onFork={item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined}
-                    onEdit={
-                      item.kind === "user"
-                        ? () => {
-                            setInput(item.text ?? "");
-                            setAttachments([]);
-                            requestAnimationFrame(() => inputRef.current?.focus());
-                          }
-                        : undefined
-                    }
-                    onRetry={
-                      item.kind === "user" ? () => void retryMessage(item) : undefined
-                    }
-                    onQuote={
-                      item.kind === "user" || item.kind === "assistant"
-                        ? () => quoteToInput(item.text ?? "")
-                        : undefined
-                    }
-                    onCopyLink={() => void copyMessageLink(item.id)}
-                    starred={item.messageId ? starredIds.includes(item.messageId) : false}
-                    onStar={
-                      item.messageId && (item.kind === "user" || item.kind === "assistant")
-                        ? () => onStarMessage(item.messageId!)
-                        : undefined
-                    }
-                    onSaveNote={
-                      item.kind === "user" || item.kind === "assistant"
-                        ? () => onSaveNote(item.text ?? "")
-                        : undefined
-                    }
-                    onSummarize={
-                      item.kind === "user" || item.kind === "assistant"
-                        ? () => onSummarize(item.text ?? "")
-                        : undefined
-                    }
-                    onCreateFile={onCreateFile}
-                    onOpenFile={onOpenFile}
-                    onApproval={onApproval}
-                  />
-                )}
-              />
+                <VirtualTimeline
+                  key={timelineView}
+                  items={timelineItems}
+                  scrollRef={chatScroll}
+                  stickToBottom={stickToBottom}
+                  scrollToId={highlightMessageId || undefined}
+                  lockItemId={timelineLockId}
+                  onLockHandled={onTimelineLockHandled}
+                  renderItem={(item, _index, meta) => (
+                    <EventCard
+                      item={item}
+                      lite={meta.lite}
+                      liteHeight={meta.height}
+                      onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
+                      highlighted={highlightMessageId === item.id}
+                      defaultOpen={
+                        timelineView === "expanded" ||
+                        (item.kind !== "reasoning" &&
+                          workspaceSettings.expandToolCalls &&
+                          item.streaming !== false)
+                      }
+                      hidden={item.kind === "reasoning" && !showReasoning}
+                      showProviderLabel={workspaceSettings.showProviderLabels}
+                      providerName={
+                        item.providerId ? providerNames.get(item.providerId) : undefined
+                      }
+                      projectId={activeSession?.projectId}
+                      projectPath={projectPath}
+                      onReply={onReply}
+                      onOpenThread={onOpenThread}
+                      onFork={
+                        item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined
+                      }
+                      onEdit={
+                        item.kind === "user"
+                          ? () => {
+                              setInput(item.text ?? "");
+                              setAttachments([]);
+                              requestAnimationFrame(() => inputRef.current?.focus());
+                            }
+                          : undefined
+                      }
+                      onRetry={item.kind === "user" ? () => void retryMessage(item) : undefined}
+                      onQuote={
+                        item.kind === "user" || item.kind === "assistant"
+                          ? () => quoteToInput(item.text ?? "")
+                          : undefined
+                      }
+                      onCopyLink={() => void copyMessageLink(item.id)}
+                      starred={item.messageId ? starredIds.includes(item.messageId) : false}
+                      onStar={
+                        item.messageId && (item.kind === "user" || item.kind === "assistant")
+                          ? () => onStarMessage(item.messageId!)
+                          : undefined
+                      }
+                      onSaveNote={
+                        item.kind === "user" || item.kind === "assistant"
+                          ? () => onSaveNote(item.text ?? "")
+                          : undefined
+                      }
+                      onSummarize={
+                        item.kind === "user" || item.kind === "assistant"
+                          ? () => onSummarize(item.text ?? "")
+                          : undefined
+                      }
+                      onCreateFile={onCreateFile}
+                      onOpenFile={onOpenFile}
+                      onApproval={onApproval}
+                    />
+                  )}
+                />
               </TimelineErrorBoundary>
             ) : !activeSession ? (
               <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-1 py-8 sm:py-12">

@@ -159,5 +159,30 @@ describe.skipIf(process.platform === "win32")(
       expect(events.some((event) => event.type === "run.failed")).toBe(true);
       expect(requests).toHaveLength(1);
     }, 15_000);
+
+    it("isolates reused CLI item ids while steering within one run", async () => {
+      const { request, requests } = await fixture();
+      const events: BridgeEvent[] = [];
+      await worker!.run(request, (event) => {
+        events.push(event);
+        if (event.type === "run.started") {
+          expect(worker!.steer(request.sessionId, "Also inspect the second city.")).toBe(true);
+        }
+      });
+      expect(requests, JSON.stringify(events)).toHaveLength(2);
+      const replies = events.filter((event) => event.type === "assistant.completed");
+      expect(replies).toHaveLength(2);
+      const firstId = (replies[0]?.payload as { itemId: string }).itemId;
+      expect(replies[1]?.payload).toMatchObject({
+        itemId: `s1:${firstId}`,
+        text: "fixture completed"
+      });
+      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(events.at(-1)?.type).toBe("turn.completed");
+      expect(
+        events.every((event, index) => index === 0 || event.seq > events[index - 1]!.seq)
+      ).toBe(true);
+      expect(JSON.stringify(requests[1]?.body)).toContain("Also inspect the second city.");
+    }, 15_000);
   }
 );

@@ -118,6 +118,34 @@ describe("plan and collab tool detection", () => {
     ).toBe("tool-req-plan-start");
   });
 
+  it("does not reuse a plan card from before the latest user turn", () => {
+    expect(
+      existingPlanTimelineId(
+        [
+          {
+            id: "tool-req-plan-start",
+            kind: "tool",
+            data: {
+              tool: "update_plan",
+              items: [{ text: "Inspect reports", status: "pending" }]
+            }
+          },
+          { id: "user-steer", kind: "user" },
+          {
+            id: "tool-req-s1-plan",
+            kind: "assistant",
+            data: { text: "next" }
+          }
+        ],
+        "req",
+        {
+          tool: "update_plan",
+          items: [{ text: "Inspect reports", status: "completed" }]
+        }
+      )
+    ).toBeUndefined();
+  });
+
   it("keeps the richer plan checklist when history overwrites a live card", () => {
     expect(
       mergeToolEventData(

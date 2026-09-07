@@ -86,7 +86,15 @@ export function existingPlanTimelineId(
   requestId: string,
   data: unknown
 ) {
-  const plans = items.filter((item) => item.kind === "tool" && isPlanTool(item.data));
+  let lastUser = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.kind === "user") {
+      lastUser = index;
+      break;
+    }
+  }
+  const scope = lastUser >= 0 ? items.slice(lastUser + 1) : items;
+  const plans = scope.filter((item) => item.kind === "tool" && isPlanTool(item.data));
   if (!plans.length) return undefined;
   const prefix = `tool-${requestId}-`;
   const sameRequest = plans.find((item) => item.id.startsWith(prefix));
@@ -284,11 +292,7 @@ export function runtimeNoticeMessage(data: unknown, text?: string): string {
   return firstString([record?.message, record?.output, text]);
 }
 
-export function isRecoverableStreamError(item: {
-  kind?: string;
-  text?: string;
-  data?: unknown;
-}) {
+export function isRecoverableStreamError(item: { kind?: string; text?: string; data?: unknown }) {
   if (item.kind !== "error" && toolName(item.data) !== "runtimeerror") return false;
   const message = runtimeNoticeMessage(item.data, item.text);
   return /stream disconnected before completion|stream closed before response\.completed|socket closed/i.test(

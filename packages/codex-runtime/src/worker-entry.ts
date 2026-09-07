@@ -41,7 +41,11 @@ rl.on("line", (input) => {
       approvalResponses.get(response.requestId)?.(response.decision);
       return;
     }
-    if (response.type === "turn.steer" && typeof response.message === "string" && response.message.trim()) {
+    if (
+      response.type === "turn.steer" &&
+      typeof response.message === "string" &&
+      response.message.trim()
+    ) {
       steerInputs.push({
         message: response.message,
         ...(Array.isArray(response.attachments) && response.attachments.length
@@ -152,7 +156,12 @@ try {
           return interruptedForSteer;
         }
         if (mapped.type !== "tool.output") return false;
-        interruptedForSteer = (mapped.payload as Record<string, unknown>)?.phase === "completed";
+        const payload = mapped.payload as Record<string, unknown>;
+        // Startup/compaction notices are not completed tool calls. Interrupting
+        // here can discard the original input before the CLI has sent it.
+        if (payload?.tool === "runtime_error" || payload?.tool === "context_compacted")
+          return false;
+        interruptedForSteer = payload?.phase === "completed";
         return interruptedForSteer;
       },
       onMappedEvent: (mapped) => {
@@ -178,6 +187,7 @@ try {
     if (steerInputs.length && (interruptedForSteer || state.completed)) {
       const input = steerInputs.shift()!;
       nextInput = buildCodexRunInput(input.message, input.attachments, request.cwd);
+      normalizer.beginSegment();
       continue;
     }
     const incomplete = incompleteStreamError(state);

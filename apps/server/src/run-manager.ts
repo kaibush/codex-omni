@@ -339,7 +339,11 @@ export class RunManager {
       .listPendingApprovals(sessionId)
       .map((approval) => this.publicApproval(approval));
     let replayAfter = -1;
-    if (currentRun && cursor?.lastRequestId === currentRun.id && typeof cursor.lastSeq === "number") {
+    if (
+      currentRun &&
+      cursor?.lastRequestId === currentRun.id &&
+      typeof cursor.lastSeq === "number"
+    ) {
       replayAfter = cursor.lastSeq;
     }
     const replay = currentRun ? this.store.listRunEvents(currentRun.id, replayAfter, 1001) : [];
@@ -437,12 +441,19 @@ export class RunManager {
     this.store.updateSession(sessionId, { status: status === "completed" ? "idle" : status });
     this.store.resolvePendingApprovals(sessionId, status === "cancelled" ? "cancelled" : "expired");
     if (broadcast) {
-      this.broadcast(sessionId, {
+      const run = active ? this.store.getRun(active.runId) : this.store.getLatestRun(sessionId);
+      const event = {
+        ...(run ? { protocolVersion: 1, projectId: run.projectId } : {}),
         type: status === "completed" ? "turn.completed" : `run.${status}`,
         sessionId,
-        ...(active ? { requestId: active.runId } : {}),
+        ...(run ? { requestId: run.id, seq: run.lastSeq + 1 } : {}),
         payload: data
-      });
+      };
+      // Cancellation, timeouts and worker loss originate here, not in the
+      // SDK. Persist their terminal event so reconnect replay ends with the
+      // same state as the snapshot, even when the browser missed the broadcast.
+      if (run) this.store.appendRunEvent(run.id, sessionId, run.lastSeq + 1, JSON.stringify(event));
+      this.broadcast(sessionId, event);
     }
     this.reconnecting.delete(sessionId);
     this.activeRuns.delete(sessionId);
@@ -658,23 +669,21 @@ export class RunManager {
     this.store.upsertEventMessage({
       sessionId: command.sessionId,
       role: "user",
-      content: command.message,
+      content: command.displayMessage ?? command.message,
       providerId,
       eventType: "user.message",
       itemId: persistedItemId,
       dataJson: JSON.stringify({ turnOptions, steer: true, pending: true })
     });
-    const persisted = this.store.getMessageByItemId(
-      command.sessionId,
-      persistedItemId
-    );
+    const persisted = this.store.getMessageByItemId(command.sessionId, persistedItemId);
     this.broadcast(command.sessionId, {
       type: "user.message",
       sessionId: command.sessionId,
       requestId: active.runId,
       payload: {
         id: persisted?.id,
-        message: command.message,
+        itemId: persistedItemId,
+        message: command.displayMessage ?? command.message,
         providerId,
         createdAt: persisted?.createdAt ?? Date.now(),
         turnOptions,
@@ -785,10 +794,7 @@ export class RunManager {
     if (!session || !project || session.projectId !== project.id)
       throw new Error("Session/project mismatch");
     const latestRun = this.store.getLatestRun(session.id);
-    if (
-      latestRun?.status === "running" &&
-      latestRun.serviceInstanceId !== this.serviceInstanceId
-    ) {
+    if (latestRun?.status === "running" && latestRun.serviceInstanceId !== this.serviceInstanceId) {
       throw new Error("Session is handled by another server instance");
     }
     if (this.worker.isActive(session.id) || this.activeRuns.has(session.id)) {

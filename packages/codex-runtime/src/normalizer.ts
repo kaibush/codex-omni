@@ -145,6 +145,7 @@ function mapUnknownItem(
 
 export function createNormalizer(request: BridgeRequest) {
   let seq = 0;
+  let segment = 0;
   const startedAt = Date.now();
   let firstResponseAt: number | undefined;
   const envelope = (
@@ -163,6 +164,11 @@ export function createNormalizer(request: BridgeRequest) {
     payload
   });
   const lastText = new Map<string, string>();
+  const scopedItemId = (itemId: string) => {
+    const value = String(itemId ?? "").trim();
+    if (!value) return value;
+    return segment > 0 ? `s${segment}:${value}` : value;
+  };
   const patchField = (itemId: string, key: "text" | "output", next: string | undefined) => {
     const value = next ?? "";
     const previous = lastText.get(`${key}:${itemId}`) ?? "";
@@ -179,26 +185,27 @@ export function createNormalizer(request: BridgeRequest) {
     item: ThreadItem
   ): BridgeEvent[] => {
     firstResponseAt ??= Date.now();
+    const itemId = scopedItemId(item.id);
     if (item.type === "agent_message")
       return [
         envelope(phase === "completed" ? "assistant.completed" : "assistant.delta", {
-          itemId: item.id,
+          itemId,
           phase,
-          ...(phase === "completed" ? { text: item.text } : patchField(item.id, "text", item.text))
+          ...(phase === "completed" ? { text: item.text } : patchField(itemId, "text", item.text))
         })
       ];
     if (item.type === "reasoning")
       return [
         envelope("reasoning.delta", {
-          itemId: item.id,
+          itemId,
           phase,
-          ...patchField(item.id, "text", item.text)
+          ...patchField(itemId, "text", item.text)
         })
       ];
     if (item.type === "command_execution")
       return [
         envelope(phase === "started" ? "tool.started" : "tool.output", {
-          itemId: item.id,
+          itemId,
           tool: "command",
           command: item.command,
           exitCode: item.exit_code,
@@ -206,13 +213,13 @@ export function createNormalizer(request: BridgeRequest) {
           phase,
           ...(phase === "completed"
             ? { output: item.aggregated_output }
-            : patchField(item.id, "output", item.aggregated_output))
+            : patchField(itemId, "output", item.aggregated_output))
         })
       ];
     if (item.type === "file_change")
       return [
         envelope("file.change", {
-          itemId: item.id,
+          itemId,
           changes: item.changes,
           status: item.status,
           phase
@@ -221,7 +228,7 @@ export function createNormalizer(request: BridgeRequest) {
     if (item.type === "mcp_tool_call")
       return [
         envelope(phase === "started" ? "tool.started" : "tool.output", {
-          itemId: item.id,
+          itemId,
           tool: `mcp__${item.server}__${item.tool}`,
           input: item.arguments,
           result: item.result,
@@ -233,7 +240,7 @@ export function createNormalizer(request: BridgeRequest) {
     if (item.type === "web_search")
       return [
         envelope(phase === "started" ? "tool.started" : "tool.output", {
-          itemId: item.id,
+          itemId,
           tool: "web_search",
           query: item.query,
           phase
@@ -242,7 +249,7 @@ export function createNormalizer(request: BridgeRequest) {
     if (item.type === "todo_list")
       return [
         envelope(phase === "started" ? "tool.started" : "tool.output", {
-          itemId: item.id,
+          itemId,
           tool: "update_plan",
           items: item.items,
           status: phase === "completed" ? "completed" : "in_progress",
@@ -256,14 +263,15 @@ export function createNormalizer(request: BridgeRequest) {
       if (!message) return [];
       return [
         envelope("tool.output", {
-          itemId: item.id,
+          itemId,
           tool: "runtime_error",
           message,
           phase
         })
       ];
     }
-    return mapUnknownItem(phase, item, envelope);
+    const record = asRecord(item) ?? {};
+    return mapUnknownItem(phase, { ...record, id: itemId }, envelope);
   };
   const timedItemEvent = (
     phase: "started" | "updated" | "completed",
@@ -280,6 +288,10 @@ export function createNormalizer(request: BridgeRequest) {
     }));
   };
   return {
+    beginSegment() {
+      segment += 1;
+      lastText.clear();
+    },
     initial: () =>
       envelope("run.started", {
         runtimeKey: request.runtimeKey,
@@ -361,6 +373,7 @@ export function createNormalizer(request: BridgeRequest) {
       const phase = payload.phase === "started" ? "started" : "completed";
       return envelope(phase === "started" ? "tool.started" : "tool.output", {
         ...payload,
+        itemId: scopedItemId(String(payload.itemId ?? "")),
         phase,
         status: payload.status ?? (phase === "started" ? "in_progress" : "completed"),
         startedAt,
@@ -374,7 +387,12 @@ export function createNormalizer(request: BridgeRequest) {
       command: string;
     }) => {
       firstResponseAt ??= Date.now();
-      return envelope("approval.requested", { ...payload, startedAt, firstResponseAt });
+      return envelope("approval.requested", {
+        ...payload,
+        itemId: scopedItemId(payload.itemId),
+        startedAt,
+        firstResponseAt
+      });
     },
     failure: (error: unknown, fallback?: string) =>
       envelope("run.failed", {

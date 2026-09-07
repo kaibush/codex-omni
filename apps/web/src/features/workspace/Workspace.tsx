@@ -277,6 +277,18 @@ export function Workspace() {
       stickToBottom.current = true;
       historyExpanded.current = false;
       historyScrollSnapshot.current = null;
+      // Returning to the live tail starts a fresh paging window. A completed
+      // history walk may have exhausted its cursor even when the cached latest
+      // page still has older messages. An unchanged refetch will not rerun the
+      // page effect, so restore the cursor here as well as the cards.
+      historyRequestId.current += 1;
+      historyLoadingRef.current = false;
+      setHistoryLoading(false);
+      const latestPage = qc.getQueryData<SessionDetailPage>(["session", sessionId]);
+      if (latestPage) {
+        setHistoryCursor(latestPage.nextCursor);
+        setHasOlderMessages(latestPage.hasMore);
+      }
       setTimelineLockId(undefined);
       setFollowingLive(true);
       setHasDeferredLiveEvents(false);
@@ -924,6 +936,7 @@ export function Workspace() {
         setRunState((current) =>
           patchTaskState(current, {
             status: "running",
+            ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
             ...(reconnecting ? { reconnecting } : {})
           })
@@ -942,6 +955,7 @@ export function Workspace() {
         setRunState((current) =>
           patchTaskState(current, {
             status: "completed",
+            ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
             ...(typeof payload.firstResponseAt === "number"
               ? { firstResponseAt: payload.firstResponseAt }
@@ -955,6 +969,7 @@ export function Workspace() {
         setRunState((current) =>
           patchTaskState(current, {
             status: "failed",
+            ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
             endedAt: payload.endedAt ?? Date.now(),
             ...(payload.usage ? { usage: payload.usage } : {}),
@@ -968,6 +983,7 @@ export function Workspace() {
         setRunState((current) =>
           patchTaskState(current, {
             status: "cancelled",
+            ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
             endedAt: payload.endedAt ?? Date.now(),
             ...(payload.reason ? { reason: String(payload.reason) } : {})
@@ -978,6 +994,7 @@ export function Workspace() {
         setRunState((current) =>
           patchTaskState(current, {
             status: "interrupted",
+            ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
             endedAt: payload.endedAt ?? Date.now(),
             ...(payload.reason ? { reason: String(payload.reason) } : {})
@@ -991,6 +1008,7 @@ export function Workspace() {
             ? current
             : patchTaskState(current, {
                 status: "running",
+                ...(typeof event.requestId === "string" ? { runId: event.requestId } : {}),
                 reconnecting: null,
                 ...(!current.firstResponseAt
                   ? {
@@ -1126,7 +1144,7 @@ export function Workspace() {
         beforeId: cursor.id
       });
       const older = await api<SessionDetailPage>(`/api/sessions/${sessionId}?${params}`);
-      if (currentSessionId.current !== sessionId) return;
+      if (currentSessionId.current !== sessionId || historyRequestId.current !== requestId) return;
       const olderEvents = older.messages
         .filter(isVisibleTimelineMessage)
         .map((message) => fromMessage(message));
@@ -1154,7 +1172,7 @@ export function Workspace() {
       setHistoryCursor(older.nextCursor);
       setHasOlderMessages(older.hasMore);
     } catch (error) {
-      if (currentSessionId.current === sessionId) {
+      if (currentSessionId.current === sessionId && historyRequestId.current === requestId) {
         historyScrollSnapshot.current = null;
         setTimelineLockId(undefined);
         setSendNotice(error instanceof Error ? error.message : "更早的历史加载失败");
@@ -1641,7 +1659,11 @@ export function Workspace() {
       if (socket.current?.readyState === WebSocket.OPEN) {
         socket.current.send(command);
         setSendNotice(
-          steering ? "已插入当前对话" : runState?.status === "running" || pendingApprovals.length ? "已加入消息队列" : "正在启动任务"
+          steering
+            ? "已插入当前对话"
+            : runState?.status === "running" || pendingApprovals.length
+              ? "已加入消息队列"
+              : "正在启动任务"
         );
       } else {
         setSendNotice("连接正在恢复，连接成功后会自动发送");

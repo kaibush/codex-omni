@@ -183,6 +183,17 @@ export function patchTaskState(
     runId?: string;
   }
 ): TaskState {
+  if (current) {
+    const sameRun =
+      patch.runId && current.runId
+        ? patch.runId === current.runId
+        : patch.startedAt == null || patch.startedAt === current.startedAt;
+    // A snapshot can arrive before replayed start/progress events. Once this
+    // run has ended, those events must not resurrect it or erase its end time.
+    if (sameRun && current.status !== "running" && patch.status === "running") return current;
+    if (!sameRun && (patch.startedAt == null || patch.startedAt <= current.startedAt))
+      return current;
+  }
   const firstResponseAt = patch.firstResponseAt ?? current?.firstResponseAt;
   const usage = patch.usage ?? current?.usage;
   const reason = patch.reason ?? current?.reason;
@@ -226,7 +237,13 @@ export function beginRunningTaskState(
   const runId = patch.runId ?? current?.runId;
   const sameRun =
     Boolean(patch.runId && current?.runId === patch.runId) ||
-    (current?.status === "running" && !patch.runId);
+    Boolean(
+      current && !patch.runId && (patch.startedAt == null || patch.startedAt === current.startedAt)
+    );
+  if (current) {
+    if (sameRun && current.status !== "running") return current;
+    if (!sameRun && patch.startedAt != null && patch.startedAt <= current.startedAt) return current;
+  }
   return buildTaskState({
     startedAt: patch.startedAt ?? current?.startedAt ?? Date.now(),
     status: "running",

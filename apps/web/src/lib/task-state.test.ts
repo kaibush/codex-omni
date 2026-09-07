@@ -120,6 +120,20 @@ describe("taskStatusLabel", () => {
 });
 
 describe("beginRunningTaskState", () => {
+  it.each(["completed", "cancelled", "failed", "interrupted"] as const)(
+    "does not revive a %s snapshot when the same run's start is replayed",
+    (status) => {
+      const snapshot = { status, runId: "run-1", startedAt: 1000, endedAt: 2000 };
+      expect(beginRunningTaskState(snapshot, { runId: "run-1", startedAt: 1000 })).toBe(snapshot);
+      expect(beginRunningTaskState(snapshot, { startedAt: 1000 })).toBe(snapshot);
+    }
+  );
+
+  it("ignores an older run's start after a newer run is restored", () => {
+    const current = { status: "running" as const, runId: "run-2", startedAt: 3000 };
+    expect(beginRunningTaskState(current, { runId: "run-1", startedAt: 1000 })).toBe(current);
+  });
+
   it("does not reuse firstResponseAt from a previous completed run", () => {
     const previous = resolveTaskState({
       sessionStatus: "idle",
@@ -161,6 +175,35 @@ describe("beginRunningTaskState", () => {
 });
 
 describe("patchTaskState", () => {
+  it.each(["completed", "cancelled", "failed", "interrupted"] as const)(
+    "keeps a %s snapshot terminal through replayed progress and reconnect notices",
+    (status) => {
+      const snapshot = { status, runId: "run-1", startedAt: 1000, endedAt: 2000 };
+      expect(
+        patchTaskState(snapshot, { status: "running", runId: "run-1", firstResponseAt: 1500 })
+      ).toBe(snapshot);
+      expect(
+        patchTaskState(snapshot, {
+          status: "running",
+          reconnecting: {
+            message: "Reconnecting... 1/5 (stream disconnected)",
+            attempt: 1,
+            maxAttempts: 5,
+            reason: "stream disconnected"
+          }
+        })
+      ).toBe(snapshot);
+    }
+  );
+
+  it("ignores delayed progress and failure events from the previous run", () => {
+    const current = { status: "running" as const, runId: "run-2", startedAt: 3000 };
+    expect(patchTaskState(current, { status: "running", runId: "run-1" })).toBe(current);
+    expect(
+      patchTaskState(current, { status: "failed", runId: "run-1", startedAt: 1000, endedAt: 4000 })
+    ).toBe(current);
+  });
+
   it("preserves object identity for repeated visible stream progress", () => {
     const current = {
       startedAt: 1000,

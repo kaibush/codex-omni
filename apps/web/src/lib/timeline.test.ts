@@ -489,6 +489,27 @@ describe("plan and stream-error cleanup", () => {
     expect(planItemsCompleted(result[0]?.data)).toBe(1);
   });
 
+  it("does not merge plan cards across a later user turn", () => {
+    const result = coalesceDuplicatePlanItems([
+      item("plan-a", 1, {
+        kind: "tool",
+        data: {
+          tool: "update_plan",
+          items: [{ text: "Inspect reports", status: "completed" }]
+        }
+      }),
+      item("user-steer", 2, { kind: "user", text: "还有西安的" }),
+      item("plan-b", 3, {
+        kind: "tool",
+        data: {
+          tool: "update_plan",
+          items: [{ text: "Inspect reports", status: "pending" }]
+        }
+      })
+    ]);
+    expect(result.map((entry) => entry.id)).toEqual(["plan-a", "user-steer", "plan-b"]);
+  });
+
   it("hides a recovered stream error that sits after a later assistant card", () => {
     const result = hideSupersededStreamErrors([
       item("assistant-1", 41, { kind: "assistant", text: "ok" }),

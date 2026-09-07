@@ -117,8 +117,7 @@ function pickRicherPlan(left: TimelineItem, right: TimelineItem): TimelineItem {
   };
 }
 
-/** Keep one checklist when Codex emits started+updated plan cards with different ids. */
-export function coalesceDuplicatePlanItems(items: TimelineItem[]): TimelineItem[] {
+function coalescePlanSegment(items: TimelineItem[]): TimelineItem[] {
   const best = new Map<string, TimelineItem>();
   for (const item of items) {
     if (item.kind !== "tool" || !isPlanTool(item.data)) continue;
@@ -137,6 +136,19 @@ export function coalesceDuplicatePlanItems(items: TimelineItem[]): TimelineItem[
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(best.get(key) ?? item);
+  }
+  return result;
+}
+
+/** Keep one checklist when Codex emits started+updated plan cards with different ids. */
+export function coalesceDuplicatePlanItems(items: TimelineItem[]): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  let start = 0;
+  for (let index = 0; index <= items.length; index += 1) {
+    if (index < items.length && items[index]?.kind !== "user") continue;
+    if (index > start) result.push(...coalescePlanSegment(items.slice(start, index)));
+    if (index < items.length) result.push(items[index]!);
+    start = index + 1;
   }
   return result;
 }

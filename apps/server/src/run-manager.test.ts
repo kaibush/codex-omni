@@ -8,6 +8,7 @@ import type { BridgeEvent } from "@codex-omni/protocol";
 const runtimeMocks = vi.hoisted(() => ({
   run: vi.fn(),
   respond: vi.fn(() => false),
+  steer: vi.fn((..._args: unknown[]) => true),
   cancel: vi.fn(() => false),
   shutdown: vi.fn(),
   active: false,
@@ -34,6 +35,9 @@ vi.mock("@codex-omni/codex-runtime", async (importOriginal) => ({
     }
     respond() {
       return runtimeMocks.respond();
+    }
+    steer(...args: unknown[]) {
+      return runtimeMocks.steer(...args);
     }
     cancel() {
       runtimeMocks.active = false;
@@ -72,6 +76,8 @@ beforeEach(() => {
   runtimeMocks.run.mockReset();
   runtimeMocks.respond.mockReset();
   runtimeMocks.respond.mockReturnValue(false);
+  runtimeMocks.steer.mockReset();
+  runtimeMocks.steer.mockReturnValue(true);
   runtimeMocks.cancel.mockReset();
   runtimeMocks.cancel.mockReturnValue(false);
   runtimeMocks.shutdown.mockReset();
@@ -1576,7 +1582,143 @@ describe("RunManager reconnect state", () => {
   });
 });
 
+describe("RunManager steer inserts", () => {
+  it("persists a steered user turn without replacing the current run cards", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    let release!: () => void;
+    runtimeMocks.run.mockImplementation(
+      async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "assistant.completed",
+            payload: { itemId: "m1", text: "先查北京。" }
+          })
+        );
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+    manager = new RunManager(store!, "/tmp/runtime");
+    const first = manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "明天北京的天气"
+      },
+      socket
+    );
+    await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(1));
+    await manager.handle(
+      {
+        type: "turn.steer",
+        clientId: "steer-1",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "Runtime-only context: 还有西安的",
+        displayMessage: "还有西安的"
+      },
+      socket
+    );
+    expect(runtimeMocks.steer).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.steer).toHaveBeenCalledWith(
+      session.id,
+      "Runtime-only context: 还有西安的",
+      []
+    );
+    const users =
+      store?.listMessages(session.id).filter((message) => message.role === "user") ?? [];
+    expect(users.map((message) => message.content)).toEqual(["明天北京的天气", "还有西安的"]);
+    const steered = users[1]!;
+    expect(steered.itemId).toBe("steer:steer-1");
+    expect(
+      sent.find((event) => event.type === "user.message" && event.payload?.steer)
+    ).toMatchObject({
+      payload: {
+        id: steered.id,
+        itemId: "steer:steer-1",
+        message: "还有西安的",
+        steer: true
+      }
+    });
+    expect(
+      store?.listMessages(session.id).find((message) => message.role === "assistant")?.content
+    ).toBe("先查北京。");
+    release();
+    await first;
+  });
+});
+
 describe("RunManager recovery and queue", () => {
+  it.each(["cancelled", "failed", "interrupted"] as const)(
+    "replays a server-side %s event after all earlier progress",
+    async (status) => {
+      const { project, provider, session, socket, sent } = fixture();
+      let release!: () => void;
+      runtimeMocks.run.mockImplementation(
+        async (_request: unknown, onEvent: (event: BridgeEvent) => void) => {
+          onEvent(bridgeEvent({ seq: 1, type: "run.started", payload: {} }));
+          onEvent(
+            bridgeEvent({
+              seq: 2,
+              type: "tool.output",
+              payload: { itemId: "tool-1", tool: "command", phase: "completed", output: "done" }
+            })
+          );
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      );
+      manager = new RunManager(store!, "/tmp/runtime", status === "failed" ? 100 : 60_000);
+      const running = manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: session.id,
+          providerId: provider.id,
+          message: "run"
+        },
+        socket
+      );
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      manager.unsubscribeSocket(socket);
+      if (status === "cancelled") manager.cancel(session.id);
+      else if (status === "interrupted") manager.shutdown();
+      await vi.waitFor(() => expect(store?.getLatestRun(session.id)?.status).toBe(status));
+      release();
+      await running;
+
+      const run = store!.getLatestRun(session.id)!;
+      const persisted = store!
+        .listRunEvents(run.id, -1, 100)
+        .map((row) => JSON.parse(row.eventJson));
+      expect(persisted.at(-1)).toMatchObject({
+        type: `run.${status}`,
+        requestId: run.id,
+        seq: 3,
+        payload: { status }
+      });
+      sent.length = 0;
+      await manager.handle(
+        { type: "session.subscribe", sessionId: session.id, lastRequestId: run.id, lastSeq: 0 },
+        socket
+      );
+      expect(sent[0]).toMatchObject({ type: "session.snapshot", payload: { run: { status } } });
+      expect(sent.at(-1)).toMatchObject({ type: `run.${status}`, seq: 3 });
+    }
+  );
+
   it("locks a session before persisting a second concurrent user message", async () => {
     const { project, provider, session, socket } = fixture();
     let release!: () => void;
