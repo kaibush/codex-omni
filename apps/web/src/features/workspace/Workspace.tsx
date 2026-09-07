@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { applyTextPatch, compactTimelineItem } from "@codex-omni/protocol";
+import { applyTextPatch, compactTimelineItem, type TurnAttachment } from "@codex-omni/protocol";
 import { useNavigate, useParams } from "react-router";
 import { FolderPlus, LoaderCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -110,6 +110,7 @@ import { WorkspaceComposer } from "@/features/workspace/WorkspaceComposer";
 import { WorkspaceHeader } from "@/features/workspace/WorkspaceHeader";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
+import { messageRetryPayload } from "@/features/workspace/message-retry";
 import {
   SESSION_PAGE_SIZE,
   boundOutboundCommands,
@@ -903,9 +904,15 @@ export function Workspace() {
         enqueueTimelineUpdate((current) =>
           upsert(current, String(payload.id ?? `user-${event.requestId}`), {
             kind: "user",
+            ...(typeof payload.id === "string" ? { messageId: payload.id } : {}),
             text: String(payload.message ?? ""),
             providerId: payload.providerId ?? providerIdRef.current,
-            ...(payload.continuation === true ? { data: { continuation: true } } : {}),
+            data: {
+              attachments: queuedAttachmentMeta(payload),
+              ...(payload.turnOptions ? { turnOptions: payload.turnOptions } : {}),
+              ...(payload.continuation === true ? { continuation: true } : {}),
+              ...(payload.continuationRetry === true ? { continuationRetry: true } : {})
+            },
             createdAt: payload.createdAt ?? Date.now()
           })
         );
@@ -1535,7 +1542,7 @@ export function Workspace() {
   const send = () => {
     void submitMessage();
   };
-  const submitMessage = async (overrideText?: string) => {
+  const submitMessage = async (overrideText?: string, retryAttachments: TurnAttachment[] = []) => {
     const usingOverride = overrideText != null;
     const raw = (usingOverride ? overrideText : input).trim();
     const files = usingOverride ? [] : attachments;
@@ -1567,11 +1574,7 @@ export function Workspace() {
         ? {
             message: raw,
             displayMessage: raw,
-            attachments: [] as Array<{
-              name: string;
-              path: string;
-              kind: ComposerAttachment["kind"];
-            }>
+            attachments: retryAttachments
           }
         : await composeTurnPayload(raw, files);
       if (isPlaceholderSessionTitle(activeSession.title)) {
@@ -1651,6 +1654,14 @@ export function Workspace() {
       setAttachError(message);
     } finally {
       setSending(false);
+    }
+  };
+  const retryMessage = async (item: TimelineItem) => {
+    try {
+      const retry = await messageRetryPayload(item, (id) => api<Message>(`/api/messages/${id}`));
+      await submitMessage(retry.message, retry.attachments);
+    } catch (error) {
+      setSendNotice(error instanceof Error ? error.message : "重试消息加载失败");
     }
   };
   const removeQueuedTurn = (queueId: string) => {
@@ -2154,6 +2165,7 @@ export function Workspace() {
               setAttachments={setAttachments}
               inputRef={inputRef}
               submitMessage={submitMessage}
+              retryMessage={retryMessage}
               quoteToInput={quoteToInput}
               copyMessageLink={copyMessageLink}
               starredIds={starredIds}

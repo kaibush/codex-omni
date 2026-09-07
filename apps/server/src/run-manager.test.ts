@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Store } from "@codex-omni/db";
 import type { BridgeEvent } from "@codex-omni/protocol";
 
@@ -18,7 +21,8 @@ const runtimeMocks = vi.hoisted(() => ({
   }
 }));
 
-vi.mock("@codex-omni/codex-runtime", () => ({
+vi.mock("@codex-omni/codex-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@codex-omni/codex-runtime")>()),
   BridgeWorkerAdapter: class {
     async run(...args: unknown[]) {
       runtimeMocks.active = true;
@@ -62,6 +66,7 @@ import { RunManager } from "./run-manager.js";
 
 let store: Store | undefined;
 let manager: RunManager | undefined;
+const tempDirs: string[] = [];
 
 beforeEach(() => {
   runtimeMocks.run.mockReset();
@@ -80,15 +85,16 @@ afterEach(() => {
   manager = undefined;
   store?.db.close();
   store = undefined;
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(root = "/tmp/project") {
   store = new Store(":memory:");
   const provider = store.upsertProvider({ name: "Provider" });
   const project = store.createProject({
     name: "Project",
-    displayPath: "/tmp/project",
-    realPath: "/tmp/project",
+    displayPath: root,
+    realPath: root,
     providerId: provider.id
   });
   const session = store.createSession({ projectId: project.id, providerId: provider.id });
@@ -101,6 +107,18 @@ function fixture() {
     }
   };
   return { provider, project, session, socket, sent };
+}
+
+function attachmentFixture() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "omni-attachment-run-"));
+  tempDirs.push(dir);
+  const root = path.join(dir, "project");
+  mkdirSync(path.join(root, ".codex-uploads"), { recursive: true });
+  const imagePath = path.join(root, ".codex-uploads", "shot.png");
+  writeFileSync(imagePath, "image");
+  const outside = path.join(dir, "secret.png");
+  writeFileSync(outside, "outside");
+  return { ...fixture(root), imagePath, outside };
 }
 
 function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: number }): BridgeEvent {
@@ -256,6 +274,158 @@ describe("RunManager terminal state", () => {
     const terminal = sent.find((event) => event.type === "turn.completed")!;
     expect(terminal.seq).toBe(3);
     expect(store!.getLatestRun(session.id)).toMatchObject({ status: "completed", lastSeq: 3 });
+  });
+});
+
+describe("RunManager attachments", () => {
+  it("persists and broadcasts attachments, and restores them and run options by message id", async () => {
+    const { project, session, socket, sent, imagePath } = attachmentFixture();
+    const attachments = [{ name: "shot.png", path: imagePath, kind: "image" as const }];
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "inspect",
+        model: "image-model",
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false,
+        attachments: [{ ...attachments[0]!, path: ".codex-uploads/shot.png" }]
+      },
+      socket
+    );
+    const user = store!.listMessages(session.id).find((message) => message.role === "user")!;
+    expect(JSON.parse(user.dataJson!)).toMatchObject({ attachments });
+    expect(sent.find((event) => event.type === "user.message")?.payload.attachments).toEqual(
+      attachments
+    );
+    await manager.handle(
+      {
+        type: "run.retry",
+        projectId: project.id,
+        sessionId: session.id,
+        messageId: user.id,
+        message: user.content
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        attachments,
+        model: "image-model",
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false
+      }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("forwards explicit retry attachments without weakening runtime defaults", async () => {
+    const { project, session, socket, imagePath } = attachmentFixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "run.retry",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "inspect",
+        attachments: [{ name: "shot.png", path: imagePath, kind: "image" }]
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [{ name: "shot.png", path: imagePath, kind: "image" }],
+        approvalPolicy: "on-request"
+      }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+  });
+
+  it.each(["turn.start", "turn.enqueue", "run.retry"] as const)(
+    "rejects outside attachments before %s has side effects",
+    async (type) => {
+      const { project, session, socket, outside } = attachmentFixture();
+      manager = new RunManager(store!, "/tmp/runtime");
+      await expect(
+        manager.handle(
+          {
+            type,
+            projectId: project.id,
+            sessionId: session.id,
+            message: "inspect",
+            attachments: [{ name: "secret.png", path: outside, kind: "image" }]
+          },
+          socket
+        )
+      ).rejects.toThrow("inside the project");
+      expect(runtimeMocks.run).not.toHaveBeenCalled();
+      expect(store!.getLatestRun(session.id)).toBeUndefined();
+      expect(store!.listMessages(session.id)).toEqual([]);
+      expect(store!.listQueuedTurns(session.id)).toEqual([]);
+    }
+  );
+
+  it("revalidates queued files after a symlink replacement and keeps the queue for correction", async () => {
+    const { project, session, socket, sent, imagePath, outside } = attachmentFixture();
+    manager = new RunManager(store!, "/tmp/runtime");
+    runtimeMocks.active = true;
+    await manager.handle(
+      {
+        type: "turn.enqueue",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "inspect",
+        attachments: [{ name: "shot.png", path: imagePath, kind: "image" }]
+      },
+      socket
+    );
+    rmSync(imagePath);
+    symlinkSync(outside, imagePath);
+    runtimeMocks.active = false;
+    await manager.handle({ type: "queue.start-next", sessionId: session.id }, socket);
+    await vi.waitFor(() => expect(sent.some((event) => event.type === "server.error")).toBe(true));
+    expect(runtimeMocks.run).not.toHaveBeenCalled();
+    expect(store!.listQueuedTurns(session.id)).toHaveLength(1);
+    expect(store!.getLatestRun(session.id)).toBeUndefined();
+  });
+
+  it("rejects retry metadata from another session", async () => {
+    const { project, session, socket } = attachmentFixture();
+    const other = store!.createSession({ projectId: project.id });
+    const source = store!.addMessage({
+      sessionId: other.id,
+      role: "user",
+      content: "other",
+      providerId: null,
+      eventType: "user.message"
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await expect(
+      manager.handle(
+        {
+          type: "run.retry",
+          projectId: project.id,
+          sessionId: session.id,
+          message: "inspect",
+          messageId: source.id
+        },
+        socket
+      )
+    ).rejects.toThrow("does not belong to this session");
+    expect(runtimeMocks.run).not.toHaveBeenCalled();
   });
 });
 
@@ -657,12 +827,10 @@ describe("RunManager reconnect state", () => {
   });
 
   it("forwards queued image attachments to the runtime", async () => {
-    const { project, provider, session, socket } = fixture();
+    const { project, provider, session, socket, imagePath } = attachmentFixture();
     runtimeMocks.run.mockImplementation(
       async (request: { attachments?: unknown }, onEvent: (event: BridgeEvent) => void) => {
-        expect(request.attachments).toEqual([
-          { name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }
-        ]);
+        expect(request.attachments).toEqual([{ name: "shot.png", path: imagePath, kind: "image" }]);
         onEvent(
           bridgeEvent({
             seq: 1,

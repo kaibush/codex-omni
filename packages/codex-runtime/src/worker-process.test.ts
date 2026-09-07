@@ -155,6 +155,23 @@ process.stdin.on("end", () => {
 });
 
 describe("bridge subprocess transport", () => {
+  it("rejects an outside attachment through the actual worker entry without starting an API turn", async () => {
+    const worker = new BridgeWorkerAdapter();
+    workers.push(worker);
+    const events: BridgeEvent[] = [];
+    await expect(
+      worker.run(
+        {
+          ...request(),
+          attachments: [{ name: "outside.png", path: "../outside.png", kind: "image" }]
+        },
+        (event) => events.push(event)
+      )
+    ).rejects.toThrow("inside the project");
+    expect(events.map((event) => event.type)).toEqual(["run.started", "run.failed"]);
+    expect(worker.runtimeInfo("s")).toBeNull();
+  });
+
   async function adapter() {
     const entry = path.join(dir, "worker.cjs");
     await writeFile(

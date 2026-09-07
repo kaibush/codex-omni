@@ -108,6 +108,7 @@ export function WorkspaceTimeline({
   setAttachments,
   inputRef,
   submitMessage,
+  retryMessage,
   quoteToInput,
   copyMessageLink,
   starredIds,
@@ -166,6 +167,7 @@ export function WorkspaceTimeline({
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   submitMessage: (text?: string) => void;
+  retryMessage: (item: TimelineItem) => void;
   quoteToInput: (text: string) => void;
   copyMessageLink: (id: string) => void;
   starredIds: string[];
@@ -546,7 +548,7 @@ export function WorkspaceTimeline({
                         : undefined
                     }
                     onRetry={
-                      item.kind === "user" ? () => void submitMessage(item.text ?? "") : undefined
+                      item.kind === "user" ? () => void retryMessage(item) : undefined
                     }
                     onQuote={
                       item.kind === "user" || item.kind === "assistant"

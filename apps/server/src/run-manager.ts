@@ -5,6 +5,7 @@ import {
   INCOMPLETE_TURN_MESSAGE,
   resolveProviderHome,
   runtimeKey,
+  sanitizeCodexAttachments,
   terminateRecordedWorker,
   type WorkerRuntimeInfo
 } from "@codex-omni/codex-runtime";
@@ -22,6 +23,7 @@ import {
   firstUsefulFailureMessage,
   isGenericCodexExecError,
   sanitizeCodexExecError,
+  turnOptionsSchema,
   truncateToolText,
   type BridgeEvent,
   type RunCommand,
@@ -101,19 +103,7 @@ function shouldRetryContinuation(assistantText: string, hasExecutionEvidence: bo
 }
 
 function queuedAttachments(options: Record<string, any>): TurnAttachment[] {
-  if (!Array.isArray(options.attachments)) return [];
-  return options.attachments.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as Record<string, unknown>;
-    const name = typeof record.name === "string" ? record.name.trim() : "";
-    const filePath = typeof record.path === "string" ? record.path.trim() : "";
-    const kind =
-      record.kind === "image" || record.kind === "text" || record.kind === "file"
-        ? record.kind
-        : null;
-    if (!name || !filePath || !kind) return [];
-    return [{ name, path: filePath, kind }];
-  });
+  return turnOptionsSchema.shape.attachments.parse(options.attachments) ?? [];
 }
 
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
@@ -612,6 +602,7 @@ export class RunManager {
       this.sendQueueSnapshot(command.sessionId);
       return existingRun;
     }
+    const attachments = sanitizeCodexAttachments(project.realPath, command.attachments);
     const queued = this.store.enqueueTurn({
       ...(command.clientId ? { id: command.clientId } : {}),
       sessionId: command.sessionId,
@@ -627,7 +618,7 @@ export class RunManager {
           : {}),
         ...(command.mode ? { mode: command.mode } : {}),
         ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
-        ...(command.attachments?.length ? { attachments: command.attachments } : {})
+        ...(attachments.length ? { attachments } : {})
       })
     });
     this.acknowledgeQueue(command.sessionId, queued.id, "queued");
@@ -673,13 +664,27 @@ export class RunManager {
     }
   }
 
-  private async startTurn(command: TurnStartCommand, sourceQueueId?: string) {
+  private async startTurn(input: TurnStartCommand, sourceQueueId?: string) {
+    let command = input;
+    if (input.type === "run.retry" && input.messageId) {
+      const source = this.store.getMessage(input.messageId);
+      if (!source || source.sessionId !== input.sessionId || source.role !== "user")
+        throw new Error("Retry message does not belong to this session");
+      const data = parseJson<Record<string, unknown>>(source.dataJson, {});
+      const previousOptions = turnOptionsSchema.parse(data.turnOptions ?? {});
+      command = {
+        ...previousOptions,
+        ...input,
+        attachments: input.attachments ?? queuedAttachments(data)
+      };
+    }
     const session = this.store.getSession(command.sessionId);
     const project = this.store.getProject(command.projectId);
     if (!session || !project || session.projectId !== project.id)
       throw new Error("Session/project mismatch");
     if (this.worker.isActive(session.id) || this.activeRuns.has(session.id))
       throw new Error("Session already has an active turn");
+    const attachments = sanitizeCodexAttachments(project.realPath, command.attachments);
     if (session.status === "running") {
       this.finishRun(session.id, "interrupted", { reason: "worker-gone" });
     }
@@ -695,7 +700,7 @@ export class RunManager {
       ? this.store.findMessageByEventType(session.id, "provider.continuation")?.content
       : null;
     const continuationRetry = command.continuationRetry === true;
-    const planMode = !continuationRetry && command.type === "turn.start" && command.mode === "plan";
+    const planMode = !continuationRetry && command.mode === "plan";
     const userMessageText = continuationRetry
       ? "自动复核：继续执行上一轮未完成的工作"
       : planMode
@@ -740,8 +745,14 @@ export class RunManager {
       startedAt,
       timeout
     });
-    const selectedModel =
-      command.type === "turn.start" ? (command.model ?? provider.model) : provider.model;
+    const selectedModel = command.model ?? provider.model;
+    const turnOptions = {
+      ...(selectedModel ? { model: selectedModel } : {}),
+      sandbox: planMode ? ("read-only" as const) : (command.sandbox ?? settings.sandbox),
+      approvalPolicy: command.approvalPolicy ?? settings.approvalPolicy,
+      networkAccessEnabled: command.networkAccessEnabled ?? settings.networkAccessEnabled,
+      mode: planMode ? ("plan" as const) : ("execute" as const)
+    };
     this.store.createRun({
       id: requestId,
       sessionId: session.id,
@@ -779,14 +790,12 @@ export class RunManager {
       content: userMessageText,
       providerId: provider.id,
       eventType: "user.message",
-      ...(continuationApplied
-        ? {
-            dataJson: JSON.stringify({
-              continuation: true,
-              ...(continuationRetry ? { continuationRetry: true } : {})
-            })
-          }
-        : {})
+      dataJson: JSON.stringify({
+        turnOptions,
+        ...(attachments.length ? { attachments } : {}),
+        ...(continuationApplied ? { continuation: true } : {}),
+        ...(continuationRetry ? { continuationRetry: true } : {})
+      })
     });
     this.broadcast(session.id, {
       type: "user.message",
@@ -797,6 +806,8 @@ export class RunManager {
         message: userMessage.content,
         providerId: userMessage.providerId,
         createdAt: userMessage.createdAt,
+        turnOptions,
+        ...(attachments.length ? { attachments } : {}),
         ...(continuationApplied
           ? { continuation: true, ...(continuationRetry ? { continuationRetry: true } : {}) }
           : {})
@@ -943,22 +954,10 @@ export class RunManager {
             ...(provider.configToml ? { configToml: provider.configToml } : {}),
             ...(provider.authJson ? { authJson: provider.authJson } : {}),
             ...(provider.envJson ? { messageEnvVars: JSON.parse(provider.envJson) } : {}),
-            ...(command.type === "turn.start" && command.attachments?.length
-              ? { attachments: command.attachments }
-              : {}),
-            sandbox: planMode
-              ? "read-only"
-              : command.type === "turn.start"
-                ? (command.sandbox ?? settings.sandbox)
-                : "workspace-write",
-            approvalPolicy:
-              command.type === "turn.start"
-                ? (command.approvalPolicy ?? settings.approvalPolicy)
-                : "never",
-            networkAccessEnabled:
-              command.type === "turn.start"
-                ? (command.networkAccessEnabled ?? settings.networkAccessEnabled)
-                : settings.networkAccessEnabled
+            ...(attachments.length ? { attachments } : {}),
+            sandbox: turnOptions.sandbox,
+            approvalPolicy: turnOptions.approvalPolicy,
+            networkAccessEnabled: turnOptions.networkAccessEnabled
           },
           onRuntimeEvent,
           (runtime) => this.updateRuntime(requestId, runtime)
@@ -1010,6 +1009,8 @@ export class RunManager {
         completed = false;
         await this.startTurn({
           ...command,
+          ...turnOptions,
+          attachments,
           type: "turn.start",
           projectId: project.id,
           sessionId: session.id,

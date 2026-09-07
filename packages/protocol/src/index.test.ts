@@ -92,6 +92,29 @@ describe("protocol", () => {
     expect(command.type).toBe("run.retry");
     if (command.type === "run.retry") expect(command.providerId).toBe("other");
   });
+  it("keeps retry attachments, original message ids and runtime options", () => {
+    const command = {
+      type: "run.retry",
+      projectId: "p",
+      sessionId: "s",
+      message: "inspect",
+      messageId: "original",
+      model: "custom",
+      sandbox: "read-only",
+      approvalPolicy: "on-request",
+      networkAccessEnabled: false,
+      attachments: [{ name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }]
+    };
+    expect(runCommandSchema.parse(command)).toEqual(command);
+    for (const path of ["", "   ", "image\0.png"]) {
+      expect(
+        runCommandSchema.safeParse({
+          ...command,
+          attachments: [{ ...command.attachments[0], path }]
+        }).success
+      ).toBe(false);
+    }
+  });
   it("accepts a session subscribe command after reconnect", () => {
     expect(runCommandSchema.parse({ type: "session.subscribe", sessionId: "session-1" })).toEqual({
       type: "session.subscribe",

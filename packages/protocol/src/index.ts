@@ -183,10 +183,25 @@ export type BridgeEvent = z.infer<typeof eventSchema>;
 
 export const turnAttachmentSchema = z.object({
   name: z.string().min(1),
-  path: z.string().min(1),
+  path: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((value) => Boolean(value.trim()) && !value.includes("\0"), {
+      message: "Attachment path is invalid"
+    }),
   kind: z.enum(["image", "text", "file"])
 });
 export type TurnAttachment = z.infer<typeof turnAttachmentSchema>;
+
+export const turnOptionsSchema = z.object({
+  model: z.string().optional(),
+  sandbox: sandboxSchema.optional(),
+  approvalPolicy: approvalPolicySchema.optional(),
+  networkAccessEnabled: z.boolean().optional(),
+  mode: z.enum(["plan", "execute"]).optional(),
+  attachments: z.array(turnAttachmentSchema).max(8).optional()
+});
 
 export const runCommandSchema = z.discriminatedUnion("type", [
   z.object({
@@ -195,12 +210,7 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     message: z.string().min(1),
     providerId: z.string().optional(),
-    model: z.string().optional(),
-    sandbox: sandboxSchema.optional(),
-    approvalPolicy: approvalPolicySchema.optional(),
-    networkAccessEnabled: z.boolean().optional(),
-    mode: z.enum(["plan", "execute"]).optional(),
-    attachments: z.array(turnAttachmentSchema).optional()
+    ...turnOptionsSchema.shape
   }),
   z.object({
     type: z.literal("turn.enqueue"),
@@ -209,13 +219,8 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     message: z.string().min(1),
     displayMessage: z.string().optional(),
-    attachments: z.array(turnAttachmentSchema).optional(),
     providerId: z.string().optional(),
-    model: z.string().optional(),
-    sandbox: sandboxSchema.optional(),
-    approvalPolicy: approvalPolicySchema.optional(),
-    networkAccessEnabled: z.boolean().optional(),
-    mode: z.enum(["plan", "execute"]).optional()
+    ...turnOptionsSchema.shape
   }),
   z.object({ type: z.literal("turn.cancel"), sessionId: z.string(), turnId: z.string() }),
   z.object({
@@ -250,7 +255,9 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     projectId: z.string(),
     sessionId: z.string(),
     message: z.string().min(1),
-    providerId: z.string().optional()
+    providerId: z.string().optional(),
+    messageId: z.string().min(1).optional(),
+    ...turnOptionsSchema.shape
   })
 ]);
 export type RunCommand = z.infer<typeof runCommandSchema>;
@@ -324,7 +331,7 @@ export const bridgeRequestSchema = z.object({
   configToml: z.string().optional(),
   authJson: z.string().optional(),
   messageEnvVars: z.record(z.string(), z.string()).optional(),
-  attachments: z.array(turnAttachmentSchema).optional(),
+  attachments: turnOptionsSchema.shape.attachments,
   sandbox: sandboxSchema,
   approvalPolicy: approvalPolicySchema,
   networkAccessEnabled: z.boolean()
