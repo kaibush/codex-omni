@@ -58,8 +58,7 @@ export function isGenericCodexExecError(value: unknown) {
 export function sanitizeCodexExecError(value: unknown, fallback?: string) {
   const message = typeof value === "string" ? value.trim() : "";
   const fallbackText = typeof fallback === "string" ? fallback.trim() : "";
-  const usableFallback =
-    fallbackText && !isGenericCodexExecError(fallbackText) ? fallbackText : "";
+  const usableFallback = fallbackText && !isGenericCodexExecError(fallbackText) ? fallbackText : "";
   const match = message.match(CODEX_EXEC_EXIT);
   if (match) {
     const stderr = usefulCodexStderr(match[2] ?? "");
@@ -182,6 +181,13 @@ export const eventSchema = z.object({
 });
 export type BridgeEvent = z.infer<typeof eventSchema>;
 
+export const turnAttachmentSchema = z.object({
+  name: z.string().min(1),
+  path: z.string().min(1),
+  kind: z.enum(["image", "text", "file"])
+});
+export type TurnAttachment = z.infer<typeof turnAttachmentSchema>;
+
 export const runCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("turn.start"),
@@ -193,7 +199,8 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     sandbox: sandboxSchema.optional(),
     approvalPolicy: approvalPolicySchema.optional(),
     networkAccessEnabled: z.boolean().optional(),
-    mode: z.enum(["plan", "execute"]).optional()
+    mode: z.enum(["plan", "execute"]).optional(),
+    attachments: z.array(turnAttachmentSchema).optional()
   }),
   z.object({
     type: z.literal("turn.enqueue"),
@@ -202,15 +209,7 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     message: z.string().min(1),
     displayMessage: z.string().optional(),
-    attachments: z
-      .array(
-        z.object({
-          name: z.string().min(1),
-          path: z.string().min(1),
-          kind: z.enum(["image", "text", "file"])
-        })
-      )
-      .optional(),
+    attachments: z.array(turnAttachmentSchema).optional(),
     providerId: z.string().optional(),
     model: z.string().optional(),
     sandbox: sandboxSchema.optional(),
@@ -325,6 +324,7 @@ export const bridgeRequestSchema = z.object({
   configToml: z.string().optional(),
   authJson: z.string().optional(),
   messageEnvVars: z.record(z.string(), z.string()).optional(),
+  attachments: z.array(turnAttachmentSchema).optional(),
   sandbox: sandboxSchema,
   approvalPolicy: approvalPolicySchema,
   networkAccessEnabled: z.boolean()

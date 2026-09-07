@@ -110,6 +110,18 @@ describe("protocol", () => {
     ).toMatchObject({ type: "turn.enqueue", clientId: "client-1" });
     expect(
       runCommandSchema.parse({
+        type: "turn.start",
+        projectId: "project-1",
+        sessionId: "session-1",
+        message: "see image",
+        attachments: [{ name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }]
+      })
+    ).toMatchObject({
+      type: "turn.start",
+      attachments: [{ name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }]
+    });
+    expect(
+      runCommandSchema.parse({
         type: "session.subscribe",
         sessionId: "session-1",
         lastRequestId: "run-1",

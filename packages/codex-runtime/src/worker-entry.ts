@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { Codex } from "@openai/codex-sdk";
 import { bridgeRequestSchema, firstUsefulFailureMessage } from "@codex-omni/protocol";
 import { createCollabRolloutTailer } from "./collab-rollout.js";
+import { buildCodexRunInput } from "./codex-input.js";
 import { gitMetadataWritableRoots } from "./git-metadata.js";
+import { resolveCodexModelRuntimeConfig } from "./model-runtime-config.js";
 import { createNormalizer } from "./normalizer.js";
 import { workerEnvironment } from "./provider-home.js";
 
@@ -81,13 +83,22 @@ collabTimer.unref();
 let terminalFailure = false;
 let lastFailureMessage = "";
 try {
+  const modelRuntime = resolveCodexModelRuntimeConfig({
+    ...(request.model ? { model: request.model } : {}),
+    ...(request.configToml ? { configToml: request.configToml } : {})
+  });
   const codex = new Codex({
     ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
     ...(request.apiKey ? { apiKey: request.apiKey } : {}),
     env: workerEnvironment(request),
     config: {
       model_supports_reasoning_summaries: true,
-      features: { multi_agent: true }
+      features: { multi_agent: true },
+      ...(modelRuntime.contextWindow ? { model_context_window: modelRuntime.contextWindow } : {}),
+      ...(modelRuntime.autoCompactTokenLimit
+        ? { model_auto_compact_token_limit: modelRuntime.autoCompactTokenLimit }
+        : {}),
+      ...(modelRuntime.serviceTier ? { service_tier: modelRuntime.serviceTier } : {})
     }
   });
   const options = {
@@ -104,7 +115,9 @@ try {
   const thread = request.threadId
     ? codex.resumeThread(request.threadId, options)
     : codex.startThread(options);
-  const { events } = await thread.runStreamed(request.message);
+  const { events } = await thread.runStreamed(
+    buildCodexRunInput(request.message, request.attachments, request.cwd)
+  );
   for await (const event of events) {
     if (
       request.approvalPolicy !== "never" &&
@@ -141,11 +154,7 @@ try {
         if (message) lastFailureMessage = message;
       } else if (mapped.type === "run.reconnecting" && message) {
         lastFailureMessage = message;
-      } else if (
-        mapped.type === "tool.output" &&
-        payload.tool === "runtime_error" &&
-        message
-      ) {
+      } else if (mapped.type === "tool.output" && payload.tool === "runtime_error" && message) {
         lastFailureMessage = message;
       }
     }

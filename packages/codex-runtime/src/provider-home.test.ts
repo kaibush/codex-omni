@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,5 +39,19 @@ describe("provider home", () => {
       authJson: '{"OPENAI_API_KEY":"sk"}'
     });
     expect(home).toBe(path.join(dir, "p1"));
+  });
+
+  it("injects a context window when materializing unknown custom models", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "codex-home-"));
+    const home = await resolveProviderHome({
+      providersRoot: dir,
+      providerId: "grok",
+      homeMode: "managed",
+      configToml: 'model = "grok-4.6"\nmodel_provider = "custom"\n',
+      authJson: '{"OPENAI_API_KEY":"sk"}'
+    });
+    const toml = await readFile(path.join(home, "config.toml"), "utf8");
+    expect(toml).toContain("model_context_window = 256000");
+    expect(toml).toContain("model_auto_compact_token_limit = 230400");
   });
 });

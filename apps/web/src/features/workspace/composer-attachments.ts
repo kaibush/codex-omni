@@ -130,12 +130,22 @@ export function buildAttachmentPrompt(
   attachments: Array<{ name: string; path: string; kind: ComposerAttachmentKind; text?: string }>
 ) {
   if (!attachments.length) return "";
-  const lines = ["附件已保存到当前工程，请读取这些文件："];
-  for (const item of attachments) {
-    const kindLabel = item.kind === "image" ? "图片" : item.kind === "text" ? "文本" : "文件";
-    lines.push(`- \`${item.path}\`（${kindLabel} · ${item.name}）`);
+  const images = attachments.filter((item) => item.kind === "image");
+  const files = attachments.filter((item) => item.kind !== "image");
+  const lines: string[] = [];
+  if (images.length) {
+    lines.push("以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：");
+    for (const item of images) lines.push(`- ${item.name}`);
   }
-  const textFiles = attachments.filter((item) => item.kind === "text" && item.text);
+  if (files.length) {
+    if (lines.length) lines.push("");
+    lines.push("附件已保存到当前工程，请读取这些文件：");
+    for (const item of files) {
+      const kindLabel = item.kind === "text" ? "文本" : "文件";
+      lines.push(`- \`${item.path}\`（${kindLabel} · ${item.name}）`);
+    }
+  }
+  const textFiles = files.filter((item) => item.kind === "text" && item.text);
   if (textFiles.length) {
     lines.push("");
     for (const item of textFiles) {

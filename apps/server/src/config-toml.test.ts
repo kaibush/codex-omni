@@ -57,4 +57,22 @@ describe("buildApiKeyProviderFiles", () => {
     expect(files.configToml).toContain('base_url = "https://api.example.com/v1"');
     expect(files.configToml).toContain('wire_api = "chat"');
   });
+
+  it("injects a context window for unknown custom models", () => {
+    const files = buildApiKeyProviderFiles({
+      name: "Grok",
+      model: "grok-4.6",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-3"
+    });
+    expect(files.configToml).toContain("model_context_window = 256000");
+    expect(files.configToml).toContain("model_auto_compact_token_limit = 230400");
+    expect(
+      buildApiKeyProviderFiles({
+        name: "Work",
+        model: "gpt-5.1-codex-max",
+        apiKey: "sk-4"
+      }).configToml
+    ).not.toContain("model_context_window");
+  });
 });

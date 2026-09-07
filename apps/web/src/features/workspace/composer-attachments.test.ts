@@ -41,6 +41,9 @@ describe("composer attachments", () => {
     ]);
     expect(prompt).toContain("`.codex-uploads/1-notes.md`");
     expect(prompt).toContain('<file path=".codex-uploads/1-notes.md">');
+    expect(prompt).toContain("已作为本轮输入直接附加");
+    expect(prompt).toContain("shot.png");
+    expect(prompt).not.toContain("`.codex-uploads/1-shot.png`");
     expect(
       formatContextEstimate("abcd", [attachment({ id: "1", name: "a.txt", text: "hello" })])
     ).toContain("tokens");

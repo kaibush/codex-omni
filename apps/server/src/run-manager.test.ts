@@ -378,6 +378,172 @@ describe("RunManager reconnect state", () => {
     ).toBe(true);
   });
 
+  it("retries a continuation even when Codex only emitted runtime_error warnings", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        calls += 1;
+        if (calls === 1) {
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.output",
+              payload: {
+                itemId: "err-1",
+                tool: "runtime_error",
+                message: "Model metadata for grok-4.6 not found. Defaulting to fallback metadata."
+              }
+            })
+          );
+          onEvent(
+            bridgeEvent({
+              seq: 2,
+              type: "assistant.completed",
+              payload: { itemId: "assistant-1", text: "我先检查相关文件，然后继续处理。" }
+            })
+          );
+        } else {
+          expect(request.message).toContain("没有观察到工具调用");
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.started",
+              payload: { itemId: "tool-1", tool: "command" }
+            })
+          );
+        }
+        onEvent(
+          bridgeEvent({
+            seq: 9,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+
+    expect(calls).toBe(2);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "retrying")
+    ).toBe(true);
+  });
+
+  it("retries after context compaction if the model only posts a short plan", async () => {
+    const { project, provider, session, socket } = fixture();
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        calls += 1;
+        if (calls === 1) {
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.started",
+              payload: { itemId: "tool-1", tool: "command" }
+            })
+          );
+          onEvent(
+            bridgeEvent({
+              seq: 2,
+              type: "tool.output",
+              payload: { itemId: "tool-1", tool: "command", output: "ok" }
+            })
+          );
+          onEvent(
+            bridgeEvent({
+              seq: 3,
+              type: "tool.output",
+              payload: { itemId: "compact-1", tool: "context_compacted" }
+            })
+          );
+          onEvent(
+            bridgeEvent({
+              seq: 4,
+              type: "assistant.completed",
+              payload: { itemId: "assistant-2", text: "先核对截图和审计页现状。" }
+            })
+          );
+        } else {
+          expect(request.message).toContain("压缩上下文");
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.started",
+              payload: { itemId: "tool-2", tool: "command" }
+            })
+          );
+        }
+        onEvent(
+          bridgeEvent({
+            seq: 9,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "grok-iq 审计页也显示用户原文"
+      },
+      socket
+    );
+
+    expect(calls).toBe(2);
+  });
+
+  it("forwards queued image attachments to the runtime", async () => {
+    const { project, provider, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(
+      async (request: { attachments?: unknown }, onEvent: (event: BridgeEvent) => void) => {
+        expect(request.attachments).toEqual([
+          { name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }
+        ]);
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.enqueue",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "see image",
+        attachments: [{ name: "shot.png", path: ".codex-uploads/shot.png", kind: "image" }]
+      },
+      socket
+    );
+
+    expect(runtimeMocks.run).toHaveBeenCalled();
+  });
+
   it("drops oversized stream events for a backed-up socket but keeps terminal events", async () => {
     const { project, provider, session, sent } = fixture();
     const socket = {

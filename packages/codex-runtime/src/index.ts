@@ -247,3 +247,11 @@ export {
 export { createNormalizer } from "./normalizer.js";
 export { extractRolloutToolEvents, findRolloutFile } from "./collab-rollout.js";
 export type { CollabRolloutEvent } from "./collab-rollout.js";
+
+export { buildCodexRunInput } from "./codex-input.js";
+export {
+  applyCustomModelRuntimeToml,
+  inferModelContextWindow,
+  isKnownCodexModel,
+  resolveCodexModelRuntimeConfig
+} from "./model-runtime-config.js";

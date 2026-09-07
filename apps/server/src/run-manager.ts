@@ -23,7 +23,8 @@ import {
   sanitizeCodexExecError,
   truncateToolText,
   type BridgeEvent,
-  type RunCommand
+  type RunCommand,
+  type TurnAttachment
 } from "@codex-omni/protocol";
 import { captureGitCheckpoint } from "./project-git.js";
 import { backfillSessionRolloutTools, rolloutToolPayload } from "./session-rollout.js";
@@ -62,9 +63,24 @@ function isContinuationRequest(message: string, triggers: unknown) {
   return triggers.some((trigger) => typeof trigger === "string" && trigger.trim() === normalized);
 }
 
-const continuationExecutionEvents = new Set(["tool.started", "tool.output", "file.change"]);
+const continuationIgnoredTools = new Set(["runtime_error", "context_compacted"]);
 const continuationRetryMessage =
   "自动复核：上一轮继续执行请求没有观察到工具调用或文件变更。请现在立即读取相关文件并完成未完成的工作，不要只解释计划；如果任务确实已经完成，请先用工具验证结果。";
+const compactionRetryMessage =
+  "自动复核：上一轮在压缩上下文后没有继续调用工具就结束了。请现在立即读取相关文件并完成未完成的工作，不要只解释计划；如果任务确实已经完成，请先用工具验证结果。";
+
+function eventToolName(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const tool = (payload as Record<string, unknown>).tool;
+  return typeof tool === "string" ? tool : "";
+}
+
+function isContinuationExecutionEvent(event: { type: string; payload?: unknown }) {
+  if (event.type === "file.change") return true;
+  if (event.type !== "tool.started" && event.type !== "tool.output") return false;
+  const tool = eventToolName(event.payload);
+  return Boolean(tool) && !continuationIgnoredTools.has(tool);
+}
 
 function shouldRetryContinuation(assistantText: string, hasExecutionEvidence: boolean) {
   if (hasExecutionEvidence) return false;
@@ -78,9 +94,25 @@ function shouldRetryContinuation(assistantText: string, hasExecutionEvidence: bo
   ) {
     return false;
   }
-  return /(我会|我将|我先|接下来|下一步|计划|稍后|正在准备|I'll|I will|next step|plan to|let me)/i.test(
+  return /(我会|我将|我先|先看|先读|先核|先检查|接下来|下一步|计划|稍后|正在准备|现在打开|现在先|I'll|I will|next step|plan to|let me)/i.test(
     normalized
   );
+}
+
+function queuedAttachments(options: Record<string, any>): TurnAttachment[] {
+  if (!Array.isArray(options.attachments)) return [];
+  return options.attachments.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const filePath = typeof record.path === "string" ? record.path.trim() : "";
+    const kind =
+      record.kind === "image" || record.kind === "text" || record.kind === "file"
+        ? record.kind
+        : null;
+    if (!name || !filePath || !kind) return [];
+    return [{ name, path: filePath, kind }];
+  });
 }
 
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
@@ -607,6 +639,7 @@ export class RunManager {
 
   private queuedToCommand(item: QueuedTurnRow): TurnStartCommand {
     const options = parseJson<Record<string, any>>(item.optionsJson, {});
+    const attachments = queuedAttachments(options);
     return {
       type: "turn.start",
       projectId: item.projectId,
@@ -619,7 +652,8 @@ export class RunManager {
       ...(typeof options.networkAccessEnabled === "boolean"
         ? { networkAccessEnabled: options.networkAccessEnabled }
         : {}),
-      ...(options.mode === "plan" || options.mode === "execute" ? { mode: options.mode } : {})
+      ...(options.mode === "plan" || options.mode === "execute" ? { mode: options.mode } : {}),
+      ...(attachments.length ? { attachments } : {})
     };
   }
 
@@ -772,6 +806,8 @@ export class RunManager {
     }
     let completed = false;
     let hasExecutionEvidence = false;
+    let compactedThisTurn = false;
+    let hasPostCompactionExecution = false;
     const assistantTextByItem = new Map<string, string>();
     const onRuntimeEvent = (rawEvent: BridgeEvent) => {
       const event: BridgeEvent = compactStreamEvent({
@@ -781,7 +817,14 @@ export class RunManager {
         sessionId: session.id
       });
       const payload = (event.payload ?? {}) as Record<string, any>;
-      if (continuationExecutionEvents.has(event.type)) hasExecutionEvidence = true;
+      if (event.type === "tool.output" && eventToolName(payload) === "context_compacted") {
+        compactedThisTurn = true;
+        hasPostCompactionExecution = false;
+      }
+      if (isContinuationExecutionEvent(event)) {
+        hasExecutionEvidence = true;
+        if (compactedThisTurn) hasPostCompactionExecution = true;
+      }
       if (event.type === "assistant.delta" || event.type === "assistant.completed") {
         const itemId = String(payload.itemId ?? "assistant");
         assistantTextByItem.set(
@@ -904,6 +947,9 @@ export class RunManager {
             ...(provider.configToml ? { configToml: provider.configToml } : {}),
             ...(provider.authJson ? { authJson: provider.authJson } : {}),
             ...(provider.envJson ? { messageEnvVars: JSON.parse(provider.envJson) } : {}),
+            ...(command.type === "turn.start" && command.attachments?.length
+              ? { attachments: command.attachments }
+              : {}),
             sandbox: planMode
               ? "read-only"
               : command.type === "turn.start"
@@ -936,16 +982,24 @@ export class RunManager {
         this.finishRun(session.id, "completed", { startedAt });
       }
       const assistantText = [...assistantTextByItem.values()].join("\n");
+      const latestAssistantText = [...assistantTextByItem.values()].at(-1) ?? "";
       const needsContinuationRetry =
         continuationApplied &&
         !continuationRetry &&
         shouldRetryContinuation(assistantText, hasExecutionEvidence);
-      if (needsContinuationRetry) {
+      const needsCompactionRetry =
+        !continuationRetry &&
+        compactedThisTurn &&
+        !hasPostCompactionExecution &&
+        shouldRetryContinuation(latestAssistantText, false);
+      if (needsContinuationRetry || needsCompactionRetry) {
         this.broadcastContinuationNotice(
           session.id,
           provider.id,
           requestId,
-          "上游本轮没有观察到工具调用，正在自动复核一次。",
+          compactedThisTurn
+            ? "上游在压缩上下文后没有继续调用工具，正在自动复核一次。"
+            : "上游本轮没有观察到工具调用，正在自动复核一次。",
           "retrying"
         );
         completed = false;
@@ -954,7 +1008,7 @@ export class RunManager {
           projectId: project.id,
           sessionId: session.id,
           providerId: provider.id,
-          message: continuationRetryMessage,
+          message: needsCompactionRetry ? compactionRetryMessage : continuationRetryMessage,
           continuationRetry: true
         });
         return;
