@@ -2,6 +2,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import {
   BridgeWorkerAdapter,
+  INCOMPLETE_TURN_MESSAGE,
   resolveProviderHome,
   runtimeKey,
   terminateRecordedWorker,
@@ -805,17 +806,25 @@ export class RunManager {
       this.store.updateSession(session.id, { title: titleFromFirstMessage(command.message) });
     }
     let completed = false;
+    let completionEvent: BridgeEvent | undefined;
     let hasExecutionEvidence = false;
     let compactedThisTurn = false;
     let hasPostCompactionExecution = false;
     const assistantTextByItem = new Map<string, string>();
     const onRuntimeEvent = (rawEvent: BridgeEvent) => {
+      // Late output must not resurrect a cancelled, timed-out or failed run.
+      if (this.store.getRun(requestId)?.status !== "running") return;
       const event: BridgeEvent = compactStreamEvent({
         ...rawEvent,
         requestId,
         projectId: project.id,
         sessionId: session.id
       });
+      if (event.type === "turn.completed") {
+        // Completion is provisional until the worker has drained and exited cleanly.
+        completionEvent = event;
+        return;
+      }
       const payload = (event.payload ?? {}) as Record<string, any>;
       if (event.type === "tool.output" && eventToolName(payload) === "context_compacted") {
         compactedThisTurn = true;
@@ -845,7 +854,7 @@ export class RunManager {
         const sanitized = resolveFailureMessage(this.store, requestId, incoming, previous?.content);
         if (sanitized && sanitized !== incoming) payload.message = sanitized;
       }
-      const terminalEvent = event.type === "turn.completed" || event.type === "run.failed";
+      const terminalEvent = event.type === "run.failed";
       if (event.type === "run.reconnecting") {
         this.reconnecting.add(session.id);
         this.persistRun(session.id, "running", { startedAt, reconnecting: payload });
@@ -883,20 +892,7 @@ export class RunManager {
           this.store.updateRun(requestId, { threadId });
         }
       }
-      if (event.type === "turn.completed") {
-        completed = true;
-        this.finishRun(
-          session.id,
-          "completed",
-          {
-            startedAt,
-            firstResponseAt: payload.firstResponseAt,
-            endedAt: typeof payload.endedAt === "number" ? payload.endedAt : Date.now(),
-            usage: payload.usage
-          },
-          false
-        );
-      } else if (event.type === "run.failed") {
+      if (event.type === "run.failed") {
         this.finishRun(
           session.id,
           "failed",
@@ -976,11 +972,20 @@ export class RunManager {
           codexHome
         });
       }
-      const current = this.store.getSession(session.id);
-      if (current?.status === "running") {
-        completed = true;
-        this.finishRun(session.id, "completed", { startedAt });
-      }
+      const currentRun = this.store.getRun(requestId);
+      if (currentRun?.status !== "running") return;
+      if (!completionEvent) throw new Error(INCOMPLETE_TURN_MESSAGE);
+      // Rollout/tool events can arrive after the SDK completion event. Publish the
+      // terminal event last so replay cursors never skip it.
+      const terminal = {
+        ...completionEvent,
+        seq: Math.max(completionEvent.seq, currentRun.lastSeq + 1)
+      };
+      const terminalPayload = (terminal.payload ?? {}) as Record<string, unknown>;
+      this.persistEvent(session.id, provider.id, terminal);
+      this.broadcast(session.id, terminal);
+      this.finishRun(session.id, "completed", { ...terminalPayload, startedAt }, false);
+      completed = true;
       const assistantText = [...assistantTextByItem.values()].join("\n");
       const latestAssistantText = [...assistantTextByItem.values()].at(-1) ?? "";
       const needsContinuationRetry =
@@ -1004,6 +1009,7 @@ export class RunManager {
         );
         completed = false;
         await this.startTurn({
+          ...command,
           type: "turn.start",
           projectId: project.id,
           sessionId: session.id,
@@ -1025,8 +1031,8 @@ export class RunManager {
         );
       }
     } catch (error) {
-      const current = this.store.getSession(session.id);
-      if (current?.status === "running") {
+      completed = false;
+      if (this.store.getRun(requestId)?.status === "running") {
         const incoming = error instanceof Error ? error.message : String(error);
         const previous = this.store.getMessageByItemId(session.id, `${requestId}:run.failed`);
         const reason = resolveFailureMessage(this.store, requestId, incoming, previous?.content);

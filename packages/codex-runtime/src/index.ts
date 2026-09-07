@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { eventSchema, type BridgeEvent, type BridgeRequest } from "@codex-omni/protocol";
+import { isTerminalBridgeEvent, workerExitError } from "./worker-stream.js";
 
 export type WorkerRuntimeInfo = {
   requestId: string;
@@ -106,6 +107,8 @@ export function terminateRecordedWorker(workerPid: number, requestId: string) {
 export class BridgeWorkerAdapter {
   private active = new Map<string, ActiveWorker>();
 
+  constructor(private workerEntry?: URL) {}
+
   run(
     request: BridgeRequest,
     onEvent: (event: BridgeEvent) => void,
@@ -115,7 +118,7 @@ export class BridgeWorkerAdapter {
       return Promise.reject(new Error("Session already has an active turn"));
     const jsUrl = new URL("./worker-entry.js", import.meta.url);
     const tsUrl = new URL("./worker-entry.ts", import.meta.url);
-    const sourceUrl = import.meta.url.endsWith(".ts") ? tsUrl : jsUrl;
+    const sourceUrl = this.workerEntry ?? (import.meta.url.endsWith(".ts") ? tsUrl : jsUrl);
     const args = sourceUrl.pathname.endsWith(".ts")
       ? ["--import", "tsx", fileURLToPath(sourceUrl)]
       : [fileURLToPath(sourceUrl)];
@@ -141,6 +144,9 @@ export class BridgeWorkerAdapter {
       onRuntime?.(this.runtimeInfo(request.sessionId)!);
       let stderr = "";
       let settled = false;
+      let sawTerminalEvent = false;
+      let failed = false;
+      let failureMessage = "";
       const settleReject = (error: Error) => {
         if (settled) return;
         settled = true;
@@ -151,16 +157,35 @@ export class BridgeWorkerAdapter {
         if (stderr.length > 16000) stderr = stderr.slice(-16000);
       });
       readline.createInterface({ input: child.stdout! }).on("line", (line) => {
+        if (settled) return;
         try {
-          onEvent(eventSchema.parse(JSON.parse(line)));
+          const event = eventSchema.parse(JSON.parse(line));
+          if (
+            event.requestId !== request.requestId ||
+            event.sessionId !== request.sessionId ||
+            event.projectId !== request.projectId
+          )
+            throw new Error("Bridge event does not belong to this run");
+          if (isTerminalBridgeEvent(event.type)) sawTerminalEvent = true;
+          if (event.type === "run.failed") {
+            failed = true;
+            const payload = (event.payload ?? {}) as Record<string, unknown>;
+            failureMessage = String(payload.message ?? payload.reason ?? "");
+          }
+          onEvent(event);
         } catch (error) {
           signalTree(child, "SIGTERM");
           settleReject(new Error(`Invalid bridge event: ${String(error)}`));
         }
       });
       child.once("error", (error) => settleReject(error));
-      child.once("exit", (code, signal) => {
-        this.active.delete(request.sessionId);
+      child.stdin?.on("error", (error) => {
+        signalTree(child, "SIGTERM");
+        settleReject(error);
+      });
+      // `exit` can precede the final stdout lines. Wait for stdio to drain.
+      child.once("close", (code, signal) => {
+        if (this.active.get(request.sessionId) === active) this.active.delete(request.sessionId);
         onRuntime?.({
           requestId: request.requestId,
           sessionId: request.sessionId,
@@ -171,16 +196,16 @@ export class BridgeWorkerAdapter {
         });
         if (settled) return;
         settled = true;
-        if (code === 0 && !signal) resolve();
-        else
-          reject(
-            new Error(
-              stderr.trim() ||
-                (signal
-                  ? `Bridge worker exited with signal ${signal}`
-                  : `Bridge worker exited with ${code}`)
-            )
-          );
+        const error = workerExitError({
+          code,
+          signal,
+          stderr,
+          sawTerminalEvent,
+          failed,
+          failureMessage
+        });
+        if (error) reject(error);
+        else resolve();
       });
       child.stdin?.write(`${JSON.stringify(request)}\n`);
     });
@@ -255,3 +280,10 @@ export {
   isKnownCodexModel,
   resolveCodexModelRuntimeConfig
 } from "./model-runtime-config.js";
+export {
+  consumeCodexEventStream,
+  INCOMPLETE_TURN_MESSAGE,
+  incompleteStreamError,
+  isTerminalBridgeEvent,
+  workerExitError
+} from "./worker-stream.js";

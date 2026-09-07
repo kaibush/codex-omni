@@ -1,13 +1,18 @@
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { Codex } from "@openai/codex-sdk";
-import { bridgeRequestSchema, firstUsefulFailureMessage } from "@codex-omni/protocol";
+import { bridgeRequestSchema } from "@codex-omni/protocol";
 import { createCollabRolloutTailer } from "./collab-rollout.js";
 import { buildCodexRunInput } from "./codex-input.js";
 import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { resolveCodexModelRuntimeConfig } from "./model-runtime-config.js";
 import { createNormalizer } from "./normalizer.js";
 import { workerEnvironment } from "./provider-home.js";
+import {
+  consumeCodexEventStream,
+  createMappedStreamState,
+  incompleteStreamError
+} from "./worker-stream.js";
 
 function numericUsage(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -16,13 +21,6 @@ function numericUsage(value: unknown): Record<string, number> {
     if (typeof entry === "number" && Number.isFinite(entry)) result[key] = entry;
   }
   return result;
-}
-
-function eventMessage(payload: unknown) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
-  const record = payload as Record<string, unknown>;
-  const message = record.reason ?? record.message;
-  return typeof message === "string" ? message.trim() : "";
 }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -80,8 +78,7 @@ const flushCollab = () => {
 };
 const collabTimer = setInterval(flushCollab, 250);
 collabTimer.unref();
-let terminalFailure = false;
-let lastFailureMessage = "";
+const streamState = createMappedStreamState();
 try {
   const modelRuntime = resolveCodexModelRuntimeConfig({
     ...(request.model ? { model: request.model } : {}),
@@ -118,19 +115,24 @@ try {
   const { events } = await thread.runStreamed(
     buildCodexRunInput(request.message, request.attachments, request.cwd)
   );
-  for await (const event of events) {
-    if (
-      request.approvalPolicy !== "never" &&
-      event.type === "item.started" &&
-      event.item.type === "command_execution"
-    ) {
-      const allowed = await requestApproval(event.item);
-      if (!allowed) throw new Error("Command denied by user");
-    }
-    if (event.type === "thread.started")
-      collabTailer.setThreadId(event.thread_id, { fromEnd: Boolean(request.threadId) });
-    if (event.type === "turn.completed") flushCollab();
-    for (const mapped of normalizer.map(event)) {
+  await consumeCodexEventStream({
+    events,
+    state: streamState,
+    map: (event) => normalizer.map(event),
+    onSdkEvent: async (event) => {
+      if (
+        request.approvalPolicy !== "never" &&
+        event.type === "item.started" &&
+        event.item.type === "command_execution"
+      ) {
+        const allowed = await requestApproval(event.item);
+        if (!allowed) throw new Error("Command denied by user");
+      }
+      if (event.type === "thread.started")
+        collabTailer.setThreadId(event.thread_id, { fromEnd: Boolean(request.threadId) });
+      if (event.type === "turn.completed") flushCollab();
+    },
+    onMappedEvent: (mapped) => {
       if (mapped.type === "turn.completed") {
         const latest = collabTailer.latestTokenUsage();
         if (!latest) send(mapped);
@@ -142,31 +144,21 @@ try {
       } else {
         send(mapped);
       }
-      const payload = (mapped.payload ?? {}) as Record<string, unknown>;
-      const message = firstUsefulFailureMessage(
-        payload.reason,
-        payload.message,
-        payload.error,
-        eventMessage(payload)
-      );
-      if (mapped.type === "run.failed") {
-        terminalFailure = true;
-        if (message) lastFailureMessage = message;
-      } else if (mapped.type === "run.reconnecting" && message) {
-        lastFailureMessage = message;
-      } else if (mapped.type === "tool.output" && payload.tool === "runtime_error" && message) {
-        lastFailureMessage = message;
-      }
+      flushCollab();
     }
-    flushCollab();
-  }
+  });
   flushCollab();
-  if (terminalFailure) process.exitCode = 1;
+  const incomplete = incompleteStreamError(streamState);
+  if (incomplete) {
+    send(normalizer.failure(incomplete, streamState.lastFailureMessage));
+    process.exitCode = 1;
+  } else if (streamState.failed) process.exitCode = 1;
 } catch (error) {
-  if (!terminalFailure) send(normalizer.failure(error, lastFailureMessage));
+  if (!streamState.failed) send(normalizer.failure(error, streamState.lastFailureMessage));
   process.exitCode = 1;
 } finally {
   clearInterval(collabTimer);
   flushCollab();
   rl.close();
+  process.stdin.destroy();
 }

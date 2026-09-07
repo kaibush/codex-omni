@@ -53,6 +53,7 @@ vi.mock("@codex-omni/codex-runtime", () => ({
   extractRolloutToolEvents: vi.fn(() => []),
   findRolloutFile: vi.fn(() => ""),
   runtimeKey: vi.fn(() => "runtime-key"),
+  INCOMPLETE_TURN_MESSAGE: "Codex 流在 turn.completed 前结束，任务未完成",
   terminateRecordedWorker: vi.fn(() => true)
 }));
 
@@ -113,6 +114,150 @@ function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: numbe
     payload: input.payload
   };
 }
+
+describe("RunManager terminal state", () => {
+  it.each([false, true])(
+    "fails EOF with execution output=%s instead of completing",
+    async (withTool) => {
+      const { project, session, socket, sent } = fixture();
+      runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+        if (withTool)
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.output",
+              payload: {
+                itemId: "tool",
+                tool: "command",
+                output: "partial execution",
+                status: "completed"
+              }
+            })
+          );
+      });
+      manager = new RunManager(store!, "/tmp/runtime");
+      await manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: session.id,
+          message: "continue work"
+        },
+        socket
+      );
+      expect(store!.getLatestRun(session.id)).toMatchObject({ status: "failed" });
+      expect(store!.getSession(session.id)?.status).toBe("failed");
+      expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+      expect(sent.find((event) => event.type === "run.failed")?.payload.reason).toContain(
+        "turn.completed"
+      );
+    }
+  );
+
+  it("keeps completion provisional if the worker subsequently exits abnormally", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: { usage: {} } }));
+      expect(store!.getSession(session.id)?.status).toBe("running");
+      throw new Error("worker crashed while draining stdout");
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "work"
+      },
+      socket
+    );
+    expect(store!.getLatestRun(session.id)).toMatchObject({
+      status: "failed",
+      reason: "worker crashed while draining stdout"
+    });
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  it("does not retry a failed continuation or accept a later completion", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "run.failed", payload: { message: "upstream failed" } }));
+      onEvent(bridgeEvent({ seq: 2, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "继续"
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("failed");
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  it("ignores completion and output after cancellation", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      manager!.cancel(session.id);
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "assistant.completed",
+          payload: { itemId: "late", text: "late" }
+        })
+      );
+      onEvent(bridgeEvent({ seq: 2, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "继续"
+      },
+      socket
+    );
+    expect(store!.getLatestRun(session.id)?.status).toBe("cancelled");
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(
+      sent.some((event) => ["turn.completed", "assistant.completed"].includes(event.type))
+    ).toBe(false);
+  });
+
+  it("publishes completion after trailing tool output with an increasing replay cursor", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({ seq: 1, type: "turn.completed", payload: { usage: { input_tokens: 1 } } })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "tool.output",
+          payload: { itemId: "tool", tool: "command", output: "done" }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "work"
+      },
+      socket
+    );
+    const terminal = sent.find((event) => event.type === "turn.completed")!;
+    expect(terminal.seq).toBe(3);
+    expect(store!.getLatestRun(session.id)).toMatchObject({ status: "completed", lastSeq: 3 });
+  });
+});
 
 describe("RunManager startup reconcile", () => {
   it("only terminates workers for this service instance on startup", () => {
