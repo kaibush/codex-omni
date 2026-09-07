@@ -226,6 +226,24 @@ export class RunManager {
     return true;
   }
 
+  private async stopOrphanWorker(sessionId: string) {
+    const orphan = this.activeRuns.get(sessionId);
+    if (this.worker.isActive(sessionId)) {
+      this.worker.cancel(sessionId);
+      const deadline = Date.now() + 5000;
+      while (this.worker.isActive(sessionId) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (this.worker.isActive(sessionId)) {
+        throw new Error("上一次任务仍在退出，请稍后重试");
+      }
+    }
+    if (orphan && this.activeRuns.get(sessionId) === orphan) {
+      clearTimeout(orphan.timeout);
+      this.activeRuns.delete(sessionId);
+    }
+  }
+
   subscribe(sessionId: string, socket: WebSocket) {
     const set = this.subscribers.get(sessionId) ?? new Set();
     set.add(socket);
@@ -305,23 +323,26 @@ export class RunManager {
   ) {
     const session = this.store.getSession(sessionId);
     if (!session) throw new Error("Session not found");
+    const latestRun = this.store.getLatestRun(sessionId);
     if (
       session.status === "running" &&
+      latestRun?.status === "running" &&
+      latestRun.serviceInstanceId === this.serviceInstanceId &&
       !this.worker.isActive(sessionId) &&
       !this.activeRuns.has(sessionId)
     ) {
       this.finishRun(sessionId, "interrupted", { reason: "worker-gone" });
     }
-    const latestRun = this.store.getLatestRun(sessionId);
+    const currentRun = this.store.getLatestRun(sessionId);
     const runtime = this.worker.runtimeInfo(sessionId);
     const approvals = this.store
       .listPendingApprovals(sessionId)
       .map((approval) => this.publicApproval(approval));
     let replayAfter = -1;
-    if (latestRun && cursor?.lastRequestId === latestRun.id && typeof cursor.lastSeq === "number") {
+    if (currentRun && cursor?.lastRequestId === currentRun.id && typeof cursor.lastSeq === "number") {
       replayAfter = cursor.lastSeq;
     }
-    const replay = latestRun ? this.store.listRunEvents(latestRun.id, replayAfter, 1001) : [];
+    const replay = currentRun ? this.store.listRunEvents(currentRun.id, replayAfter, 1001) : [];
     const firstReplaySeq = replay[0]?.seq;
     const replayTruncated =
       replay.length > 1000 ||
@@ -329,10 +350,10 @@ export class RunManager {
     this.send(socket, {
       type: "session.snapshot",
       sessionId,
-      ...(latestRun ? { requestId: latestRun.id, seq: latestRun.lastSeq } : {}),
+      ...(currentRun ? { requestId: currentRun.id, seq: currentRun.lastSeq } : {}),
       payload: {
         session: this.store.getSession(sessionId),
-        run: this.publicRun(latestRun),
+        run: this.publicRun(currentRun),
         runtime,
         approvals,
         queue: this.publicQueue(sessionId),
@@ -763,11 +784,31 @@ export class RunManager {
     const project = this.store.getProject(command.projectId);
     if (!session || !project || session.projectId !== project.id)
       throw new Error("Session/project mismatch");
-    if (this.worker.isActive(session.id) || this.activeRuns.has(session.id))
-      throw new Error("Session already has an active turn");
+    const latestRun = this.store.getLatestRun(session.id);
+    if (
+      latestRun?.status === "running" &&
+      latestRun.serviceInstanceId !== this.serviceInstanceId
+    ) {
+      throw new Error("Session is handled by another server instance");
+    }
+    if (this.worker.isActive(session.id) || this.activeRuns.has(session.id)) {
+      if (latestRun?.status === "running") {
+        throw new Error("Session already has an active turn");
+      }
+      await this.stopOrphanWorker(session.id);
+      if (this.worker.isActive(session.id) || this.activeRuns.has(session.id)) {
+        throw new Error("Session already has an active turn");
+      }
+    }
     const attachments = sanitizeCodexAttachments(project.realPath, command.attachments);
-    if (session.status === "running") {
+    if (
+      session.status === "running" &&
+      latestRun?.status === "running" &&
+      latestRun.serviceInstanceId === this.serviceInstanceId
+    ) {
       this.finishRun(session.id, "interrupted", { reason: "worker-gone" });
+    } else if (session.status === "running" && latestRun?.status !== "running") {
+      this.store.updateSession(session.id, { status: "idle" });
     }
     const requestedProvider = command.providerId ?? session.providerId ?? project.providerId;
     if (!requestedProvider) throw new Error("Select a provider first");

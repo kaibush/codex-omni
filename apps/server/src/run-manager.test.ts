@@ -493,6 +493,66 @@ describe("RunManager startup reconcile", () => {
   });
 });
 
+describe("RunManager service instance isolation", () => {
+  it("does not mark another service instance's running session as interrupted on subscribe", async () => {
+    const previous = process.env.CODEX_OMNI_INSTANCE;
+    process.env.CODEX_OMNI_INSTANCE = "dev";
+    try {
+      const { project, session, socket, sent } = fixture();
+      store!.updateSession(session.id, { status: "running" });
+      store!.createRun({
+        id: "run-prod",
+        sessionId: session.id,
+        projectId: project.id,
+        serviceInstanceId: "prod",
+        cwd: project.realPath,
+        startedAt: Date.now()
+      });
+      manager = new RunManager(store!, "/tmp/runtime");
+      await manager.handle({ type: "session.subscribe", sessionId: session.id }, socket);
+      expect(store!.getLatestRun(session.id)).toMatchObject({
+        status: "running",
+        serviceInstanceId: "prod"
+      });
+      expect(store!.getSession(session.id)?.status).toBe("running");
+      expect(sent[0]).toMatchObject({
+        type: "session.snapshot",
+        payload: { session: { status: "running" }, run: { status: "running" } }
+      });
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_OMNI_INSTANCE;
+      else process.env.CODEX_OMNI_INSTANCE = previous;
+    }
+  });
+
+  it("cleans up an orphan worker when the persisted run is already interrupted", async () => {
+    const { project, session, socket } = fixture();
+    store!.updateSession(session.id, { status: "running" });
+    store!.createRun({
+      id: "run-orphan",
+      sessionId: session.id,
+      projectId: project.id,
+      serviceInstanceId: "test",
+      cwd: project.realPath,
+      startedAt: Date.now()
+    });
+    store!.updateRun("run-orphan", { status: "interrupted", endedAt: Date.now() });
+    runtimeMocks.active = true;
+    runtimeMocks.cancel.mockReturnValue(true);
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "执行工作" },
+      socket
+    );
+    expect(runtimeMocks.cancel).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+  });
+});
+
 describe("RunManager reconnect state", () => {
   it("adds an execution directive to continuation requests", async () => {
     const { project, provider, session, socket } = fixture();
