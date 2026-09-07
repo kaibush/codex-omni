@@ -33,6 +33,12 @@ import { captureGitCheckpoint } from "./project-git.js";
 import { backfillSessionRolloutTools, rolloutToolPayload } from "./session-rollout.js";
 import { mergeToolPayload } from "./tool-payload.js";
 import { applyPlanMode, applyProjectRules } from "./workspace-loop.js";
+import { buildForkContext, FORK_CONTEXT_MESSAGE_LIMIT } from "./session-context.js";
+import {
+  continuationRetryDirective,
+  incompleteTurnReason,
+  type ContinuationRetryReason
+} from "./turn-completion.js";
 
 type WebSocket = {
   readyState: number;
@@ -66,11 +72,12 @@ function isContinuationRequest(message: string, triggers: unknown) {
   return triggers.some((trigger) => typeof trigger === "string" && trigger.trim() === normalized);
 }
 
-const continuationIgnoredTools = new Set(["runtime_error", "context_compacted"]);
-const continuationRetryMessage =
-  "自动复核：上一轮继续执行请求没有观察到工具调用或文件变更。请现在立即读取相关文件并完成未完成的工作，不要只解释计划；如果任务确实已经完成，请先用工具验证结果。";
-const compactionRetryMessage =
-  "自动复核：上一轮在压缩上下文后没有继续调用工具就结束了。请现在立即读取相关文件并完成未完成的工作，不要只解释计划；如果任务确实已经完成，请先用工具验证结果。";
+const continuationIgnoredTools = new Set([
+  "runtime_error",
+  "context_compacted",
+  "update_plan",
+  "todo_list"
+]);
 
 function eventToolName(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
@@ -85,29 +92,13 @@ function isContinuationExecutionEvent(event: { type: string; payload?: unknown }
   return Boolean(tool) && !continuationIgnoredTools.has(tool);
 }
 
-function shouldRetryContinuation(assistantText: string, hasExecutionEvidence: boolean) {
-  if (hasExecutionEvidence) return false;
-  const normalized = assistantText.trim();
-  if (!normalized) return true;
-  if (normalized.length > 1000) return false;
-  if (
-    /(已完成|已经完成|完成了|无需再做|不需要再做|任务完成|already done|nothing left|completed)/i.test(
-      normalized
-    )
-  ) {
-    return false;
-  }
-  return /(我会|我将|我先|先看|先读|先核|先检查|接下来|下一步|计划|稍后|正在准备|现在打开|现在先|I'll|I will|next step|plan to|let me)/i.test(
-    normalized
-  );
-}
-
 function queuedAttachments(options: Record<string, any>): TurnAttachment[] {
   return turnOptionsSchema.shape.attachments.parse(options.attachments) ?? [];
 }
 
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
   continuationRetry?: boolean;
+  continuationRetryReason?: ContinuationRetryReason;
 };
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
 type ClientEvent = {
@@ -200,6 +191,10 @@ export class RunManager {
   ) {
     this.runtimeMonitor = setInterval(() => this.refreshRuntimeRecords(), 3000);
     this.runtimeMonitor.unref();
+  }
+
+  private forkContextMessages(sessionId: string) {
+    return this.store.listRecentConversationMessages(sessionId, FORK_CONTEXT_MESSAGE_LIMIT);
   }
 
   reconcileStartup() {
@@ -511,13 +506,15 @@ export class RunManager {
             ? "file"
             : compact.type === "run.failed"
               ? "error"
-              : compact.type === "turn.completed"
+              : compact.type === "turn.completed" || compact.type === "run.interrupted"
                 ? "run"
                 : null;
     if (!role) return;
     const active = this.activeRuns.get(sessionId);
     let data: Record<string, any> =
-      compact.type === "turn.completed" || compact.type === "run.failed"
+      compact.type === "turn.completed" ||
+      compact.type === "run.failed" ||
+      compact.type === "run.interrupted"
         ? {
             ...payload,
             usage: payload.usage,
@@ -696,9 +693,15 @@ export class RunManager {
     }
     const provider = this.store.getProvider(requestedProvider);
     if (!provider) throw new Error("Provider not found");
-    const portableContext = !session.threadId
-      ? this.store.findMessageByEventType(session.id, "provider.continuation")?.content
-      : null;
+    const portableContext = session.threadId
+      ? null
+      : (this.store.findMessageByEventType(session.id, "provider.continuation")?.content ??
+        (session.continuationMode === "fork"
+          ? buildForkContext(
+              session.parentSessionId ?? session.id,
+              this.forkContextMessages(session.id)
+            )
+          : null));
     const continuationRetry = command.continuationRetry === true;
     const planMode = !continuationRetry && command.mode === "plan";
     const userMessageText = continuationRetry
@@ -714,7 +717,7 @@ export class RunManager {
         .map((note) => ({ title: note.title, content: note.content }))
     );
     const continuationDirective = continuationRetry
-      ? `\n\n${continuationRetryMessage}`
+      ? `\n\n${continuationRetryDirective(command.continuationRetryReason ?? "continuation")}\n\n原始用户请求：\n${command.message}`
       : settings.continuationEnabled === true &&
           isContinuationRequest(userMessageText, settings.continuationTriggers) &&
           typeof settings.continuationDirective === "string" &&
@@ -985,32 +988,64 @@ export class RunManager {
         seq: Math.max(completionEvent.seq, currentRun.lastSeq + 1)
       };
       const terminalPayload = (terminal.payload ?? {}) as Record<string, unknown>;
-      this.persistEvent(session.id, provider.id, terminal);
-      this.broadcast(session.id, terminal);
-      this.finishRun(session.id, "completed", { ...terminalPayload, startedAt }, false);
-      completed = true;
       const assistantText = [...assistantTextByItem.values()].join("\n");
       const latestAssistantText = [...assistantTextByItem.values()].at(-1) ?? "";
-      const needsContinuationRetry =
-        continuationApplied &&
-        !continuationRetry &&
-        shouldRetryContinuation(assistantText, hasExecutionEvidence);
-      const needsCompactionRetry =
-        !continuationRetry &&
-        compactedThisTurn &&
-        !hasPostCompactionExecution &&
-        shouldRetryContinuation(latestAssistantText, false);
-      if (needsContinuationRetry || needsCompactionRetry) {
+      const incompleteReason =
+        continuationRetry && !hasExecutionEvidence
+          ? (command.continuationRetryReason ?? "continuation")
+          : incompleteTurnReason({
+              message: command.message,
+              planMode,
+              continuationApplied,
+              assistantText,
+              latestAssistantText,
+              hasExecutionEvidence,
+              compactedThisTurn,
+              hasPostCompactionExecution
+            });
+      if (incompleteReason) {
+        const retry = !continuationRetry && settings.continuationEnabled === true;
+        const reason = continuationRetry
+          ? "自动复核后仍未观察到所需执行或验证；任务未确认完成。"
+          : incompleteReason === "compaction"
+            ? "上游在压缩上下文后只回复下一步计划，未继续执行；任务未完成。"
+            : "上游只回复下一步计划，未观察到工具调用或文件变更；任务未完成。";
+        const interrupted: BridgeEvent = {
+          ...terminal,
+          type: "run.interrupted",
+          payload: {
+            ...terminalPayload,
+            status: "interrupted",
+            reason,
+            completionGuard: {
+              reason: incompleteReason,
+              upstreamTerminal: terminal.type,
+              sdkTerminal: "turn.completed",
+              recoveryAttempt: continuationRetry ? 1 : 0,
+              hasExecutionEvidence,
+              compactedThisTurn,
+              hasPostCompactionExecution
+            }
+          }
+        };
+        // A transport-level completion is not task completion. Persist this
+        // decision before publishing any success or starting queued work.
+        this.persistEvent(session.id, provider.id, interrupted);
+        this.broadcast(session.id, interrupted);
+        this.finishRun(
+          session.id,
+          "interrupted",
+          { ...(interrupted.payload as Record<string, unknown>), startedAt },
+          false
+        );
         this.broadcastContinuationNotice(
           session.id,
           provider.id,
           requestId,
-          compactedThisTurn
-            ? "上游在压缩上下文后没有继续调用工具，正在自动复核一次。"
-            : "上游本轮没有观察到工具调用，正在自动复核一次。",
-          "retrying"
+          `${reason}${retry ? "正在保留原请求和权限自动复核一次。" : "已停止自动复核，请查看本轮结果后决定是否继续。"}`,
+          retry ? "retrying" : "warning"
         );
-        completed = false;
+        if (!retry) return;
         await this.startTurn({
           ...command,
           ...turnOptions,
@@ -1019,11 +1054,16 @@ export class RunManager {
           projectId: project.id,
           sessionId: session.id,
           providerId: provider.id,
-          message: needsCompactionRetry ? compactionRetryMessage : continuationRetryMessage,
-          continuationRetry: true
+          message: command.message,
+          continuationRetry: true,
+          continuationRetryReason: incompleteReason
         });
         return;
       }
+      this.persistEvent(session.id, provider.id, terminal);
+      this.broadcast(session.id, terminal);
+      this.finishRun(session.id, "completed", { ...terminalPayload, startedAt }, false);
+      completed = true;
       if (continuationApplied && !hasExecutionEvidence && (continuationRetry || assistantText)) {
         this.broadcastContinuationNotice(
           session.id,

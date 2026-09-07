@@ -19,7 +19,7 @@ afterEach(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
-  if (dir) await rm(dir, { recursive: true, force: true });
+  if (dir) await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   dir = undefined;
   server = undefined;
   worker = undefined;
@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")(
       server = createServer(async (req, res) => {
         let body = "";
         for await (const chunk of req) body += String(chunk);
-      requests.push({ url: req.url ?? "", body: body ? JSON.parse(body) : {} });
+        requests.push({ url: req.url ?? "", body: body ? JSON.parse(body) : {} });
         if (req.url !== "/v1/responses") {
           res.writeHead(404);
           res.end();

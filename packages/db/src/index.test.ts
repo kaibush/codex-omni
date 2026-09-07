@@ -692,4 +692,48 @@ describe("Store", () => {
     expect(store.listMessages(session.id).map((item) => item.role)).toEqual(["user", "assistant"]);
     expect(store.listRuns({ sessionId: session.id })).toEqual([]);
   });
+
+  it("rejects a foreign or missing fork point without copying later conversation", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const source = store.createSession({ projectId: project.id });
+    const other = store.createSession({ projectId: project.id });
+    const foreign = store.addMessage({
+      sessionId: other.id,
+      role: "user",
+      content: "other",
+      providerId: null,
+      eventType: "user.message"
+    });
+    expect(store.forkSession(source.id, foreign.id)).toBeUndefined();
+    expect(store.forkSession(source.id, "missing")).toBeUndefined();
+    expect(store.listSessions(project.id)).toHaveLength(2);
+  });
+
+  it("preserves fork order and attachment metadata even when source timestamps collide", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const source = store.createSession({ projectId: project.id });
+    store.updateSession(source.id, { threadId: "parent-thread" });
+    for (let index = 0; index < 20; index += 1)
+      store.addMessage({
+        sessionId: source.id,
+        role: "user",
+        content: `message-${index}`,
+        providerId: null,
+        eventType: "user.message",
+        createdAt: 1,
+        dataJson: JSON.stringify({ attachments: [{ path: "image.png" }] })
+      });
+    const original = store.listMessages(source.id);
+    const fork = store.forkSession(source.id)!;
+    const copied = store.listMessages(fork.id);
+    expect(fork.threadId).toBeNull();
+    expect(copied.map((item) => item.content)).toEqual(original.map((item) => item.content));
+    expect(copied.map((item) => item.dataJson)).toEqual(original.map((item) => item.dataJson));
+    expect(
+      copied.every((item, index) => index === 0 || item.createdAt > copied[index - 1]!.createdAt)
+    ).toBe(true);
+    expect(store.getSession(source.id)?.threadId).toBe("parent-thread");
+  });
 });

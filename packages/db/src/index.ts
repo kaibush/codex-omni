@@ -1021,10 +1021,11 @@ export class Store {
     input: Omit<MessageRow, "id" | "createdAt" | "updatedAt" | "itemId" | "dataJson"> & {
       itemId?: string | null;
       dataJson?: string | null;
+      createdAt?: number;
     }
   ): MessageRow {
     const id = nanoid(),
-      createdAt = Date.now();
+      createdAt = input.createdAt ?? Date.now();
     this.db
       .prepare(
         "INSERT INTO messages(id,session_id,role,content,provider_id,event_type,item_id,data_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)"
@@ -1042,12 +1043,12 @@ export class Store {
         createdAt
       );
     return {
+      ...input,
       id,
       createdAt,
       updatedAt: createdAt,
       itemId: input.itemId ?? null,
-      dataJson: input.dataJson ?? null,
-      ...input
+      dataJson: input.dataJson ?? null
     };
   }
   getMessage(id: string) {
@@ -1399,30 +1400,33 @@ export class Store {
       (message) => message.role === "user" || message.role === "assistant"
     );
     const index = messageId ? conversation.findIndex((message) => message.id === messageId) : -1;
-    const copied = messageId
-      ? index >= 0
-        ? conversation.slice(0, index + 1)
-        : conversation
-      : conversation;
-    const target = this.createSession({
-      projectId: source.projectId,
-      title: `${source.title} (分叉)`,
-      providerId: source.providerId,
-      parentSessionId: source.id,
-      continuationMode: "fork"
-    });
-    for (const message of copied) {
-      this.addMessage({
-        sessionId: target.id,
-        role: message.role,
-        content: message.content,
-        providerId: message.providerId,
-        eventType: message.eventType,
-        ...(message.itemId ? { itemId: message.itemId } : {}),
-        ...(message.dataJson ? { dataJson: message.dataJson } : {})
+    if (messageId && index < 0) return undefined;
+    const copied = messageId ? conversation.slice(0, index + 1) : conversation;
+    return this.db.transaction(() => {
+      const target = this.createSession({
+        projectId: source.projectId,
+        title: `${source.title} (分叉)`,
+        providerId: source.providerId,
+        parentSessionId: source.id,
+        continuationMode: "fork"
       });
-    }
-    return target;
+      // Copying in one millisecond with new random ids used to scramble messages
+      // having the same timestamp. Keep the snapshot order before the next turn.
+      const firstCreatedAt = Date.now() - copied.length;
+      for (const [index, message] of copied.entries()) {
+        this.addMessage({
+          sessionId: target.id,
+          role: message.role,
+          content: message.content,
+          providerId: message.providerId,
+          eventType: message.eventType,
+          createdAt: firstCreatedAt + index,
+          ...(message.itemId ? { itemId: message.itemId } : {}),
+          ...(message.dataJson ? { dataJson: message.dataJson } : {})
+        });
+      }
+      return target;
+    })();
   }
   enqueueTurn(input: {
     id?: string;

@@ -221,6 +221,7 @@ export const eventSchema = z.object({
     "approval.requested",
     "run.reconnecting",
     "turn.completed",
+    "run.interrupted",
     "run.failed"
   ]),
   payload: z.unknown()

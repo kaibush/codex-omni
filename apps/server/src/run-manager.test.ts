@@ -712,6 +712,20 @@ describe("RunManager reconnect state", () => {
     );
 
     expect(calls).toBe(2);
+    expect(store!.getSession(session.id)?.status).toBe("interrupted");
+    expect(store!.listRuns({ sessionId: session.id }).map((run) => run.status)).toEqual([
+      "interrupted",
+      "interrupted"
+    ]);
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+    for (const run of store!.listRuns({ sessionId: session.id })) {
+      const events = store!.listRunEvents(run.id).map((event) => JSON.parse(event.eventJson));
+      expect(events.at(-1)).toMatchObject({
+        type: "run.interrupted",
+        payload: { completionGuard: { upstreamTerminal: "turn.completed" } }
+      });
+      expect(events.some((event) => event.type === "turn.completed")).toBe(false);
+    }
     expect(
       sent.some((event) => event.type === "server.error" && event.payload?.kind === "warning")
     ).toBe(true);
@@ -848,6 +862,204 @@ describe("RunManager reconnect state", () => {
     );
 
     expect(calls).toBe(2);
+    // Assert outside the runtime callback: startTurn catches runtime errors,
+    // which otherwise also swallows failed assertions inside the mock.
+    expect(runtimeMocks.run.mock.calls[1]?.[0].message).toContain("压缩上下文");
+    expect(runtimeMocks.run.mock.calls[1]?.[0].message).toContain(
+      "原始用户请求：\ngrok-iq 审计页也显示用户原文"
+    );
+    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+  });
+
+  it("recovers an initial plan-only turn while preserving the original request, thread and attachments", async () => {
+    const { project, session, socket, sent, imagePath } = attachmentFixture();
+    const message = "私库构建的时候报错了";
+    const attachments = [{ name: "shot.png", path: imagePath, kind: "image" as const }];
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      const first = runtimeMocks.run.mock.calls.length === 1;
+      onEvent(
+        bridgeEvent({ seq: 1, type: "thread.started", payload: { threadId: "original-thread" } })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "tool.output",
+          payload: { tool: "runtime_error", message: "Model metadata missing" }
+        })
+      );
+      onEvent(
+        bridgeEvent(
+          first
+            ? {
+                seq: 3,
+                type: "assistant.completed",
+                payload: {
+                  itemId: "answer",
+                  text: "先看你贴的构建报错图，再对照私库的 workflow 和最近合入的代码。"
+                }
+              }
+            : {
+                seq: 3,
+                type: "tool.output",
+                payload: { itemId: "read", tool: "command", output: "read workflow" }
+              }
+        )
+      );
+      onEvent(
+        bridgeEvent({ seq: 4, type: "turn.completed", payload: { usage: { input_tokens: 10 } } })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message,
+        attachments,
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
+    expect(runtimeMocks.run.mock.calls[1]?.[0]).toMatchObject({
+      threadId: "original-thread",
+      attachments,
+      sandbox: "read-only",
+      approvalPolicy: "on-request",
+      networkAccessEnabled: false
+    });
+    expect(runtimeMocks.run.mock.calls[1]?.[0].message).toContain(`原始用户请求：\n${message}`);
+    expect(sent.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    expect(store!.listRuns({ sessionId: session.id }).map((run) => run.status)).toEqual([
+      "completed",
+      "interrupted"
+    ]);
+  });
+
+  it("does not call an unverified recovery completed or advance queued work", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      const text = runtimeMocks.run.mock.calls.length === 1 ? "我先检查截图。" : "已完成所有修改。";
+      onEvent(
+        bridgeEvent({ seq: 1, type: "assistant.completed", payload: { itemId: "answer", text } })
+      );
+      onEvent(
+        bridgeEvent({ seq: 2, type: "tool.output", payload: { tool: "update_plan", items: [] } })
+      );
+      onEvent(bridgeEvent({ seq: 3, type: "turn.completed", payload: {} }));
+    });
+    store!.enqueueTurn({
+      sessionId: session.id,
+      projectId: project.id,
+      message: "next queued task",
+      optionsJson: "{}"
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "继续" },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
+    expect(store!.getLatestRun(session.id)?.status).toBe("interrupted");
+    expect(store!.listQueuedTurns(session.id)).toHaveLength(1);
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+  });
+
+  it.each(["plan", "disabled"] as const)("respects the %s recovery setting", async (mode) => {
+    const { project, session, socket } = fixture();
+    if (mode === "disabled") store!.updateSettings({ continuationEnabled: false });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "tool.output", payload: { tool: "context_compacted" } }));
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "assistant.completed",
+          payload: { itemId: "answer", text: "先核对截图和审计页现状。" }
+        })
+      );
+      onEvent(bridgeEvent({ seq: 3, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "核对当前实现",
+        ...(mode === "plan" ? { mode } : {})
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe(
+      mode === "plan" ? "completed" : "interrupted"
+    );
+  });
+
+  it("seeds a new fork from its copied history, then resumes only the new native thread", async () => {
+    const { project, session, socket } = fixture();
+    store!.updateSession(session.id, { threadId: "parent-thread" });
+    store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "私库构建的时候报错了",
+      providerId: null,
+      eventType: "user.message",
+      createdAt: 1,
+      dataJson: JSON.stringify({ attachments: [{ path: ".codex-uploads/error.png" }] })
+    });
+    const branchPoint = store!.addMessage({
+      sessionId: session.id,
+      role: "assistant",
+      content: "先看你贴的构建报错图。",
+      providerId: null,
+      eventType: "assistant.completed",
+      createdAt: 2
+    });
+    store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "future message outside fork",
+      providerId: null,
+      eventType: "user.message",
+      createdAt: 3
+    });
+    const fork = store!.forkSession(session.id, branchPoint.id)!;
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({ seq: 1, type: "thread.started", payload: { threadId: "fork-thread" } })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "assistant.completed",
+          payload: { itemId: "answer", text: "已完成检查。" }
+        })
+      );
+      onEvent(bridgeEvent({ seq: 3, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: fork.id, message: "继续" },
+      socket
+    );
+    const first = runtimeMocks.run.mock.calls[0]?.[0];
+    expect(first).not.toHaveProperty("threadId");
+    expect(first.message).toContain("USER:\n私库构建的时候报错了");
+    expect(first.message).toContain("ASSISTANT:\n先看你贴的构建报错图。");
+    expect(first.message).toContain(".codex-uploads/error.png");
+    expect(first.message).not.toContain("future message outside fork");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: fork.id, message: "继续" },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
+    expect(runtimeMocks.run.mock.calls[1]?.[0].threadId).toBe("fork-thread");
+    expect(runtimeMocks.run.mock.calls[1]?.[0].message).not.toContain("fork-history");
+    expect(store!.getSession(session.id)?.threadId).toBe("parent-thread");
   });
 
   it("forwards queued image attachments to the runtime", async () => {
