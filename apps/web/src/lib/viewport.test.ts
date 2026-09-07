@@ -16,7 +16,7 @@ describe("isStandaloneDisplay", () => {
 });
 
 describe("resolveAppViewport", () => {
-  it("fills the iOS PWA screen when visualViewport stays on the small viewport", () => {
+  it("keeps the composer in the visible viewport instead of under iOS chrome", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -26,10 +26,10 @@ describe("resolveAppViewport", () => {
         clientHeight: 779,
         standalone: true
       })
-    ).toEqual({ height: 874, offsetTop: 0 });
+    ).toEqual({ height: 779, offsetTop: 0 });
   });
 
-  it("fills Safari the same way so the composer can sit on the screen bottom", () => {
+  it("does the same in Safari", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -39,7 +39,7 @@ describe("resolveAppViewport", () => {
         clientHeight: 779,
         standalone: false
       })
-    ).toEqual({ height: 874, offsetTop: 0 });
+    ).toEqual({ height: 779, offsetTop: 0 });
   });
 
   it("does not jump to an implausible screen height", () => {
@@ -56,7 +56,7 @@ describe("resolveAppViewport", () => {
     ).toEqual({ height: 500, offsetTop: 0 });
   });
 
-  it("keeps a full-height window even if innerHeight already recovered", () => {
+  it("follows visualViewport even if innerHeight already recovered", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -66,10 +66,10 @@ describe("resolveAppViewport", () => {
         clientHeight: 874,
         standalone: false
       })
-    ).toEqual({ height: 874, offsetTop: 0 });
+    ).toEqual({ height: 779, offsetTop: 0 });
   });
 
-  it("uses the short screen side in landscape", () => {
+  it("uses the visible height in landscape instead of the long screen side", () => {
     expect(
       resolveAppViewport({
         visualHeight: 320,
@@ -81,7 +81,7 @@ describe("resolveAppViewport", () => {
         screenHeight: 874,
         standalone: true
       })
-    ).toEqual({ height: 402, offsetTop: 0 });
+    ).toEqual({ height: 320, offsetTop: 0 });
   });
 
   it("ignores a stale visualViewport offset when the keyboard is closed", () => {
@@ -94,7 +94,7 @@ describe("resolveAppViewport", () => {
         clientHeight: 874,
         standalone: false
       })
-    ).toEqual({ height: 874, offsetTop: 0 });
+    ).toEqual({ height: 779, offsetTop: 0 });
   });
 
   it("shrinks to the visual viewport when the keyboard is open", () => {
@@ -121,6 +121,19 @@ describe("resolveAppViewport", () => {
         standalone: false
       })
     ).toEqual({ height: 430, offsetTop: 86 });
+  });
+
+  it("falls back to the layout viewport when visualViewport is missing", () => {
+    expect(
+      resolveAppViewport({
+        ...iphone16Pro,
+        visualHeight: 0,
+        visualOffsetTop: 0,
+        innerHeight: 779,
+        clientHeight: 779,
+        standalone: false
+      })
+    ).toEqual({ height: 779, offsetTop: 0 });
   });
 });
 

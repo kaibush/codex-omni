@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -29,6 +30,7 @@ import { parseContextUsage } from "@/lib/context-usage";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import { taskStatusLabel, type TaskStatus } from "@/lib/task-state";
 import type { WorkspaceSettings } from "@/features/workspace/SettingsDialog";
+import { placeRuntimeOptionsPanel } from "./runtime-options-layout";
 import {
   formatDuration,
   formatTokens,
@@ -249,114 +251,201 @@ export function RuntimeOptionsPanel({
   settings,
   onChange,
   onClose,
-  homePath
+  homePath,
+  anchorRef
 }: {
   settings: WorkspaceSettings;
   onChange: (settings: WorkspaceSettings) => Promise<void>;
   onClose: () => void;
   homePath?: string | undefined;
+  anchorRef: RefObject<HTMLElement | null>;
 }) {
-  return (
-    <div className="runtime-options-panel absolute bottom-12 right-0 z-40 w-[min(calc(100vw-1.5rem),22rem)] rounded-xl border border-border bg-popover p-3 shadow-2xl">
-      <div className="flex items-center justify-between">
-        <b className="text-sm">运行设置</b>
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onClose}>
-          关闭
-        </Button>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 max-sm:grid-cols-1">
-        <label className="field-label">
-          执行方式
-          <Select
-            value={settings.executionMode}
-            onValueChange={(value) =>
-              void onChange({
-                ...settings,
-                executionMode: value as WorkspaceSettings["executionMode"]
-              })
+  const layerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const sync = () => {
+      const anchor = anchorRef.current;
+      const layer = layerRef.current;
+      if (!anchor || !layer) return;
+      const rect = anchor.getBoundingClientRect();
+      const layerRect = layer.getBoundingClientRect();
+      const viewport = { width: layerRect.width, height: layerRect.height };
+      const panelHeight = panelRef.current?.offsetHeight;
+      setBox(
+        placeRuntimeOptionsPanel({
+          anchor: {
+            top: rect.top - layerRect.top,
+            right: rect.right - layerRect.left,
+            bottom: rect.bottom - layerRect.top,
+            left: rect.left - layerRect.left,
+            width: rect.width,
+            height: rect.height
+          },
+          viewport,
+          ...(panelHeight ? { panelHeight } : {}),
+          narrow: viewport.width < 768
+        })
+      );
+    };
+    sync();
+    const frame = window.requestAnimationFrame(sync);
+    window.visualViewport?.addEventListener("resize", sync);
+    window.visualViewport?.addEventListener("scroll", sync);
+    window.addEventListener("resize", sync);
+    const panel = panelRef.current;
+    const observer = typeof ResizeObserver !== "undefined" && panel ? new ResizeObserver(sync) : null;
+    if (panel) observer?.observe(panel);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.visualViewport?.removeEventListener("resize", sync);
+      window.visualViewport?.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+      observer?.disconnect();
+    };
+  }, [anchorRef, settings]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (anchorRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest("[data-slot='select-content'], [data-radix-popper-content-wrapper]")
+      ) {
+        return;
+      }
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [anchorRef, onClose]);
+
+  return createPortal(
+    <div ref={layerRef} className="runtime-options-layer">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-label="运行设置"
+        className="runtime-options-panel rounded-xl border border-border bg-popover p-3 shadow-2xl"
+        style={{
+          top: box?.top ?? 0,
+          left: box?.left ?? 12,
+          width: box?.width,
+          maxHeight: box?.maxHeight,
+          visibility: box ? "visible" : "hidden"
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <b className="text-sm">运行设置</b>
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 max-sm:grid-cols-1">
+          <label className="field-label">
+            执行方式
+            <Select
+              value={settings.executionMode}
+              onValueChange={(value) =>
+                void onChange({
+                  ...settings,
+                  executionMode: value as WorkspaceSettings["executionMode"]
+                })
+              }
+            >
+              <SelectTrigger className="mt-1.5 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="execute">Execute</SelectItem>
+                <SelectItem value="plan">Plan</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="field-label">
+            文件权限
+            <Select
+              value={settings.sandbox}
+              onValueChange={(value) =>
+                void onChange({
+                  ...settings,
+                  sandbox: value as WorkspaceSettings["sandbox"]
+                })
+              }
+            >
+              <SelectTrigger className="mt-1.5 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="read-only">只读</SelectItem>
+                <SelectItem value="workspace-write">工作区可写</SelectItem>
+                <SelectItem value="danger-full-access">完全访问</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="field-label">
+            审批策略
+            <Select
+              value={settings.approvalPolicy}
+              onValueChange={(value) =>
+                void onChange({
+                  ...settings,
+                  approvalPolicy: value as WorkspaceSettings["approvalPolicy"]
+                })
+              }
+            >
+              <SelectTrigger className="mt-1.5 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="untrusted">建议模式</SelectItem>
+                <SelectItem value="on-request">平衡模式（推荐）</SelectItem>
+                <SelectItem value="never">全自动</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
+          允许命令访问网络
+          <Switch
+            checked={settings.networkAccessEnabled}
+            onCheckedChange={(checked) =>
+              void onChange({ ...settings, networkAccessEnabled: checked })
             }
-          >
-            <SelectTrigger className="mt-1.5 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="execute">Execute</SelectItem>
-              <SelectItem value="plan">Plan</SelectItem>
-            </SelectContent>
-          </Select>
+          />
         </label>
-        <label className="field-label">
-          文件权限
-          <Select
-            value={settings.sandbox}
-            onValueChange={(value) =>
-              void onChange({
-                ...settings,
-                sandbox: value as WorkspaceSettings["sandbox"]
-              })
+        <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
+          启用继续执行提示词
+          <Switch
+            checked={settings.continuationEnabled}
+            onCheckedChange={(checked) =>
+              void onChange({ ...settings, continuationEnabled: checked })
             }
-          >
-            <SelectTrigger className="mt-1.5 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="read-only">只读</SelectItem>
-              <SelectItem value="workspace-write">工作区可写</SelectItem>
-              <SelectItem value="danger-full-access">完全访问</SelectItem>
-            </SelectContent>
-          </Select>
+          />
         </label>
-        <label className="field-label">
-          审批策略
-          <Select
-            value={settings.approvalPolicy}
-            onValueChange={(value) =>
-              void onChange({
-                ...settings,
-                approvalPolicy: value as WorkspaceSettings["approvalPolicy"]
-              })
-            }
-          >
-            <SelectTrigger className="mt-1.5 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="untrusted">建议模式</SelectItem>
-              <SelectItem value="on-request">平衡模式（推荐）</SelectItem>
-              <SelectItem value="never">全自动</SelectItem>
-            </SelectContent>
-          </Select>
-        </label>
-      </div>
-      <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-        允许命令访问网络
-        <Switch
-          checked={settings.networkAccessEnabled}
-          onCheckedChange={(checked) =>
-            void onChange({ ...settings, networkAccessEnabled: checked })
-          }
-        />
-      </label>
-      <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-        启用继续执行提示词
-        <Switch
-          checked={settings.continuationEnabled}
-          onCheckedChange={(checked) =>
-            void onChange({ ...settings, continuationEnabled: checked })
-          }
-        />
-      </label>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。
-      </p>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-        Plan 只做只读规划；平衡模式仅在需要提升权限时确认。修改后立即保存，并用于下一次发送。
-      </p>
-      {homePath ? (
-        <p className="mt-2 truncate text-xs text-muted-foreground" title={homePath}>
-          CODEX_HOME {homePath}
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。
         </p>
-      ) : null}
-    </div>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          Plan 只做只读规划；平衡模式仅在需要提升权限时确认。修改后立即保存，并用于下一次发送。
+        </p>
+        {homePath ? (
+          <p className="mt-2 truncate text-xs text-muted-foreground" title={homePath}>
+            CODEX_HOME {homePath}
+          </p>
+        ) : null}
+      </div>
+    </div>,
+    document.body
   );
 }

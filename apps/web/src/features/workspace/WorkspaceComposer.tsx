@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import {
   Cpu,
   FileText,
@@ -216,10 +216,11 @@ export function WorkspaceComposer({
   }, [enhanceNonce]);
   const sandbox = sandboxMeta(workspaceSettings.sandbox);
   const SandboxIcon = sandbox.icon;
+  const runtimeButtonRef = useRef<HTMLButtonElement>(null);
   return (
     <>
       <footer
-        className={`composer-dock shrink-0 px-3 pb-[env(safe-area-inset-bottom)] pt-1 sm:px-5 sm:pb-4 lg:px-8 ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
+        className={`composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8 ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
       >
         <div className="chat-content-width mx-auto">
           <div
@@ -520,12 +521,15 @@ export function WorkspaceComposer({
                     <Sparkles className="size-4" />
                   )}
                 </Button>
-                <div className="relative">
+                <div className="relative z-10 shrink-0">
                   <Button
+                    ref={runtimeButtonRef}
                     type="button"
                     variant="outline"
                     className="composer-runtime-btn h-8 rounded-lg px-2.5"
                     title={`${workspaceSettings.executionMode === "plan" ? "Plan：只读规划" : "Execute：按当前权限执行"} · ${sandbox.label}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={runtimeOptionsOpen}
                     onClick={() => setRuntimeOptionsOpen((value) => !value)}
                   >
                     <SandboxIcon className="size-3.5" />
@@ -540,6 +544,7 @@ export function WorkspaceComposer({
                       onChange={saveWorkspaceSettings}
                       onClose={() => setRuntimeOptionsOpen(false)}
                       homePath={selectedProvider?.codexHome || runtimeCodexHome}
+                      anchorRef={runtimeButtonRef}
                     />
                   )}
                 </div>
