@@ -19,6 +19,7 @@ export type WorkspaceSettings = {
   expandToolCalls: boolean;
   timelineView: TimelineView;
   sendWithEnter: boolean;
+  sendMode: "queue" | "steer";
   showProviderLabels: boolean;
   executionMode: "plan" | "execute";
   uiFontSize: 13 | 14 | 15 | 16 | 18;
@@ -36,6 +37,7 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   expandToolCalls: true,
   timelineView: "folded",
   sendWithEnter: true,
+  sendMode: "queue",
   showProviderLabels: true,
   executionMode: "execute",
   uiFontSize: 14

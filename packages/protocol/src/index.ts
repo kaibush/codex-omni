@@ -269,6 +269,16 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     providerId: z.string().optional(),
     ...turnOptionsSchema.shape
   }),
+  z.object({
+    type: z.literal("turn.steer"),
+    clientId: z.string().min(1).max(120).optional(),
+    projectId: z.string(),
+    sessionId: z.string(),
+    message: z.string().min(1),
+    displayMessage: z.string().optional(),
+    providerId: z.string().optional(),
+    ...turnOptionsSchema.shape
+  }),
   z.object({ type: z.literal("turn.cancel"), sessionId: z.string(), turnId: z.string() }),
   z.object({
     type: z.literal("session.subscribe"),

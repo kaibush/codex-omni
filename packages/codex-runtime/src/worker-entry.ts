@@ -32,12 +32,23 @@ const request = bridgeRequestSchema.parse(JSON.parse(line));
 const normalizer = createNormalizer(request);
 const send = (event: unknown) => process.stdout.write(`${JSON.stringify(event)}\n`);
 const approvalResponses = new Map<string, (decision: string) => void>();
+const steerInputs: Array<{ message: string; attachments?: typeof request.attachments }> = [];
 const approveForSession = new Set<string>();
 rl.on("line", (input) => {
   try {
     const response = JSON.parse(input);
-    if (response.type !== "approval.respond") return;
-    approvalResponses.get(response.requestId)?.(response.decision);
+    if (response.type === "approval.respond") {
+      approvalResponses.get(response.requestId)?.(response.decision);
+      return;
+    }
+    if (response.type === "turn.steer" && typeof response.message === "string" && response.message.trim()) {
+      steerInputs.push({
+        message: response.message,
+        ...(Array.isArray(response.attachments) && response.attachments.length
+          ? { attachments: response.attachments }
+          : {})
+      });
+    }
   } catch {
     // Ignore malformed response lines; the active approval remains pending.
   }
@@ -108,47 +119,74 @@ try {
   const thread = request.threadId
     ? codex.resumeThread(request.threadId, options)
     : codex.startThread(options);
-  const { events } = await thread.runStreamed(
-    buildCodexRunInput(request.message, request.attachments, request.cwd)
-  );
-  await consumeCodexEventStream({
-    events,
-    state: streamState,
-    map: (event) => normalizer.map(event),
-    onSdkEvent: async (event) => {
-      if (
-        request.approvalPolicy !== "never" &&
-        event.type === "item.started" &&
-        event.item.type === "command_execution"
-      ) {
-        const allowed = await requestApproval(event.item);
-        if (!allowed) throw new Error("Command denied by user");
-      }
-      if (event.type === "thread.started")
-        collabTailer.setThreadId(event.thread_id, { fromEnd: Boolean(request.threadId) });
-      if (event.type === "turn.completed") flushCollab();
-    },
-    onMappedEvent: (mapped) => {
-      if (mapped.type === "turn.completed") {
-        const latest = collabTailer.latestTokenUsage();
-        if (!latest) send(mapped);
-        else {
-          const payload = { ...((mapped.payload ?? {}) as Record<string, unknown>) };
-          payload.usage = { ...numericUsage(payload.usage), ...numericUsage(latest) };
-          send({ ...mapped, payload });
+  let nextInput = buildCodexRunInput(request.message, request.attachments, request.cwd);
+  while (true) {
+    const segmentState = createMappedStreamState();
+    let interruptedForSteer = false;
+    const { events } = await thread.runStreamed(nextInput);
+    const state = await consumeCodexEventStream({
+      events,
+      state: segmentState,
+      map: (event) => normalizer.map(event),
+      onSdkEvent: async (event) => {
+        if (
+          request.approvalPolicy !== "never" &&
+          event.type === "item.started" &&
+          event.item.type === "command_execution"
+        ) {
+          const allowed = await requestApproval(event.item);
+          if (!allowed) throw new Error("Command denied by user");
         }
-      } else {
-        send(mapped);
+        if (event.type === "thread.started")
+          collabTailer.setThreadId(event.thread_id, { fromEnd: Boolean(request.threadId) });
+        if (event.type === "turn.completed") flushCollab();
+      },
+      shouldStop: (mapped) => {
+        if (!steerInputs.length) return false;
+        if (mapped.type === "turn.completed") {
+          interruptedForSteer = true;
+          return true;
+        }
+        if (mapped.type === "file.change") {
+          interruptedForSteer = (mapped.payload as Record<string, unknown>)?.phase === "completed";
+          return interruptedForSteer;
+        }
+        if (mapped.type !== "tool.output") return false;
+        interruptedForSteer = (mapped.payload as Record<string, unknown>)?.phase === "completed";
+        return interruptedForSteer;
+      },
+      onMappedEvent: (mapped) => {
+        if (mapped.type === "turn.completed") {
+          if (steerInputs.length) return;
+          const latest = collabTailer.latestTokenUsage();
+          if (!latest) send(mapped);
+          else {
+            const payload = { ...((mapped.payload ?? {}) as Record<string, unknown>) };
+            payload.usage = { ...numericUsage(payload.usage), ...numericUsage(latest) };
+            send({ ...mapped, payload });
+          }
+        } else {
+          send(mapped);
+        }
+        flushCollab();
       }
-      flushCollab();
+    });
+    flushCollab();
+    // A steer message can arrive just after the SDK emitted turn.completed but
+    // before the worker process exits. Keep the same worker/thread alive and
+    // resume with that input instead of dropping it.
+    if (steerInputs.length && (interruptedForSteer || state.completed)) {
+      const input = steerInputs.shift()!;
+      nextInput = buildCodexRunInput(input.message, input.attachments, request.cwd);
+      continue;
     }
-  });
-  flushCollab();
-  const incomplete = incompleteStreamError(streamState);
-  if (incomplete) {
-    send(normalizer.failure(incomplete, streamState.lastFailureMessage));
-    process.exitCode = 1;
-  } else if (streamState.failed) process.exitCode = 1;
+    const incomplete = incompleteStreamError(state);
+    if (incomplete) {
+      send(normalizer.failure(incomplete, state.lastFailureMessage));
+      process.exitCode = 1;
+    } else if (state.failed) process.exitCode = 1;
+    break;
+  }
 } catch (error) {
   if (!streamState.failed) send(normalizer.failure(error, streamState.lastFailureMessage));
   process.exitCode = 1;

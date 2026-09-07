@@ -315,6 +315,7 @@ const defaultSettings = {
   expandToolCalls: true,
   timelineView: "folded" as const,
   sendWithEnter: true,
+  sendMode: "queue" as const,
   showProviderLabels: true,
   executionMode: "execute" as const,
   uiFontSize: 14
@@ -563,6 +564,7 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),
       sendWithEnter: z.boolean(),
+      sendMode: z.enum(["queue", "steer"]).optional(),
       showProviderLabels: z.boolean(),
       executionMode: z.enum(["plan", "execute"]).optional(),
       uiFontSize: z
@@ -1690,7 +1692,9 @@ app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
         .catch((error) =>
           sendError(
             error,
-            command.type === "turn.enqueue" ? command.clientId : undefined,
+            command.type === "turn.enqueue" || command.type === "turn.steer"
+              ? command.clientId
+              : undefined,
             command.sessionId
           )
         );

@@ -1591,8 +1591,12 @@ export function Workspace() {
       restoreLiveTimeline(false);
       const clientId = createId();
       const now = Date.now();
+      const steering =
+        runState?.status === "running" &&
+        workspaceSettings.sendMode === "steer" &&
+        socket.current?.readyState === WebSocket.OPEN;
       const command = JSON.stringify({
-        type: "turn.enqueue",
+        type: steering ? "turn.steer" : "turn.enqueue",
         clientId,
         projectId,
         sessionId,
@@ -1606,38 +1610,38 @@ export function Workspace() {
         networkAccessEnabled: workspaceSettings.networkAccessEnabled,
         mode: workspaceSettings.executionMode
       });
-      queuedCommands.current = boundOutboundCommands([
-        ...queuedCommands.current.filter((item) => item.id !== clientId),
-        { id: clientId, sessionId, data: command, message: composed.displayMessage }
-      ]);
-      persistOutboundCommands(queuedCommands.current);
-      setQueuedTurns((current) => [
-        ...current.filter((item) => item.id !== clientId),
-        {
-          id: clientId,
-          sessionId,
-          projectId,
-          providerId,
-          message: composed.message,
-          options: {
-            ...(model ? { model } : {}),
-            sandbox: workspaceSettings.sandbox,
-            approvalPolicy: workspaceSettings.approvalPolicy,
-            networkAccessEnabled: workspaceSettings.networkAccessEnabled,
-            mode: workspaceSettings.executionMode,
-            displayMessage: composed.displayMessage,
-            ...(composed.attachments.length ? { attachments: composed.attachments } : {})
-          },
-          createdAt: now,
-          updatedAt: now
-        }
-      ]);
+      if (!steering) {
+        queuedCommands.current = boundOutboundCommands([
+          ...queuedCommands.current.filter((item) => item.id !== clientId),
+          { id: clientId, sessionId, data: command, message: composed.displayMessage }
+        ]);
+        persistOutboundCommands(queuedCommands.current);
+        setQueuedTurns((current) => [
+          ...current.filter((item) => item.id !== clientId),
+          {
+            id: clientId,
+            sessionId,
+            projectId,
+            providerId,
+            message: composed.message,
+            options: {
+              ...(model ? { model } : {}),
+              sandbox: workspaceSettings.sandbox,
+              approvalPolicy: workspaceSettings.approvalPolicy,
+              networkAccessEnabled: workspaceSettings.networkAccessEnabled,
+              mode: workspaceSettings.executionMode,
+              displayMessage: composed.displayMessage,
+              ...(composed.attachments.length ? { attachments: composed.attachments } : {})
+            },
+            createdAt: now,
+            updatedAt: now
+          }
+        ]);
+      }
       if (socket.current?.readyState === WebSocket.OPEN) {
         socket.current.send(command);
         setSendNotice(
-          runState?.status === "running" || pendingApprovals.length
-            ? "已加入消息队列"
-            : "正在启动任务"
+          steering ? "已插入当前对话" : runState?.status === "running" || pendingApprovals.length ? "已加入消息队列" : "正在启动任务"
         );
       } else {
         setSendNotice("连接正在恢复，连接成功后会自动发送");

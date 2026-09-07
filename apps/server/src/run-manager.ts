@@ -101,6 +101,7 @@ type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }
   continuationRetryReason?: ContinuationRetryReason;
 };
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
+type SteerCommand = Extract<RunCommand, { type: "turn.steer" }>;
 type ClientEvent = {
   type: string;
   sessionId: string;
@@ -581,6 +582,89 @@ export class RunManager {
 
   enqueueTurn(command: EnqueueCommand) {
     return this.queueCommand(command);
+  }
+
+  private steerTurn(command: SteerCommand) {
+    const session = this.store.getSession(command.sessionId);
+    const project = this.store.getProject(command.projectId);
+    if (!session || !project || session.projectId !== project.id)
+      throw new Error("Session/project mismatch");
+    const itemId = command.clientId ? `steer:${command.clientId}` : undefined;
+    if (itemId && this.store.getMessageByItemId(command.sessionId, itemId)) {
+      this.broadcast(command.sessionId, {
+        type: "turn.steer.acknowledged",
+        sessionId: command.sessionId,
+        payload: { clientId: command.clientId, status: "accepted" }
+      });
+      return;
+    }
+    const attachments = sanitizeCodexAttachments(project.realPath, command.attachments);
+    const active = this.activeRuns.get(command.sessionId);
+    if (!active || !this.worker.isActive(command.sessionId)) {
+      this.queueCommand({
+        type: "turn.enqueue",
+        ...(command.clientId ? { clientId: command.clientId } : {}),
+        projectId: command.projectId,
+        sessionId: command.sessionId,
+        message: command.message,
+        ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
+        ...(command.providerId ? { providerId: command.providerId } : {}),
+        ...(command.model ? { model: command.model } : {}),
+        ...(command.sandbox ? { sandbox: command.sandbox } : {}),
+        ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+        ...(typeof command.networkAccessEnabled === "boolean"
+          ? { networkAccessEnabled: command.networkAccessEnabled }
+          : {}),
+        ...(command.mode ? { mode: command.mode } : {}),
+        ...(attachments.length ? { attachments } : {})
+      });
+      return;
+    }
+    if (!this.worker.steer(command.sessionId, command.message, attachments))
+      throw new Error("当前运行无法插入消息");
+    const providerId = this.store.getRun(active.runId)?.providerId ?? session.providerId;
+    const turnOptions = {
+      ...(command.model ? { model: command.model } : {}),
+      ...(command.sandbox ? { sandbox: command.sandbox } : {}),
+      ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+      ...(typeof command.networkAccessEnabled === "boolean"
+        ? { networkAccessEnabled: command.networkAccessEnabled }
+        : {}),
+      ...(command.mode ? { mode: command.mode } : {}),
+      ...(attachments.length ? { attachments } : {})
+    };
+    const persistedItemId = itemId ?? `steer:${active.runId}:${Date.now()}`;
+    this.store.upsertEventMessage({
+      sessionId: command.sessionId,
+      role: "user",
+      content: command.message,
+      providerId,
+      eventType: "user.message",
+      itemId: persistedItemId,
+      dataJson: JSON.stringify({ turnOptions, steer: true, pending: true })
+    });
+    const persisted = this.store.getMessageByItemId(
+      command.sessionId,
+      persistedItemId
+    );
+    this.broadcast(command.sessionId, {
+      type: "user.message",
+      sessionId: command.sessionId,
+      requestId: active.runId,
+      payload: {
+        id: persisted?.id,
+        message: command.message,
+        providerId,
+        createdAt: persisted?.createdAt ?? Date.now(),
+        turnOptions,
+        steer: true
+      }
+    });
+    this.broadcast(command.sessionId, {
+      type: "turn.steer.acknowledged",
+      sessionId: command.sessionId,
+      payload: { ...(command.clientId ? { clientId: command.clientId } : {}), status: "accepted" }
+    });
   }
 
   private queueCommand(command: EnqueueCommand) {
@@ -1227,6 +1311,7 @@ export class RunManager {
     if (
       command.type === "turn.start" ||
       command.type === "turn.enqueue" ||
+      command.type === "turn.steer" ||
       command.type === "run.retry"
     ) {
       this.subscribe(command.sessionId, socket);
@@ -1271,6 +1356,10 @@ export class RunManager {
     }
     if (command.type === "turn.enqueue") {
       this.queueCommand(command);
+      return;
+    }
+    if (command.type === "turn.steer") {
+      this.steerTurn(command);
       return;
     }
     if (command.type === "queue.remove") {

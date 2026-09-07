@@ -227,6 +227,15 @@ export class BridgeWorkerAdapter {
     return true;
   }
 
+  steer(sessionId: string, message: string, attachments?: BridgeRequest["attachments"]) {
+    const child = this.active.get(sessionId)?.child;
+    if (!child?.stdin?.writable) return false;
+    child.stdin.write(
+      `${JSON.stringify({ type: "turn.steer", message, ...(attachments?.length ? { attachments } : {}) })}\n`
+    );
+    return true;
+  }
+
   cancel(sessionId: string) {
     const active = this.active.get(sessionId);
     if (!active) return false;

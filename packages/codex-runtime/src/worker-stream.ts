@@ -78,6 +78,7 @@ export async function consumeCodexEventStream(input: {
   map: (event: ThreadEvent) => BridgeEvent[];
   onSdkEvent?: (event: ThreadEvent) => Promise<void> | void;
   onMappedEvent: (mapped: BridgeEvent, sdkEvent: ThreadEvent) => void | Promise<void>;
+  shouldStop?: (mapped: BridgeEvent, sdkEvent: ThreadEvent) => boolean;
 }): Promise<MappedStreamState> {
   // Keep the caller's state current even if the SDK throws while draining stdout.
   const state = input.state ?? createMappedStreamState();
@@ -87,6 +88,7 @@ export async function consumeCodexEventStream(input: {
     for (const mapped of input.map(event)) {
       observeMappedEvent(state, mapped);
       await input.onMappedEvent(mapped, event);
+      if (input.shouldStop?.(mapped, event)) return state;
     }
     // A fatal event is terminal. Closing the SDK iterator also reaps its process.
     if (state.failed) break;

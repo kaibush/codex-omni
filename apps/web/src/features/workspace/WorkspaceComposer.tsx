@@ -573,14 +573,11 @@ export function WorkspaceComposer({
                         className="size-8 rounded-lg"
                         onClick={send}
                         disabled={Boolean(blockReason)}
-                        aria-label={
-                          blockReason ??
-                          (runState?.status === "running" || pendingApprovals.length
-                            ? "加入消息队列"
-                            : "发送消息")
-                        }
+                        aria-label={blockReason ?? (runState?.status === "running" && workspaceSettings.sendMode === "steer" ? "直接插入消息" : runState?.status === "running" || pendingApprovals.length ? "加入消息队列" : "发送消息")}
                       >
-                        {runState?.status === "running" || pendingApprovals.length ? (
+                        {runState?.status === "running" && workspaceSettings.sendMode === "steer" ? (
+                          <Send className="size-4" />
+                        ) : runState?.status === "running" || pendingApprovals.length ? (
                           <ListPlus className="size-4" />
                         ) : (
                           <Send className="size-4" />
@@ -590,8 +587,10 @@ export function WorkspaceComposer({
                   </TooltipTrigger>
                   <TooltipContent>
                     {blockReason ??
-                      (runState?.status === "running" || pendingApprovals.length
-                        ? "加入消息队列"
+                      (runState?.status === "running" && workspaceSettings.sendMode === "steer"
+                        ? "直接插入消息"
+                        : runState?.status === "running" || pendingApprovals.length
+                          ? "加入消息队列"
                         : "发送消息")}
                   </TooltipContent>
                 </Tooltip>
