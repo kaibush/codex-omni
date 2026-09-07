@@ -1,4 +1,5 @@
 const KEYBOARD_INSET_PX = 120;
+const IOS_CHROME_GAP_MAX_PX = 140;
 
 export type AppViewportMetrics = {
   visualHeight: number;
@@ -59,23 +60,16 @@ export function resolveAppViewport(metrics: AppViewportMetrics): AppViewport {
     return { height: visualHeight, offsetTop: visualOffsetTop };
   }
 
-  if (metrics.standalone) {
-    const landscape = positive(metrics.innerWidth) > innerHeight;
-    const screenHeight = landscape
-      ? Math.min(positive(metrics.screenWidth), positive(metrics.screenHeight))
-      : Math.max(positive(metrics.screenWidth), positive(metrics.screenHeight));
-    const visibleHeight = Math.max(layoutHeight, visualHeight + visualOffsetTop);
-    const chromeGap = screenHeight - visibleHeight;
-    return {
-      height: chromeGap > 0 && chromeGap <= 140 ? screenHeight : visibleHeight,
-      offsetTop: 0
-    };
-  }
-
-  if (visualHeight > 0) {
-    return { height: visualHeight, offsetTop: visualOffsetTop };
-  }
-  return { height: layoutHeight, offsetTop: 0 };
+  const landscape = positive(metrics.innerWidth) > innerHeight;
+  const screenHeight = landscape
+    ? Math.min(positive(metrics.screenWidth), positive(metrics.screenHeight))
+    : Math.max(positive(metrics.screenWidth), positive(metrics.screenHeight));
+  const visibleHeight = Math.max(layoutHeight, visualHeight + visualOffsetTop);
+  const chromeGap = screenHeight - visibleHeight;
+  return {
+    height: chromeGap > 0 && chromeGap <= IOS_CHROME_GAP_MAX_PX ? screenHeight : visibleHeight,
+    offsetTop: 0
+  };
 }
 
 export function applyAppViewport(

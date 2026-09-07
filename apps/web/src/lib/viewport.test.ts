@@ -29,7 +29,20 @@ describe("resolveAppViewport", () => {
     ).toEqual({ height: 874, offsetTop: 0 });
   });
 
-  it("does not jump to an implausible screen height in standalone", () => {
+  it("fills Safari the same way so the composer can sit on the screen bottom", () => {
+    expect(
+      resolveAppViewport({
+        ...iphone16Pro,
+        visualHeight: 779,
+        visualOffsetTop: 0,
+        innerHeight: 779,
+        clientHeight: 779,
+        standalone: false
+      })
+    ).toEqual({ height: 874, offsetTop: 0 });
+  });
+
+  it("does not jump to an implausible screen height", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -43,7 +56,7 @@ describe("resolveAppViewport", () => {
     ).toEqual({ height: 500, offsetTop: 0 });
   });
 
-  it("keeps a full-height standalone window even if innerHeight already recovered", () => {
+  it("keeps a full-height window even if innerHeight already recovered", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -51,12 +64,12 @@ describe("resolveAppViewport", () => {
         visualOffsetTop: 0,
         innerHeight: 874,
         clientHeight: 874,
-        standalone: true
+        standalone: false
       })
     ).toEqual({ height: 874, offsetTop: 0 });
   });
 
-  it("uses the short screen side in standalone landscape", () => {
+  it("uses the short screen side in landscape", () => {
     expect(
       resolveAppViewport({
         visualHeight: 320,
@@ -71,20 +84,7 @@ describe("resolveAppViewport", () => {
     ).toEqual({ height: 402, offsetTop: 0 });
   });
 
-  it("follows the visual viewport in Safari so the composer stays above chrome", () => {
-    expect(
-      resolveAppViewport({
-        ...iphone16Pro,
-        visualHeight: 779,
-        visualOffsetTop: 0,
-        innerHeight: 779,
-        clientHeight: 779,
-        standalone: false
-      })
-    ).toEqual({ height: 779, offsetTop: 0 });
-  });
-
-  it("pins Safari content to the visual viewport offset when the URL bar occupies the top", () => {
+  it("ignores a stale visualViewport offset when the keyboard is closed", () => {
     expect(
       resolveAppViewport({
         ...iphone16Pro,
@@ -94,7 +94,7 @@ describe("resolveAppViewport", () => {
         clientHeight: 874,
         standalone: false
       })
-    ).toEqual({ height: 779, offsetTop: 47 });
+    ).toEqual({ height: 874, offsetTop: 0 });
   });
 
   it("shrinks to the visual viewport when the keyboard is open", () => {

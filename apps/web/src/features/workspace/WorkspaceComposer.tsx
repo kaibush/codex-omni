@@ -219,7 +219,7 @@ export function WorkspaceComposer({
   return (
     <>
       <footer
-        className={`composer-dock shrink-0 px-3 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8 ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
+        className={`composer-dock shrink-0 px-3 pb-[env(safe-area-inset-bottom)] pt-1 sm:px-5 sm:pb-4 lg:px-8 ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
       >
         <div className="chat-content-width mx-auto">
           <div

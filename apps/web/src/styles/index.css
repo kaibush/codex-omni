@@ -12,13 +12,8 @@
     scrollbar-color: var(--border) transparent;
   }
   html {
-    --app-viewport-height: 100dvh;
+    --app-viewport-height: 100lvh;
     --app-viewport-offset-top: 0px;
-  }
-  @media (display-mode: standalone), (display-mode: fullscreen) {
-    html {
-      --app-viewport-height: 100lvh;
-    }
   }
   html,
   body,
@@ -178,9 +173,10 @@ input[type="checkbox"] {
     position: fixed;
     top: var(--app-viewport-offset-top, 0px);
     right: 0;
+    bottom: auto;
     left: 0;
     width: 100%;
-    height: var(--app-viewport-height, 100dvh);
+    height: var(--app-viewport-height, 100lvh);
     min-height: 0;
     max-height: none;
     overflow: hidden;
@@ -1644,6 +1640,7 @@ button.composer-chip:hover,
   .composer-dock {
     padding-left: max(0.5rem, env(safe-area-inset-left));
     padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .composer-shell {
     border-radius: 1rem;
@@ -1758,10 +1755,8 @@ button.composer-chip:hover,
 }
 
 @supports (-webkit-touch-callout: none) {
-  @media (display-mode: standalone), (display-mode: fullscreen) {
-    html {
-      --app-viewport-height: 100lvh;
-    }
+  html {
+    --app-viewport-height: 100lvh;
   }
 }
 @media (min-width: 768px) and (max-width: 1100px) {
