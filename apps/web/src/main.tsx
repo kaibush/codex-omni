@@ -8,6 +8,17 @@ import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import "@/styles/index.css";
 
+const syncViewportHeight = () => {
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  if (Number.isFinite(height) && height > 0) {
+    document.documentElement.style.setProperty("--app-viewport-height", `${height}px`);
+  }
+};
+
+syncViewportHeight();
+window.visualViewport?.addEventListener("resize", syncViewportHeight);
+window.addEventListener("resize", syncViewportHeight);
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider
