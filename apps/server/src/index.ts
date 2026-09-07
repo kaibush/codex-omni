@@ -31,6 +31,7 @@ import {
   enhancePrompt,
   filterModels,
   parseProviderImport,
+  parseProviderRuntimeSettings,
   serializeProviderExport,
   testProviderConnection
 } from "./provider-ops.js";
@@ -194,6 +195,8 @@ const publicProvider = (provider: ReturnType<typeof store.getProvider>) => {
     name: provider.name,
     kind: provider.kind,
     model: provider.model,
+    contextWindow: provider.contextWindow,
+    autoCompactTokenLimit: provider.autoCompactTokenLimit,
     models,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey ? "••••••••" : null,
@@ -215,6 +218,11 @@ const persistProvider = (provider: ProviderRow, patch: Partial<ProviderRow> = {}
     ...patch,
     name: patch.name ?? provider.name
   });
+const parseProviderInput = (value: unknown) => {
+  const parsed = providerInputSchema.safeParse(value);
+  if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? "供应商配置无效");
+  return parsed.data;
+};
 const providerFilesFromInput = async (
   input: ReturnType<typeof providerInputSchema.parse>,
   current?: ProviderRow
@@ -234,6 +242,13 @@ const providerFilesFromInput = async (
     input.authJson === "configured"
       ? (current?.authJson ?? null)
       : (input.authJson ?? current?.authJson ?? null);
+  const runtimeSettings = parseProviderRuntimeSettings({
+    contextWindow: input.contextWindow === undefined ? current?.contextWindow : input.contextWindow,
+    autoCompactTokenLimit:
+      input.autoCompactTokenLimit === undefined
+        ? current?.autoCompactTokenLimit
+        : input.autoCompactTokenLimit
+  });
   if (homeMode === "api-key") {
     const key = apiKey?.trim();
     if (!key) throw httpError(400, "API Key 为必填项");
@@ -245,6 +260,7 @@ const providerFilesFromInput = async (
     });
     return {
       homeMode,
+      ...runtimeSettings,
       codexHomePath: null as string | null,
       configToml: files.configToml,
       authJson: files.authJson,
@@ -256,6 +272,7 @@ const providerFilesFromInput = async (
       const home = await assertExternalCodexHome(input.codexHomePath ?? current?.codexHomePath);
       return {
         homeMode,
+        ...runtimeSettings,
         codexHomePath: home,
         configToml: input.configToml ?? current?.configToml ?? null,
         authJson,
@@ -279,6 +296,7 @@ const providerFilesFromInput = async (
   }
   return {
     homeMode,
+    ...runtimeSettings,
     codexHomePath: null as string | null,
     configToml,
     authJson,
@@ -353,13 +371,15 @@ app.get("/api/providers/:id", { preHandler: auth }, async (req) => {
   return publicProvider(store.getProvider(routeId(req)));
 });
 app.post("/api/providers", { preHandler: auth }, async (req) => {
-  const input = providerInputSchema.parse(req.body);
+  const input = parseProviderInput(req.body);
   const files = await providerFilesFromInput(input);
   return publicProvider(
     store.upsertProvider({
       name: input.name,
       kind: input.kind ?? "codex",
       model: input.model ?? null,
+      contextWindow: files.contextWindow ?? null,
+      autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
       modelsJson: JSON.stringify(input.models ?? []),
       baseUrl: input.baseUrl ?? null,
       apiKey: files.apiKey,
@@ -376,7 +396,7 @@ app.put("/api/providers/:id", { preHandler: auth }, async (req) => {
   const id = routeId(req);
   const current = store.getProvider(id);
   if (!current) throw httpError(404, "Provider not found");
-  const input = providerInputSchema.omit({ id: true }).parse(req.body);
+  const input = parseProviderInput(req.body);
   const files = await providerFilesFromInput(input, current);
   return publicProvider(
     store.upsertProvider({
@@ -384,6 +404,8 @@ app.put("/api/providers/:id", { preHandler: auth }, async (req) => {
       name: input.name,
       kind: input.kind ?? current.kind,
       model: input.model ?? null,
+      contextWindow: files.contextWindow ?? null,
+      autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
       modelsJson: JSON.stringify(input.models ?? []),
       baseUrl: input.baseUrl ?? null,
       apiKey: files.apiKey,
@@ -409,6 +431,8 @@ app.get("/api/providers/:id/export", { preHandler: auth }, async (req, reply) =>
     name: provider.name,
     kind: provider.kind,
     model: provider.model,
+    contextWindow: provider.contextWindow,
+    autoCompactTokenLimit: provider.autoCompactTokenLimit,
     models: published?.models ?? [],
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
@@ -427,6 +451,8 @@ app.post("/api/providers/import", { preHandler: auth }, async (req) => {
       name: input.name,
       kind: input.kind,
       model: input.model,
+      contextWindow: files.contextWindow ?? null,
+      autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
       modelsJson: JSON.stringify(input.models),
       baseUrl: input.baseUrl,
       apiKey: files.apiKey,
@@ -446,6 +472,8 @@ app.post("/api/providers/:id/clone", { preHandler: auth }, async (req, reply) =>
       name: cloneProviderName(provider.name),
       kind: provider.kind,
       model: provider.model,
+      contextWindow: provider.contextWindow,
+      autoCompactTokenLimit: provider.autoCompactTokenLimit,
       modelsJson: provider.modelsJson,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,

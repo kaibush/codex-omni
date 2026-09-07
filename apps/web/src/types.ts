@@ -98,6 +98,8 @@ export type Provider = {
   name: string;
   kind: string;
   model: string | null;
+  contextWindow?: number | null | undefined;
+  autoCompactTokenLimit?: number | null | undefined;
   models: string[];
   baseUrl: string | null;
   apiKey: string | null;

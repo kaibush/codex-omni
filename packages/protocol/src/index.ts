@@ -88,11 +88,54 @@ export function normalizeProviderHomeMode(value: string | null | undefined): Pro
   return value === "api-key" || value === "external" ? value : "managed";
 }
 
+const modelRuntimeSettingsFields = {
+  contextWindow: z
+    .number()
+    .int("上下文窗口必须为整数")
+    .positive("上下文窗口必须大于 0")
+    .max(Number.MAX_SAFE_INTEGER)
+    .nullable()
+    .optional(),
+  autoCompactTokenLimit: z
+    .number()
+    .int("自动压缩阈值必须为整数")
+    .positive("自动压缩阈值必须大于 0")
+    .max(Number.MAX_SAFE_INTEGER)
+    .nullable()
+    .optional()
+};
+
+function validateModelRuntimeSettings(
+  value: {
+    contextWindow?: number | null | undefined;
+    autoCompactTokenLimit?: number | null | undefined;
+  },
+  ctx: z.RefinementCtx
+) {
+  if (
+    value.contextWindow != null &&
+    value.autoCompactTokenLimit != null &&
+    value.autoCompactTokenLimit >= value.contextWindow
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["autoCompactTokenLimit"],
+      message: "自动压缩阈值必须小于上下文窗口"
+    });
+  }
+}
+
+export const modelRuntimeSettingsSchema = z
+  .object(modelRuntimeSettingsFields)
+  .superRefine(validateModelRuntimeSettings);
+export type ModelRuntimeSettings = z.infer<typeof modelRuntimeSettingsSchema>;
+
 export const providerSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.string(),
   model: z.string().nullable(),
+  ...modelRuntimeSettingsFields,
   models: z.array(z.string()),
   baseUrl: z.string().nullable(),
   apiKey: z.string().nullable(),
@@ -106,21 +149,24 @@ export const providerSchema = z.object({
 });
 export type Provider = z.infer<typeof providerSchema>;
 
-export const providerInputSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().min(1),
-  kind: z.string().optional(),
-  model: z.string().nullable().optional(),
-  models: z.array(z.string().min(1)).optional(),
-  baseUrl: z.string().nullable().optional(),
-  apiKey: z.string().nullable().optional(),
-  configToml: z.string().nullable().optional(),
-  authJson: z.string().nullable().optional(),
-  messageEnvVars: z.record(z.string(), z.string()).optional(),
-  isDefault: z.boolean().optional(),
-  homeMode: providerHomeModeSchema.optional(),
-  codexHomePath: z.string().nullable().optional()
-});
+export const providerInputSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().min(1),
+    kind: z.string().optional(),
+    model: z.string().nullable().optional(),
+    ...modelRuntimeSettingsFields,
+    models: z.array(z.string().min(1)).optional(),
+    baseUrl: z.string().nullable().optional(),
+    apiKey: z.string().nullable().optional(),
+    configToml: z.string().nullable().optional(),
+    authJson: z.string().nullable().optional(),
+    messageEnvVars: z.record(z.string(), z.string()).optional(),
+    isDefault: z.boolean().optional(),
+    homeMode: providerHomeModeSchema.optional(),
+    codexHomePath: z.string().nullable().optional()
+  })
+  .superRefine(validateModelRuntimeSettings);
 export type ProviderInput = z.infer<typeof providerInputSchema>;
 
 export const projectSchema = z.object({
@@ -315,27 +361,30 @@ export const activeRunSchema = z.object({
 });
 export type ActiveRun = z.infer<typeof activeRunSchema>;
 
-export const bridgeRequestSchema = z.object({
-  protocolVersion: z.literal(1),
-  requestId: z.string(),
-  projectId: z.string(),
-  sessionId: z.string(),
-  threadId: z.string().optional(),
-  cwd: z.string(),
-  runtimeKey: z.string(),
-  codexHome: z.string(),
-  message: z.string(),
-  model: z.string().optional(),
-  baseUrl: z.string().optional(),
-  apiKey: z.string().optional(),
-  configToml: z.string().optional(),
-  authJson: z.string().optional(),
-  messageEnvVars: z.record(z.string(), z.string()).optional(),
-  attachments: turnOptionsSchema.shape.attachments,
-  sandbox: sandboxSchema,
-  approvalPolicy: approvalPolicySchema,
-  networkAccessEnabled: z.boolean()
-});
+export const bridgeRequestSchema = z
+  .object({
+    protocolVersion: z.literal(1),
+    requestId: z.string(),
+    projectId: z.string(),
+    sessionId: z.string(),
+    threadId: z.string().optional(),
+    cwd: z.string(),
+    runtimeKey: z.string(),
+    codexHome: z.string(),
+    message: z.string(),
+    model: z.string().optional(),
+    ...modelRuntimeSettingsFields,
+    baseUrl: z.string().optional(),
+    apiKey: z.string().optional(),
+    configToml: z.string().optional(),
+    authJson: z.string().optional(),
+    messageEnvVars: z.record(z.string(), z.string()).optional(),
+    attachments: turnOptionsSchema.shape.attachments,
+    sandbox: sandboxSchema,
+    approvalPolicy: approvalPolicySchema,
+    networkAccessEnabled: z.boolean()
+  })
+  .superRefine(validateModelRuntimeSettings);
 export type BridgeRequest = z.infer<typeof bridgeRequestSchema>;
 
 export type AppServerNotification = { method: string; params?: any };

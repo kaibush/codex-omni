@@ -8,12 +8,46 @@ import {
   normalizeProviderHomeMode,
   parseReconnectNotice,
   providerInputSchema,
+  bridgeRequestSchema,
   runCommandSchema,
   sanitizeCodexExecError,
   sessionSchema
 } from "./index.js";
 
 describe("protocol", () => {
+  it("validates optional provider limits and passes them to bridge requests", () => {
+    const limits = { contextWindow: 32000, autoCompactTokenLimit: 28000 };
+    expect(providerInputSchema.parse({ name: "Small model", ...limits })).toMatchObject(limits);
+    expect(providerInputSchema.parse({ name: "Defaults", contextWindow: null })).toMatchObject({
+      contextWindow: null
+    });
+    for (const invalid of [
+      { contextWindow: 0 },
+      { contextWindow: -1 },
+      { contextWindow: 1.5 },
+      { contextWindow: Number.MAX_SAFE_INTEGER + 1 },
+      { autoCompactTokenLimit: 0 },
+      { contextWindow: 32000, autoCompactTokenLimit: 32000 }
+    ]) {
+      expect(providerInputSchema.safeParse({ name: "Invalid", ...invalid }).success).toBe(false);
+    }
+    expect(
+      bridgeRequestSchema.parse({
+        protocolVersion: 1,
+        requestId: "r",
+        projectId: "p",
+        sessionId: "s",
+        cwd: "/tmp",
+        runtimeKey: "k",
+        codexHome: "/tmp/home",
+        message: "hi",
+        sandbox: "read-only",
+        approvalPolicy: "never",
+        networkAccessEnabled: false,
+        ...limits
+      })
+    ).toMatchObject(limits);
+  });
   it("recognizes Codex automatic reconnect notices", () => {
     expect(
       parseReconnectNotice(

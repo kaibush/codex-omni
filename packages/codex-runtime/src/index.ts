@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import readline from "node:readline";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { eventSchema, type BridgeEvent, type BridgeRequest } from "@codex-omni/protocol";
 import { isTerminalBridgeEvent, workerExitError } from "./worker-stream.js";
 
@@ -121,7 +121,11 @@ export class BridgeWorkerAdapter {
     const tsUrl = new URL("./worker-entry.ts", import.meta.url);
     const sourceUrl = this.workerEntry ?? (import.meta.url.endsWith(".ts") ? tsUrl : jsUrl);
     const args = sourceUrl.pathname.endsWith(".ts")
-      ? ["--import", createRequire(import.meta.url).resolve("tsx"), fileURLToPath(sourceUrl)]
+      ? [
+          "--import",
+          pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+          fileURLToPath(sourceUrl)
+        ]
       : [fileURLToPath(sourceUrl)];
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();
@@ -275,12 +279,7 @@ export { extractRolloutToolEvents, findRolloutFile } from "./collab-rollout.js";
 export type { CollabRolloutEvent } from "./collab-rollout.js";
 
 export { buildCodexRunInput, sanitizeCodexAttachments } from "./codex-input.js";
-export {
-  applyCustomModelRuntimeToml,
-  inferModelContextWindow,
-  isKnownCodexModel,
-  resolveCodexModelRuntimeConfig
-} from "./model-runtime-config.js";
+export { resolveCodexModelRuntimeConfig } from "./model-runtime-config.js";
 export {
   consumeCodexEventStream,
   INCOMPLETE_TURN_MESSAGE,

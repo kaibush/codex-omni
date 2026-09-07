@@ -277,7 +277,31 @@ describe("RunManager terminal state", () => {
   });
 });
 
-describe("RunManager attachments", () => {
+describe("RunManager runtime inputs", () => {
+  it("forwards provider-specific model limits without applying guesses to other providers", async () => {
+    const { provider, project, session, socket } = fixture();
+    store!.upsertProvider({ ...provider, contextWindow: 32000, autoCompactTokenLimit: 28000 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "hi" },
+      socket
+    );
+    expect(runtimeMocks.run.mock.calls[0]?.[0]).toMatchObject({
+      contextWindow: 32000,
+      autoCompactTokenLimit: 28000
+    });
+    store!.upsertProvider({ ...provider, contextWindow: null, autoCompactTokenLimit: null });
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "hi" },
+      socket
+    );
+    expect(runtimeMocks.run.mock.calls[1]?.[0]).not.toHaveProperty("contextWindow");
+    expect(runtimeMocks.run.mock.calls[1]?.[0]).not.toHaveProperty("autoCompactTokenLimit");
+  });
+
   it("persists and broadcasts attachments, and restores them and run options by message id", async () => {
     const { project, session, socket, sent, imagePath } = attachmentFixture();
     const attachments = [{ name: "shot.png", path: imagePath, kind: "image" as const }];

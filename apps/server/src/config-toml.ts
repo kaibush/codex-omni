@@ -1,5 +1,3 @@
-import { applyCustomModelRuntimeToml } from "@codex-omni/codex-runtime";
-
 function stripTomlComment(line: string) {
   let inString = false;
   let quote = "";
@@ -311,11 +309,11 @@ export function buildApiKeyProviderFiles(input: {
       "[model_providers.custom]",
       `name = ${tomlString(input.name.trim() || "custom")}`,
       `base_url = ${tomlString(baseUrl)}`,
-      `wire_api = "chat"`
+      `wire_api = "responses"`
     );
   }
   return {
-    configToml: applyCustomModelRuntimeToml(`${lines.join("\n")}\n`, model),
+    configToml: `${lines.join("\n")}\n`,
     authJson: JSON.stringify({ OPENAI_API_KEY: input.apiKey }, null, 2)
   };
 }

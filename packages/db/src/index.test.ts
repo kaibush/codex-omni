@@ -3,6 +3,33 @@ import { Store } from "./index.js";
 let store: Store | undefined;
 afterEach(() => store?.db.close());
 describe("Store", () => {
+  it("persists, preserves on partial updates, and clears provider model limits", () => {
+    store = new Store(":memory:");
+    const provider = store.upsertProvider({
+      name: "Small",
+      contextWindow: 32000,
+      autoCompactTokenLimit: 28000
+    });
+    expect(store.getProvider(provider.id)).toMatchObject({
+      contextWindow: 32000,
+      autoCompactTokenLimit: 28000
+    });
+    store.upsertProvider({ id: provider.id, name: "Renamed" });
+    expect(store.listProviders()[0]).toMatchObject({
+      contextWindow: 32000,
+      autoCompactTokenLimit: 28000
+    });
+    store.upsertProvider({
+      id: provider.id,
+      name: "Defaults",
+      contextWindow: null,
+      autoCompactTokenLimit: null
+    });
+    expect(store.getProvider(provider.id)).toMatchObject({
+      contextWindow: null,
+      autoCompactTokenLimit: null
+    });
+  });
   it("creates provider, project and continuation session", () => {
     store = new Store(":memory:");
     const provider = store.upsertProvider({ name: "Provider A" });
@@ -223,7 +250,9 @@ describe("Store", () => {
       itemId: "jsonl:call-spawn",
       createdAt: 1_788_070_945_680
     });
-    expect(db.getMessageByItemId(session.id, "jsonl:call-spawn")?.createdAt).toBe(1_788_070_945_680);
+    expect(db.getMessageByItemId(session.id, "jsonl:call-spawn")?.createdAt).toBe(
+      1_788_070_945_680
+    );
   });
 
   it("pages backward through messages without gaps when timestamps match", () => {

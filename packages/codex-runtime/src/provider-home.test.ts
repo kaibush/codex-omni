@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,7 +41,7 @@ describe("provider home", () => {
     expect(home).toBe(path.join(dir, "p1"));
   });
 
-  it("injects a context window when materializing unknown custom models", async () => {
+  it("preserves unknown model configuration without injecting guessed context limits", async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "codex-home-"));
     const home = await resolveProviderHome({
       providersRoot: dir,
@@ -51,7 +51,27 @@ describe("provider home", () => {
       authJson: '{"OPENAI_API_KEY":"sk"}'
     });
     const toml = await readFile(path.join(home, "config.toml"), "utf8");
-    expect(toml).toContain("model_context_window = 256000");
-    expect(toml).toContain("model_auto_compact_token_limit = 230400");
+    expect(toml).toBe('model = "grok-4.6"\nmodel_provider = "custom"\n');
+  });
+
+  it("preserves explicit TOML limits and external configuration byte-for-byte", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "codex-home-"));
+    const config =
+      'model = "custom"\nmodel_context_window = 32_000\nmodel_auto_compact_token_limit = 28_000\nservice_tier = "fast"\n';
+    const managed = await resolveProviderHome({
+      providersRoot: dir,
+      providerId: "managed",
+      configToml: config
+    });
+    expect(await readFile(path.join(managed, "config.toml"), "utf8")).toBe(config);
+    await writeFile(path.join(dir, "config.toml"), config);
+    await resolveProviderHome({
+      providersRoot: dir,
+      providerId: "external",
+      homeMode: "external",
+      codexHomePath: dir,
+      configToml: "this stored copy is deliberately not used"
+    });
+    expect(await readFile(path.join(dir, "config.toml"), "utf8")).toBe(config);
   });
 });

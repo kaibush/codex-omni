@@ -14,6 +14,8 @@ describe("provider ops", () => {
       name: "Work",
       kind: "codex",
       model: "gpt-5",
+      contextWindow: 32000,
+      autoCompactTokenLimit: 28000,
       models: ["gpt-5"],
       baseUrl: "https://api.example.com/v1",
       apiKey: "sk-test",
@@ -26,6 +28,8 @@ describe("provider ops", () => {
     expect(imported.name).toBe("Work");
     expect(imported.apiKey).toBe("sk-test");
     expect(imported.homeMode).toBe("managed");
+    expect(imported.contextWindow).toBe(32000);
+    expect(imported.autoCompactTokenLimit).toBe(28000);
     expect(
       parseProviderImport({
         name: "Key",
@@ -49,6 +53,17 @@ describe("provider ops", () => {
       "o4-mini"
     ]);
     expect(parseModelsFromConfigToml('model = "gpt-5"')).toEqual(["gpt-5"]);
+  });
+  it("rejects invalid imported model limits and keeps unset limits nullable", () => {
+    const provider = { name: "Custom", homeMode: "api-key", apiKey: "fixture-key" };
+    expect(parseProviderImport(provider)).toMatchObject({
+      contextWindow: null,
+      autoCompactTokenLimit: null
+    });
+    expect(() => parseProviderImport({ ...provider, contextWindow: "32000" })).toThrow();
+    expect(() =>
+      parseProviderImport({ ...provider, contextWindow: 32000, autoCompactTokenLimit: 64000 })
+    ).toThrow();
   });
 });
 

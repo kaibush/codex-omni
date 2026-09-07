@@ -949,6 +949,10 @@ export class RunManager {
             codexHome,
             message: runtimeMessage,
             ...(selectedModel ? { model: selectedModel } : {}),
+            ...(provider.contextWindow != null ? { contextWindow: provider.contextWindow } : {}),
+            ...(provider.autoCompactTokenLimit != null
+              ? { autoCompactTokenLimit: provider.autoCompactTokenLimit }
+              : {}),
             ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
             ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
             ...(provider.configToml ? { configToml: provider.configToml } : {}),

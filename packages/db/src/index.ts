@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import { DEFAULT_SESSION_TITLE, resolveSessionTitle } from "./session-title.js";
+import { migrateLegacyGeneratedProviderConfig } from "./provider-context-migration.js";
 export {
   DEFAULT_SESSION_TITLE,
   isPlaceholderSessionTitle,
@@ -13,6 +14,8 @@ export type ProviderRow = {
   name: string;
   kind: string;
   model: string | null;
+  contextWindow: number | null;
+  autoCompactTokenLimit: number | null;
   modelsJson: string | null;
   baseUrl: string | null;
   apiKey: string | null;
@@ -284,7 +287,9 @@ export class Store {
           if (stillRunning) continue;
           writeInterrupted(session);
           this.db
-            .prepare("UPDATE sessions SET status='interrupted',updated_at=? WHERE id=? AND status='running'")
+            .prepare(
+              "UPDATE sessions SET status='interrupted',updated_at=? WHERE id=? AND status='running'"
+            )
             .run(now, session.id);
           interruptedIds.push(session.id);
         }
@@ -381,6 +386,24 @@ export class Store {
       this.db.exec("ALTER TABLE providers ADD COLUMN home_mode TEXT");
     if (!providerColumns.has("codex_home_path"))
       this.db.exec("ALTER TABLE providers ADD COLUMN codex_home_path TEXT");
+    this.db.transaction(() => {
+      if (!providerColumns.has("context_window"))
+        this.db.exec("ALTER TABLE providers ADD COLUMN context_window INTEGER");
+      if (!providerColumns.has("auto_compact_token_limit"))
+        this.db.exec("ALTER TABLE providers ADD COLUMN auto_compact_token_limit INTEGER");
+      if (!providerColumns.has("context_window")) {
+        const legacy = this.db
+          .prepare(
+            "SELECT id,config_toml as configToml FROM providers WHERE home_mode='api-key' AND config_toml IS NOT NULL"
+          )
+          .all() as Array<{ id: string; configToml: string }>;
+        const update = this.db.prepare("UPDATE providers SET config_toml=? WHERE id=?");
+        for (const row of legacy) {
+          const next = migrateLegacyGeneratedProviderConfig(row.configToml);
+          if (next !== row.configToml) update.run(next, row.id);
+        }
+      }
+    })();
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY,
@@ -603,18 +626,19 @@ export class Store {
   listProviders(): ProviderRow[] {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
       )
       .all() as ProviderRow[];
   }
   getProvider(id: string) {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
       )
       .get(id) as ProviderRow | undefined;
   }
   upsertProvider(input: Partial<ProviderRow> & Pick<ProviderRow, "name">): ProviderRow {
+    const current = input.id ? this.getProvider(input.id) : undefined;
     const now = Date.now(),
       id = input.id ?? nanoid();
     const transaction = this.db.transaction(() => {
@@ -623,13 +647,21 @@ export class Store {
       }
       this.db
         .prepare(
-          `INSERT INTO providers(id,name,kind,model,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,codex_home_path,created_at,updated_at) VALUES(@id,@name,@kind,@model,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@codexHomePath,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,codex_home_path=@codexHomePath,updated_at=@now`
+          `INSERT INTO providers(id,name,kind,model,context_window,auto_compact_token_limit,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,codex_home_path,created_at,updated_at) VALUES(@id,@name,@kind,@model,@contextWindow,@autoCompactTokenLimit,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@codexHomePath,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,context_window=@contextWindow,auto_compact_token_limit=@autoCompactTokenLimit,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,codex_home_path=@codexHomePath,updated_at=@now`
         )
         .run({
           id,
           name: input.name,
           kind: input.kind ?? "codex",
           model: input.model ?? null,
+          contextWindow:
+            input.contextWindow === undefined
+              ? (current?.contextWindow ?? null)
+              : input.contextWindow,
+          autoCompactTokenLimit:
+            input.autoCompactTokenLimit === undefined
+              ? (current?.autoCompactTokenLimit ?? null)
+              : input.autoCompactTokenLimit,
           modelsJson: input.modelsJson ?? null,
           baseUrl: input.baseUrl ?? null,
           apiKey: input.apiKey ?? null,

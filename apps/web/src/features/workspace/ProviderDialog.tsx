@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { modelRuntimeSettingsSchema } from "@codex-omni/protocol";
 import {
   Copy,
   Download,
@@ -18,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { api } from "@/lib/api";
 import type { Provider, ProviderHomeMode } from "@/types";
 import { ServerFolderPicker } from "./ServerFolderPicker";
+import { ProviderRuntimeFields } from "./ProviderRuntimeFields";
 
 type ProviderInput = Omit<Provider, "id" | "isDefault"> & { id?: string; isDefault?: boolean };
 
@@ -25,6 +27,8 @@ const empty: ProviderInput = {
   name: "",
   kind: "codex",
   model: null,
+  contextWindow: null,
+  autoCompactTokenLimit: null,
   models: [],
   baseUrl: null,
   apiKey: null,
@@ -118,6 +122,8 @@ export function ProviderDialog({
   const submit = async () => {
     const name = editing.name?.trim();
     if (!name) return setError("供应商名称为必填项");
+    const runtimeSettings = modelRuntimeSettingsSchema.safeParse(editing);
+    if (!runtimeSettings.success) return setError(runtimeSettings.error.issues[0]?.message ?? "模型运行参数无效");
     const homeMode: ProviderHomeMode = editing.homeMode ?? (editing.id ? "managed" : "api-key");
     if (homeMode === "api-key") {
       const key = editing.apiKey?.trim();
@@ -550,6 +556,7 @@ export function ProviderDialog({
                 </select>
               </label>
             ) : null}
+            <ProviderRuntimeFields value={editing} onChange={(patch) => setEditing((current) => ({ ...current, ...patch }))} />
             {(editing.homeMode ?? "api-key") === "managed" ? (
               <>
                 <label className="field-label sm:col-span-2">

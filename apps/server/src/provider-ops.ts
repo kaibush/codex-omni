@@ -1,10 +1,25 @@
-import { normalizeProviderHomeMode, type ProviderHomeMode } from "@codex-omni/protocol";
+import {
+  modelRuntimeSettingsSchema,
+  normalizeProviderHomeMode,
+  type ProviderHomeMode
+} from "@codex-omni/protocol";
 import { parseModelsFromConfigToml, parseProviderConnection } from "./config-toml.js";
+
+export function parseProviderRuntimeSettings(value: unknown) {
+  const parsed = modelRuntimeSettingsSchema.safeParse(value);
+  if (!parsed.success)
+    throw Object.assign(new Error(parsed.error.issues[0]?.message ?? "模型运行参数无效"), {
+      statusCode: 400
+    });
+  return parsed.data;
+}
 
 export type ProviderExport = {
   name: string;
   kind: string;
   model: string | null;
+  contextWindow: number | null;
+  autoCompactTokenLimit: number | null;
   models: string[];
   baseUrl: string | null;
   apiKey: string | null;
@@ -19,6 +34,8 @@ export function serializeProviderExport(input: {
   name: string;
   kind?: string | null;
   model?: string | null;
+  contextWindow?: number | null;
+  autoCompactTokenLimit?: number | null;
   models?: string[];
   baseUrl?: string | null;
   apiKey?: string | null;
@@ -33,6 +50,8 @@ export function serializeProviderExport(input: {
     name: input.name,
     kind: input.kind || "codex",
     model: input.model ?? null,
+    contextWindow: input.contextWindow ?? null,
+    autoCompactTokenLimit: input.autoCompactTokenLimit ?? null,
     models: input.models ?? [],
     baseUrl: input.baseUrl ?? null,
     apiKey: input.apiKey ?? null,
@@ -48,6 +67,7 @@ export function parseProviderImport(value: unknown): ProviderExport {
   if (typeof value !== "object" || !value)
     throw Object.assign(new Error("导入内容必须是 JSON 对象"), { statusCode: 400 });
   const record = value as Record<string, unknown>;
+  const runtimeSettings = parseProviderRuntimeSettings(record);
   const name = typeof record.name === "string" ? record.name.trim() : "";
   if (!name) throw Object.assign(new Error("导入配置缺少供应商名称"), { statusCode: 400 });
   const homeMode = normalizeProviderHomeMode(
@@ -88,6 +108,8 @@ export function parseProviderImport(value: unknown): ProviderExport {
     name,
     kind: typeof record.kind === "string" && record.kind.trim() ? record.kind : "codex",
     model: typeof record.model === "string" && record.model.trim() ? record.model : null,
+    contextWindow: runtimeSettings.contextWindow ?? null,
+    autoCompactTokenLimit: runtimeSettings.autoCompactTokenLimit ?? null,
     models,
     baseUrl: typeof record.baseUrl === "string" && record.baseUrl.trim() ? record.baseUrl : null,
     apiKey,
@@ -254,9 +276,12 @@ export async function enhancePrompt(input: {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw Object.assign(new Error("强化接口响应超时（60 秒），请检查供应商地址、模型或上游负载"), {
-        statusCode: 504
-      });
+      throw Object.assign(
+        new Error("强化接口响应超时（60 秒），请检查供应商地址、模型或上游负载"),
+        {
+          statusCode: 504
+        }
+      );
     }
     throw error;
   }

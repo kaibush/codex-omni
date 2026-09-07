@@ -1,61 +1,46 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyCustomModelRuntimeToml,
-  inferModelContextWindow,
-  isKnownCodexModel,
-  parseRootTomlValue,
-  resolveCodexModelRuntimeConfig
-} from "./model-runtime-config.js";
+import { resolveCodexModelRuntimeConfig } from "./model-runtime-config.js";
 
-describe("custom model runtime config", () => {
-  it("treats official Codex models as known and leaves custom aliases unknown", () => {
-    expect(isKnownCodexModel("gpt-5.1-codex-max")).toBe(true);
-    expect(isKnownCodexModel("gpt-5.6-sol")).toBe(false);
-    expect(isKnownCodexModel("grok-4.6")).toBe(false);
-    expect(isKnownCodexModel("deepseek-v4-flash")).toBe(false);
-    expect(inferModelContextWindow("gpt-5.1-codex-max")).toBeUndefined();
-    expect(inferModelContextWindow("grok-4.6")).toBe(256_000);
-    expect(inferModelContextWindow("claude-opus-4.6")).toBe(256_000);
+describe("provider model runtime config", () => {
+  it.each(["gpt-5.1-codex-max", "small-custom", "proxy-128k", "grok-4.6"])(
+    "does not guess context capacity from %s",
+    (model) => {
+      expect(resolveCodexModelRuntimeConfig({ model })).toEqual({});
+    }
+  );
+
+  it("passes explicit provider limits for small and large models", () => {
+    expect(
+      resolveCodexModelRuntimeConfig({ contextWindow: 32000, autoCompactTokenLimit: 28000 })
+    ).toEqual({ contextWindow: 32000, autoCompactTokenLimit: 28000 });
+    expect(resolveCodexModelRuntimeConfig({ contextWindow: 128000 })).toEqual({
+      contextWindow: 128000
+    });
+    expect(resolveCodexModelRuntimeConfig({ autoCompactTokenLimit: 64000 })).toEqual({
+      autoCompactTokenLimit: 64000
+    });
   });
 
-  it("injects context window for unknown models without overwriting user values", () => {
-    const injected = applyCustomModelRuntimeToml(`
-model = "grok-4.6"
-model_provider = "custom"
-service_tier = "fast"
-
-[model_providers.custom]
-base_url = "https://api.example.com/v1"
-`);
-    expect(parseRootTomlValue(injected, "model_context_window")).toBe("256000");
-    expect(parseRootTomlValue(injected, "model_auto_compact_token_limit")).toBe("230400");
-    expect(parseRootTomlValue(injected, "service_tier")).toBe("fast");
-    expect(injected).toContain("[model_providers.custom]");
-
-    const preserved = applyCustomModelRuntimeToml(`
-model = "grok-4.6"
-model_context_window = 2000000
-`);
-    expect(parseRootTomlValue(preserved, "model_context_window")).toBe("2000000");
-    expect(applyCustomModelRuntimeToml('model = "gpt-5.1-codex-max"\n')).toBe(
-      'model = "gpt-5.1-codex-max"\n'
-    );
+  it("leaves TOML and profile precedence to the CLI instead of replaying root values as flags", () => {
+    expect(
+      resolveCodexModelRuntimeConfig({
+        model: "custom",
+        contextWindow: null,
+        autoCompactTokenLimit: null,
+        configToml:
+          'model_context_window = 32000\nmodel_auto_compact_token_limit = 28000\nservice_tier = "fast"\n[profiles.work]\nmodel_context_window = 128000\n'
+      })
+    ).toEqual({});
   });
 
-  it("prefers config.toml overrides when building SDK config", () => {
-    const runtime = resolveCodexModelRuntimeConfig({
-      model: "deepseek-v4-flash",
-      configToml: `
-model = "ignored"
-model_context_window = 128000
-service_tier = "fast"
-`
-    });
-    expect(runtime).toMatchObject({
-      model: "deepseek-v4-flash",
-      contextWindow: 128000,
-      autoCompactTokenLimit: 115200,
-      serviceTier: "fast"
-    });
+  it.each([
+    { contextWindow: 0 },
+    { contextWindow: -1 },
+    { contextWindow: 12.5 },
+    { autoCompactTokenLimit: 0 },
+    { contextWindow: 32000, autoCompactTokenLimit: 32000 },
+    { contextWindow: 32000, autoCompactTokenLimit: 64000 }
+  ])("rejects invalid provider limits %j", (value) => {
+    expect(() => resolveCodexModelRuntimeConfig(value)).toThrow();
   });
 });

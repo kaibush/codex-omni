@@ -1,7 +1,6 @@
 import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BridgeRequest } from "@codex-omni/protocol";
-import { applyCustomModelRuntimeToml } from "./model-runtime-config.js";
 
 export async function materializeProviderHome(
   root: string,
@@ -14,7 +13,7 @@ export async function materializeProviderHome(
   const home = path.join(root, providerId);
   await mkdir(home, { recursive: true, mode: 0o700 });
   if (configToml?.trim()) {
-    await writeFile(path.join(home, "config.toml"), applyCustomModelRuntimeToml(configToml), {
+    await writeFile(path.join(home, "config.toml"), configToml, {
       mode: 0o600
     });
     await chmod(path.join(home, "config.toml"), 0o600);

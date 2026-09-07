@@ -80,10 +80,7 @@ const collabTimer = setInterval(flushCollab, 250);
 collabTimer.unref();
 const streamState = createMappedStreamState();
 try {
-  const modelRuntime = resolveCodexModelRuntimeConfig({
-    ...(request.model ? { model: request.model } : {}),
-    ...(request.configToml ? { configToml: request.configToml } : {})
-  });
+  const modelRuntime = resolveCodexModelRuntimeConfig(request);
   const codex = new Codex({
     ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
     ...(request.apiKey ? { apiKey: request.apiKey } : {}),
@@ -94,8 +91,7 @@ try {
       ...(modelRuntime.contextWindow ? { model_context_window: modelRuntime.contextWindow } : {}),
       ...(modelRuntime.autoCompactTokenLimit
         ? { model_auto_compact_token_limit: modelRuntime.autoCompactTokenLimit }
-        : {}),
-      ...(modelRuntime.serviceTier ? { service_tier: modelRuntime.serviceTier } : {})
+        : {})
     }
   });
   const options = {
