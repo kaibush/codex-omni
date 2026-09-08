@@ -121,6 +121,7 @@ npm i -g https://github.com/kaibush/codex-omni/releases/latest/download/codex-om
 | `CODEX_OMNI_FS_ROOTS` | 系统根目录 | 目录浏览范围，逗号分隔 |
 | `CODEX_OMNI_VERSION` | `package.json` 的 version | 覆盖展示 / 比较用的版本号 |
 | `CODEX_OMNI_GITHUB_REPO` | `kaibush/codex-omni` | 应用内更新检查读取的 GitHub Releases 仓库 |
+| `CODEX_OMNI_SHELL` | 当前用户登录 shell | 工程终端启动的 shell；systemd 等无 `SHELL` 环境时也会回退到 zsh/bash |
 
 本地开发时，前端还可通过 `CODEX_OMNI_API_URL` 指定 API 地址（默认 `http://127.0.0.1:8790`）。HTTPS 部署请同时设置 `COOKIE_SECURE=true`，详见 [部署与 HTTPS](docs/部署与HTTPS.md)。
 

@@ -2,6 +2,7 @@ import os from "node:os";
 import type { IPty } from "node-pty";
 import * as pty from "node-pty";
 import { nanoid } from "nanoid";
+import { buildTerminalEnv, resolveTerminalRuntime } from "./terminal-shell.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
 
@@ -109,19 +110,19 @@ export class TerminalManager {
     const id = nanoid();
     const cols = Math.max(20, Math.min(400, Math.trunc(input.cols ?? 120)));
     const rows = Math.max(5, Math.min(200, Math.trunc(input.rows ?? 30)));
-    const shell =
-      process.env.SHELL?.trim() || (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
-    const child = pty.spawn(shell, [], {
+    const runtime = resolveTerminalRuntime();
+    const shell = runtime.shell;
+    const child = pty.spawn(shell, runtime.args, {
       name: "xterm-256color",
       cols,
       rows,
       cwd: input.cwd,
-      env: {
-        ...process.env,
-        TERM: "xterm-256color",
-        COLORTERM: "truecolor",
-        CODEX_OMNI_TERMINAL_ID: id
-      } as Record<string, string>
+      env: buildTerminalEnv({
+        shell,
+        terminalId: id,
+        home: runtime.home,
+        username: runtime.username
+      })
     });
     const now = Date.now();
     const terminal: ManagedTerminal = {

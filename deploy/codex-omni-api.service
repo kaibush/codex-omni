@@ -11,6 +11,10 @@ Environment=CODEX_OMNI_PORT=8791
 Environment=CODEX_OMNI_ORIGIN=https://codex.lvyrix.com
 Environment=CODEX_OMNI_INSTANCE=prod
 Environment=COOKIE_SECURE=true
+Environment=HOME=/root
+Environment=SHELL=/usr/bin/zsh
+Environment=USER=root
+Environment=LOGNAME=root
 ExecStart=/root/.nvm/versions/node/v24.18.0/bin/node dist/cli/codex-omni.js
 Restart=on-failure
 RestartSec=3

@@ -32,11 +32,16 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import type { Project, ProjectTerminal } from "@/types";
 import {
   chromePointerMovedTooFar,
+  encodeTerminalKeyboardSubmit,
   isCoarsePointer,
   isDuplicateChromeClick,
+  isTouchLikePointer,
   joinVisibleLines,
   shouldFocusTerminalAfterChromeAction,
-  terminalCopyPayload
+  shouldPreventChromePointerDefault,
+  shouldSubmitTerminalKeyboard,
+  terminalCopyPayload,
+  terminalKeyboardFieldProps
 } from "./terminal-chrome";
 
 type TerminalList = { host: string; items: ProjectTerminal[] };
@@ -78,9 +83,13 @@ function TerminalViewport({
   const [searchIndex, setSearchIndex] = useState(0);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardDraft, setKeyboardDraft] = useState("");
   const lastPointerType = useRef<string | undefined>(undefined);
   const chromePointerStartX = useRef(0);
   const pasteAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const keyboardRef = useRef<HTMLInputElement | null>(null);
+  const keyboardComposing = useRef(false);
 
   useEffect(() => {
     ctrlRef.current = ctrl;
@@ -97,6 +106,14 @@ function TerminalViewport({
   useEffect(() => {
     if (pasteOpen) pasteAreaRef.current?.focus();
   }, [pasteOpen]);
+  useEffect(() => {
+    if (!keyboardOpen) {
+      keyboardRef.current?.blur();
+      return;
+    }
+    const timer = window.setTimeout(() => keyboardRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [keyboardOpen]);
 
   const sendInput = useCallback(
     (raw: string, applyLatchedModifiers = true) => {
@@ -358,8 +375,12 @@ function TerminalViewport({
     xterm.current?.blur();
   };
 
-  const rememberChromePointer = (event: { preventDefault: () => void; pointerType: string; clientX: number }) => {
-    event.preventDefault();
+  const rememberChromePointer = (event: {
+    preventDefault: () => void;
+    pointerType: string;
+    clientX: number;
+  }) => {
+    if (shouldPreventChromePointerDefault(event.pointerType)) event.preventDefault();
     lastPointerType.current = event.pointerType;
     chromePointerStartX.current = event.clientX;
     if (
@@ -375,7 +396,7 @@ function TerminalViewport({
   const chromeActivateProps = (activate: () => void, repeat = false) => ({
     onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
       rememberChromePointer(event);
-      if (!repeat) return;
+      if (isTouchLikePointer(event.pointerType) || !repeat) return;
       activate();
       const hold = window.setTimeout(() => {
         const timer = window.setInterval(activate, 50);
@@ -403,7 +424,7 @@ function TerminalViewport({
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     onPointerUp: (event: PointerEvent<HTMLButtonElement>) => {
-      if (repeat) return;
+      if (repeat && !isTouchLikePointer(event.pointerType)) return;
       if (chromePointerMovedTooFar(chromePointerStartX.current, event.clientX)) return;
       activate();
     },
@@ -430,7 +451,10 @@ function TerminalViewport({
   });
 
   const copyFromTerminal = () => {
-    const payload = terminalCopyPayload(xterm.current?.getSelection() ?? "", readVisibleBufferText());
+    const payload = terminalCopyPayload(
+      xterm.current?.getSelection() ?? "",
+      readVisibleBufferText()
+    );
     if (!payload.text) {
       toast.error(payload.message);
       return;
@@ -471,6 +495,14 @@ function TerminalViewport({
     setPasteDraft("");
     if (value) sendInput(value, false);
     focusTerminalIfAppropriate();
+  };
+
+  const submitKeyboard = () => {
+    if (keyboardComposing.current) return;
+    const data = encodeTerminalKeyboardSubmit(keyboardDraft);
+    setKeyboardDraft("");
+    sendInput(data, false);
+    keyboardRef.current?.focus();
   };
 
   const jumpSearch = (hits: number[], index: number) => {
@@ -616,7 +648,10 @@ function TerminalViewport({
         <div ref={host} className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3" />
         {pasteOpen ? (
           <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
-            <label className="mb-1.5 block text-xs text-muted-foreground" htmlFor="terminal-paste-input">
+            <label
+              className="mb-1.5 block text-xs text-muted-foreground"
+              htmlFor="terminal-paste-input"
+            >
               粘贴到终端
             </label>
             <textarea
@@ -658,76 +693,129 @@ function TerminalViewport({
         ) : null}
       </div>
       <div className="shrink-0 border-t border-border bg-muted px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950">
-        <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            className={modifierClass(ctrl)}
-            aria-pressed={ctrl}
-            title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"}
-            {...modifierButtonProps("ctrl")}
+            className={modifierClass(keyboardOpen)}
+            aria-pressed={keyboardOpen}
+            title={keyboardOpen ? "收起输入键盘" : "打开输入键盘"}
+            aria-label={keyboardOpen ? "收起输入键盘" : "打开输入键盘"}
+            {...chromeActivateProps(() => setKeyboardOpen((value) => !value))}
           >
-            <Keyboard className="size-3.5" /> Ctrl{sticky.ctrl ? " *" : ""}
+            <Keyboard className="size-3.5" /> {keyboardOpen ? "收起" : "输入"}
           </button>
-          <button
-            type="button"
-            className={modifierClass(alt)}
-            aria-pressed={alt}
-            title={sticky.alt ? "Alt 连续锁定" : "Alt"}
-            {...modifierButtonProps("alt")}
-          >
-            <Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}
-          </button>
-          <button
-            type="button"
-            className={modifierClass(shift)}
-            aria-pressed={shift}
-            title={sticky.shift ? "Shift 连续锁定" : "Shift"}
-            {...modifierButtonProps("shift")}
-          >
-            Shift{sticky.shift ? " *" : ""}
-          </button>
-          {shortcut("Esc", "\x1b")}
-          {shortcut("Tab", "\t")}
-          {shortcut("←", "\x1b[D", "方向左", true)}
-          {shortcut("↑", "\x1b[A", "方向上", true)}
-          {shortcut("↓", "\x1b[B", "方向下", true)}
-          {shortcut("→", "\x1b[C", "方向右", true)}
-          {shortcut("Home", "\x1b[H")}
-          {shortcut("End", "\x1b[F")}
-          {(["C", "D", "Z", "L", "A", "E", "R", "W", "U", "K"] as const).map((key) =>
-            shortcut(`^${key}`, controlCharacter(key), `Ctrl+${key}`)
-          )}
-          <button
-            type="button"
-            className={chromeIconClass}
-            title="复制"
-            aria-label="复制终端内容"
-            {...chromeActivateProps(copyFromTerminal)}
-          >
-            <Copy className="size-4" />
-          </button>
-          <button
-            type="button"
-            className={chromeIconClass}
-            title="粘贴"
-            aria-label="粘贴"
-            {...chromeActivateProps(pasteIntoTerminal)}
-          >
-            <Clipboard className="size-4" />
-          </button>
-          <button
-            type="button"
-            className={chromeIconClass}
-            title="清屏（Ctrl+L）"
-            aria-label="清屏"
-            {...chromeActivateProps(() => {
-              sendInput("\x0c", false);
-              focusTerminalIfAppropriate();
-            })}
-          >
-            <Eraser className="size-4" />
-          </button>
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain touch-pan-x pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              className={modifierClass(ctrl)}
+              aria-pressed={ctrl}
+              title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"}
+              {...modifierButtonProps("ctrl")}
+            >
+              Ctrl{sticky.ctrl ? " *" : ""}
+            </button>
+            <button
+              type="button"
+              className={modifierClass(alt)}
+              aria-pressed={alt}
+              title={sticky.alt ? "Alt 连续锁定" : "Alt"}
+              {...modifierButtonProps("alt")}
+            >
+              <Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}
+            </button>
+            <button
+              type="button"
+              className={modifierClass(shift)}
+              aria-pressed={shift}
+              title={sticky.shift ? "Shift 连续锁定" : "Shift"}
+              {...modifierButtonProps("shift")}
+            >
+              Shift{sticky.shift ? " *" : ""}
+            </button>
+            {shortcut("Esc", "\x1b")}
+            {shortcut("Tab", "\t")}
+            {shortcut("←", "\x1b[D", "方向左", true)}
+            {shortcut("↑", "\x1b[A", "方向上", true)}
+            {shortcut("↓", "\x1b[B", "方向下", true)}
+            {shortcut("→", "\x1b[C", "方向右", true)}
+            {shortcut("Home", "\x1b[H")}
+            {shortcut("End", "\x1b[F")}
+            {(["C", "D", "Z", "L", "A", "E", "R", "W", "U", "K"] as const).map((key) =>
+              shortcut(`^${key}`, controlCharacter(key), `Ctrl+${key}`)
+            )}
+            <button
+              type="button"
+              className={chromeIconClass}
+              title="复制"
+              aria-label="复制终端内容"
+              {...chromeActivateProps(copyFromTerminal)}
+            >
+              <Copy className="size-4" />
+            </button>
+            <button
+              type="button"
+              className={chromeIconClass}
+              title="粘贴"
+              aria-label="粘贴"
+              {...chromeActivateProps(pasteIntoTerminal)}
+            >
+              <Clipboard className="size-4" />
+            </button>
+            <button
+              type="button"
+              className={chromeIconClass}
+              title="清屏（Ctrl+L）"
+              aria-label="清屏"
+              {...chromeActivateProps(() => {
+                sendInput("\x0c", false);
+                focusTerminalIfAppropriate();
+              })}
+            >
+              <Eraser className="size-4" />
+            </button>
+          </div>
         </div>
+        {keyboardOpen ? (
+          <form
+            className="mt-1.5 flex items-center gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitKeyboard();
+            }}
+          >
+            <input
+              {...terminalKeyboardFieldProps}
+              ref={keyboardRef}
+              value={keyboardDraft}
+              placeholder="中英文输入"
+              aria-label="终端输入键盘"
+              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+              onChange={(event) => setKeyboardDraft(event.target.value)}
+              onCompositionStart={() => {
+                keyboardComposing.current = true;
+              }}
+              onCompositionEnd={() => {
+                keyboardComposing.current = false;
+              }}
+              onKeyDown={(event) => {
+                if (
+                  !shouldSubmitTerminalKeyboard({
+                    key: event.key,
+                    shiftKey: event.shiftKey,
+                    isComposing: event.nativeEvent.isComposing || keyboardComposing.current,
+                    keyCode: event.nativeEvent.keyCode
+                  })
+                )
+                  return;
+                event.preventDefault();
+                submitKeyboard();
+              }}
+            />
+            <button type="submit" className={chromeKeyClass} aria-label="发送到终端">
+              发送
+            </button>
+          </form>
+        ) : null}
       </div>
     </div>
   );

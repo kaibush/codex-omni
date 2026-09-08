@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   isCoarsePointer,
   chromePointerMovedTooFar,
+  encodeTerminalKeyboardSubmit,
   isDuplicateChromeClick,
+  isTouchLikePointer,
   joinVisibleLines,
   shouldFocusTerminalAfterChromeAction,
+  shouldPreventChromePointerDefault,
+  shouldSubmitTerminalKeyboard,
   sliceVisibleLines,
   terminalCopyPayload,
+  terminalKeyboardFieldProps,
   visibleBufferText
 } from "./terminal-chrome";
 
@@ -78,5 +83,50 @@ describe("chrome pointer movement", () => {
   it("treats small jitter as a tap and larger swipes as a scroll", () => {
     expect(chromePointerMovedTooFar(100, 106)).toBe(false);
     expect(chromePointerMovedTooFar(100, 120)).toBe(true);
+  });
+});
+
+describe("touch chrome scrolling", () => {
+  it("does not preventDefault on touch/pen so iOS can pan the key row", () => {
+    expect(isTouchLikePointer("touch")).toBe(true);
+    expect(isTouchLikePointer("pen")).toBe(true);
+    expect(isTouchLikePointer("mouse")).toBe(false);
+    expect(shouldPreventChromePointerDefault("touch")).toBe(false);
+    expect(shouldPreventChromePointerDefault("pen")).toBe(false);
+    expect(shouldPreventChromePointerDefault("mouse")).toBe(true);
+    expect(shouldPreventChromePointerDefault(undefined)).toBe(true);
+  });
+});
+
+describe("terminal keyboard field", () => {
+  it("uses iOS text-field attributes for CJK and the send key", () => {
+    expect(terminalKeyboardFieldProps).toMatchObject({
+      type: "text",
+      inputMode: "text",
+      enterKeyHint: "send",
+      autoCapitalize: "none",
+      autoCorrect: "off",
+      autoComplete: "off",
+      spellCheck: false,
+      lang: "zh-CN"
+    });
+  });
+
+  it("submits on Enter but not while composing Chinese", () => {
+    expect(shouldSubmitTerminalKeyboard({ key: "Enter" })).toBe(true);
+    expect(shouldSubmitTerminalKeyboard({ key: "Enter", shiftKey: true })).toBe(false);
+    expect(shouldSubmitTerminalKeyboard({ key: "Enter", isComposing: true })).toBe(false);
+    expect(shouldSubmitTerminalKeyboard({ key: "Enter", nativeEvent: { isComposing: true } })).toBe(
+      false
+    );
+    expect(shouldSubmitTerminalKeyboard({ key: "Enter", keyCode: 229 })).toBe(false);
+    expect(shouldSubmitTerminalKeyboard({ key: "a" })).toBe(false);
+  });
+
+  it("sends a carriage return after typed text", () => {
+    expect(encodeTerminalKeyboardSubmit("")).toBe("\r");
+    expect(encodeTerminalKeyboardSubmit("ls")).toBe("ls\r");
+    expect(encodeTerminalKeyboardSubmit("echo hi\n")).toBe("echo hi\r");
+    expect(encodeTerminalKeyboardSubmit("one\ntwo")).toBe("one\rtwo\r");
   });
 });

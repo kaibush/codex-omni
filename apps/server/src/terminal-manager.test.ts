@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const ptyMocks = vi.hoisted(() => ({
+  spawnCalls: [] as Array<{ file: string; args: string[]; options: Record<string, any> }>,
   instances: [] as Array<{
     writes: string[];
     resizes: Array<[number, number]>;
@@ -11,7 +12,8 @@ const ptyMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("node-pty", () => ({
-  spawn: vi.fn(() => {
+  spawn: vi.fn((file: string, args: string[] = [], options: Record<string, any> = {}) => {
+    ptyMocks.spawnCalls.push({ file, args, options });
     const dataHandlers: Array<(data: string) => void> = [];
     const exitHandlers: Array<(event: { exitCode: number; signal?: number }) => void> = [];
     const instance = {
@@ -53,6 +55,7 @@ import { TerminalManager } from "./terminal-manager.js";
 
 beforeEach(() => {
   ptyMocks.instances.length = 0;
+  ptyMocks.spawnCalls.length = 0;
 });
 
 describe("TerminalManager", () => {
@@ -107,6 +110,23 @@ describe("TerminalManager", () => {
     expect(process.resizes).toEqual([[120, 40]]);
     expect(manager.close(terminal.id)).toBe(true);
     expect(process.kills).toEqual(["SIGHUP"]);
+  });
+
+  it("starts a login shell and restores HOME/SHELL for systemd", () => {
+    const manager = new TerminalManager();
+    manager.create({
+      projectId: "project-1",
+      projectName: "Project",
+      cwd: "/tmp/project"
+    });
+    const spawn = ptyMocks.spawnCalls[0]!;
+    expect(spawn.args).toEqual(["-l"]);
+    expect(spawn.options.env.SHELL).toBe(spawn.file);
+    expect(spawn.options.env.HOME).toEqual(expect.any(String));
+    expect(spawn.options.env.HOME.length).toBeGreaterThan(0);
+    expect(spawn.options.env.TERM).toBe("xterm-256color");
+    expect(spawn.options.env.COLORTERM).toBe("truecolor");
+    expect(spawn.file).toMatch(/zsh|bash|sh|powershell/i);
   });
 
   it("reports exit metadata while retaining scrollback until the tab is closed", () => {
