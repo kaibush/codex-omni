@@ -1,15 +1,46 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { ArrowDown, Delete, Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, Square, SquareTerminal } from "lucide-react";
+import {
+  ArrowDown,
+  Clipboard,
+  Command,
+  Copy,
+  Delete,
+  Download,
+  Eraser,
+  Keyboard,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Square,
+  SquareTerminal
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/context/theme-provider";
 import { api, terminalChatWsUrl } from "@/lib/api";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import type { Project, Session, TerminalChatSession } from "@/types";
-import { xtermTheme } from "./terminal-chrome";
+import { LiveDuration } from "./WorkspaceStatus";
+import {
+  chromePointerMovedTooFar,
+  encodeTerminalKeyboardSubmit,
+  isCoarsePointer,
+  isDuplicateChromeClick,
+  isTouchLikePointer,
+  joinVisibleLines,
+  shouldFocusTerminalAfterChromeAction,
+  shouldPreventChromePointerDefault,
+  shouldSubmitTerminalKeyboard,
+  terminalCopyPayload,
+  terminalKeyboardFieldProps,
+  xtermTheme
+} from "./terminal-chrome";
 
 type SessionList = { items: TerminalChatSession[] };
 type Profile = { id: string; name: string; executable: string; args: string[] };
@@ -17,9 +48,33 @@ type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
 const chromeKeyClass =
-  "h-9 shrink-0 rounded-lg border border-border bg-background px-3 text-xs text-foreground dark:border-white/15 dark:bg-white/5 dark:text-slate-200";
-const chromeKeyActiveClass =
-  "h-9 shrink-0 rounded-lg border border-sky-500 bg-sky-500/15 px-3 text-xs text-sky-800 dark:border-sky-400 dark:bg-sky-400/15 dark:text-sky-100";
+  "inline-flex h-10 min-w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-xs font-medium text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
+const chromeIconClass =
+  "inline-flex h-10 min-w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
+const modifierClass = (pressed: boolean) =>
+  `inline-flex h-10 min-w-14 shrink-0 touch-manipulation items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium select-none ${
+    pressed
+      ? "border-sky-500 bg-sky-500/15 text-sky-800 dark:border-sky-400 dark:bg-sky-400/20 dark:text-sky-100"
+      : "border-border bg-background text-foreground dark:border-white/15 dark:bg-white/5 dark:text-slate-200"
+  }`;
+
+function statusLabel(session: TerminalChatSession, connected: boolean) {
+  const parts = [
+    connected
+      ? session.pid
+        ? `已连接 · PID ${session.pid}`
+        : "已连接"
+      : "正在恢复连接，终端仍在后台运行"
+  ];
+  if (session.state === "needs_attention") parts.push("已暂停自动重启");
+  else if (session.restartPolicy === "on-unexpected-exit") parts.push("异常退出自动重启");
+  else parts.push("手动重启");
+  if (session.restartCount) parts.push(`已重启 ${session.restartCount} 次`);
+  if (session.state === "stopped") parts.push("已停止");
+  else if (session.state === "exited") parts.push("进程已退出");
+  else if (session.state === "failed") parts.push(session.lastError || "启动失败");
+  return parts.join(" · ");
+}
 
 function TerminalChatViewport({ session, onChange }: { session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
   const { resolvedTheme } = useTheme();
@@ -33,28 +88,94 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const attempts = useRef(0);
   const rawRef = useRef(false);
   const ctrlRef = useRef(false);
+  const altRef = useRef(false);
+  const shiftRef = useRef(false);
+  const stickyRef = useRef({ ctrl: false, alt: false, shift: false });
   const onChangeRef = useRef(onChange);
   const outputRef = useRef("");
   const firstSeqRef = useRef(1);
   const pageVisibleRef = useRef(document.visibilityState === "visible");
+  const lastPointerType = useRef<string | undefined>(undefined);
+  const chromePointerStartX = useRef(0);
+  const pasteAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const keyboardRef = useRef<HTMLInputElement | null>(null);
+  const keyboardComposing = useRef(false);
+  const lineComposing = useRef(false);
   const [connected, setConnected] = useState(false);
   const [raw, setRaw] = useState(false);
   const [draft, setDraft] = useState("");
   const [ctrl, setCtrl] = useState(false);
+  const [alt, setAlt] = useState(false);
+  const [shift, setShift] = useState(false);
+  const [sticky, setSticky] = useState({ ctrl: false, alt: false, shift: false });
   const [atBottom, setAtBottom] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [firstSeq, setFirstSeq] = useState(1);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<TerminalHistoryItem[]>([]);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteDraft, setPasteDraft] = useState("");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardDraft, setKeyboardDraft] = useState("");
 
-  const send = useCallback((data: string) => {
+  const sendRaw = useCallback((data: string) => {
     if (!data) return;
     const ws = socket.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "terminal.input", terminalId: session.id, data }));
   }, [session.id]);
 
+  const sendInput = useCallback((rawData: string, applyLatchedModifiers = true) => {
+    let data = rawData;
+    if (applyLatchedModifiers && shiftRef.current) {
+      const arrows: Record<string, string> = {
+        "\x1b[A": "\x1b[1;2A",
+        "\x1b[B": "\x1b[1;2B",
+        "\x1b[C": "\x1b[1;2C",
+        "\x1b[D": "\x1b[1;2D"
+      };
+      if (arrows[rawData]) data = arrows[rawData];
+      else if (rawData.length === 1) data = rawData.toUpperCase();
+    }
+    if (applyLatchedModifiers && ctrlRef.current && data.length === 1) data = control(data);
+    if (applyLatchedModifiers && altRef.current) data = `\x1b${data}`;
+    if (applyLatchedModifiers) {
+      if (ctrlRef.current && !stickyRef.current.ctrl) {
+        ctrlRef.current = false;
+        setCtrl(false);
+      }
+      if (altRef.current && !stickyRef.current.alt) {
+        altRef.current = false;
+        setAlt(false);
+      }
+      if (shiftRef.current && !stickyRef.current.shift) {
+        shiftRef.current = false;
+        setShift(false);
+      }
+    }
+    sendRaw(data);
+  }, [sendRaw]);
+
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { ctrlRef.current = ctrl; }, [ctrl]);
+  useEffect(() => { altRef.current = alt; }, [alt]);
+  useEffect(() => { shiftRef.current = shift; }, [shift]);
+  useEffect(() => { stickyRef.current = sticky; }, [sticky]);
+  useEffect(() => {
+    rawRef.current = raw;
+    if (terminal.current) terminal.current.options.disableStdin = !raw;
+  }, [raw]);
+  useEffect(() => {
+    if (pasteOpen) pasteAreaRef.current?.focus();
+  }, [pasteOpen]);
+  useEffect(() => {
+    if (!keyboardOpen) {
+      keyboardRef.current?.blur();
+      return;
+    }
+    const timer = window.setTimeout(() => keyboardRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [keyboardOpen]);
 
   useEffect(() => {
     const element = host.current;
@@ -64,7 +185,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       fontSize: window.innerWidth < 640 ? 12 : 13,
       lineHeight: 1.2,
       scrollback: 5000,
-      disableStdin: false,
+      disableStdin: true,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
       theme: xtermTheme(resolvedThemeRef.current)
     });
@@ -72,13 +193,22 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     instance.loadAddon(fit);
     instance.open(element);
     terminal.current = instance;
+    instance.options.disableStdin = !rawRef.current;
     const fitTerminal = () => {
-      fit.fit();
-      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "terminal.resize", terminalId: session.id, cols: instance.cols, rows: instance.rows }));
+      try {
+        fit.fit();
+        if (socket.current?.readyState === WebSocket.OPEN) {
+          socket.current.send(JSON.stringify({ type: "terminal.resize", terminalId: session.id, cols: instance.cols, rows: instance.rows }));
+        }
+      } catch {
+        // Hidden while switching workspace tabs.
+      }
     };
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(element);
-    const dataSubscription = instance.onData((data) => { if (rawRef.current) send(ctrlRef.current && data.length === 1 ? control(data) : data); });
+    const dataSubscription = instance.onData((data) => {
+      if (rawRef.current) sendInput(data);
+    });
     const scrollSubscription = instance.onScroll(() => {
       const buffer = instance.buffer.active;
       setAtBottom(buffer.viewportY >= buffer.baseY);
@@ -89,7 +219,12 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       if (disposed || !pageVisibleRef.current) return;
       const ws = new WebSocket(terminalChatWsUrl());
       socket.current = ws;
-      ws.onopen = () => { attempts.current = 0; setConnected(true); ws.send(JSON.stringify({ type: "terminal.subscribe", terminalId: session.id, lastSeq: lastSeq.current })); fitTerminal(); };
+      ws.onopen = () => {
+        attempts.current = 0;
+        setConnected(true);
+        ws.send(JSON.stringify({ type: "terminal.subscribe", terminalId: session.id, lastSeq: lastSeq.current }));
+        fitTerminal();
+      };
       ws.onmessage = (event) => {
         const message = JSON.parse(String(event.data));
         if (message.terminalId && message.terminalId !== session.id) return;
@@ -100,9 +235,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           } else if (message.payload?.output) {
             outputRef.current += String(message.payload.output);
           }
-          if (message.payload?.output && !message.payload?.replay) instance.write(String(message.payload.output));
-          else if (message.payload?.output) instance.write(String(message.payload.output));
-          if (typeof message.payload?.firstSeq === "number") { firstSeqRef.current = message.payload.firstSeq; setFirstSeq(message.payload.firstSeq); }
+          if (message.payload?.output) instance.write(String(message.payload.output));
+          if (typeof message.payload?.firstSeq === "number") {
+            firstSeqRef.current = message.payload.firstSeq;
+            setFirstSeq(message.payload.firstSeq);
+          }
           if (typeof message.seq === "number") lastSeq.current = message.seq;
           if (message.payload?.terminal) applyChange(message.payload.terminal);
           if (message.payload?.truncated) instance.write("\r\n\x1b[90m[仅显示最近输出，可加载更早历史]\x1b[0m\r\n");
@@ -121,7 +258,12 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           outputRef.current = `${outputRef.current}${marker}`.slice(-4 * 1024 * 1024);
         }
       };
-      ws.onclose = () => { if (disposed || !pageVisibleRef.current) return; setConnected(false); attempts.current += 1; reconnect.current = window.setTimeout(connect, Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4))); };
+      ws.onclose = () => {
+        if (disposed || !pageVisibleRef.current) return;
+        setConnected(false);
+        attempts.current += 1;
+        reconnect.current = window.setTimeout(connect, Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4)));
+      };
       ws.onerror = () => setConnected(false);
     };
     const onVisibilityChange = () => {
@@ -137,23 +279,197 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     connect();
-    return () => { disposed = true; document.removeEventListener("visibilitychange", onVisibilityChange); if (reconnect.current) window.clearTimeout(reconnect.current); observer.disconnect(); dataSubscription.dispose(); scrollSubscription.dispose(); socket.current?.close(); instance.dispose(); terminal.current = null; };
-  }, [send, session.id]);
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (reconnect.current) window.clearTimeout(reconnect.current);
+      observer.disconnect();
+      dataSubscription.dispose();
+      scrollSubscription.dispose();
+      socket.current?.close();
+      instance.dispose();
+      terminal.current = null;
+    };
+  }, [sendInput, session.id]);
 
   useEffect(() => {
     if (terminal.current) terminal.current.options.theme = xtermTheme(resolvedTheme);
   }, [resolvedTheme]);
-  useEffect(() => { rawRef.current = raw; ctrlRef.current = ctrl; }, [ctrl, raw]);
-  const submit = (event: React.FormEvent) => { event.preventDefault(); if (!draft.trim()) return; send(`${draft}\r`); setDraft(""); };
-  const sendControl = (key: string) => send(control(key));
+
+  const focusTerminalIfAppropriate = () => {
+    if (shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+      terminal.current?.focus();
+      return;
+    }
+    terminal.current?.blur();
+  };
+  const rememberChromePointer = (event: { preventDefault: () => void; pointerType: string; clientX: number }) => {
+    if (shouldPreventChromePointerDefault(event.pointerType)) event.preventDefault();
+    lastPointerType.current = event.pointerType;
+    chromePointerStartX.current = event.clientX;
+    if (!shouldFocusTerminalAfterChromeAction({ pointerType: event.pointerType, coarsePointer: isCoarsePointer() })) {
+      terminal.current?.blur();
+    }
+  };
+  const chromeActivateProps = (activate: () => void, repeat = false) => ({
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
+      rememberChromePointer(event);
+      if (isTouchLikePointer(event.pointerType) || !repeat) return;
+      activate();
+      const hold = window.setTimeout(() => {
+        const timer = window.setInterval(activate, 50);
+        const stop = () => {
+          window.clearInterval(timer);
+          window.clearTimeout(hold);
+          event.currentTarget.releasePointerCapture(event.pointerId);
+          event.currentTarget.removeEventListener("pointerup", stop);
+          event.currentTarget.removeEventListener("pointercancel", stop);
+          event.currentTarget.removeEventListener("pointerleave", stop);
+        };
+        event.currentTarget.addEventListener("pointerup", stop);
+        event.currentTarget.addEventListener("pointercancel", stop);
+        event.currentTarget.addEventListener("pointerleave", stop);
+      }, 280);
+      const cancel = () => {
+        window.clearTimeout(hold);
+        event.currentTarget.removeEventListener("pointerup", cancel);
+        event.currentTarget.removeEventListener("pointercancel", cancel);
+        event.currentTarget.removeEventListener("pointerleave", cancel);
+      };
+      event.currentTarget.addEventListener("pointerup", cancel);
+      event.currentTarget.addEventListener("pointercancel", cancel);
+      event.currentTarget.addEventListener("pointerleave", cancel);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    onPointerUp: (event: PointerEvent<HTMLButtonElement>) => {
+      if (repeat && !isTouchLikePointer(event.pointerType)) return;
+      if (chromePointerMovedTooFar(chromePointerStartX.current, event.clientX)) return;
+      activate();
+    },
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (repeat || event.detail > 0) return;
+      activate();
+    }
+  });
+  const toggleModifier = (key: "ctrl" | "alt" | "shift", stickyLock = false) => {
+    const apply = (pressed: boolean, locked: boolean) => {
+      setSticky((current) => ({ ...current, [key]: locked }));
+      if (key === "ctrl") setCtrl(pressed);
+      if (key === "alt") setAlt(pressed);
+      if (key === "shift") setShift(pressed);
+    };
+    if (stickyLock) {
+      const locked = !sticky[key];
+      apply(locked, locked);
+      return;
+    }
+    if (sticky[key]) {
+      apply(false, false);
+      return;
+    }
+    apply(!(key === "ctrl" ? ctrl : key === "alt" ? alt : shift), false);
+  };
+  const modifierButtonProps = (key: "ctrl" | "alt" | "shift") => ({
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => rememberChromePointer(event),
+    onPointerUp: (event: PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === "mouse") return;
+      if (chromePointerMovedTooFar(chromePointerStartX.current, event.clientX)) return;
+      toggleModifier(key);
+    },
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (isDuplicateChromeClick(event.detail, lastPointerType.current)) return;
+      toggleModifier(key);
+    },
+    onDoubleClick: () => toggleModifier(key, true)
+  });
+  const shortcut = (label: string, data: string, title?: string, repeat = false) => (
+    <button type="button" className={chromeKeyClass} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, false); focusTerminalIfAppropriate(); }, repeat)}>
+      {label}
+    </button>
+  );
+  const readVisibleBufferText = () => {
+    const term = terminal.current;
+    const buffer = term?.buffer.active;
+    if (!term || !buffer) return "";
+    const start = Math.max(0, buffer.viewportY);
+    const lines: string[] = [];
+    const end = Math.min(buffer.length, start + term.rows);
+    for (let index = start; index < end; index += 1) lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
+    return joinVisibleLines(lines);
+  };
+  const copyFromTerminal = () => {
+    const payload = terminalCopyPayload(terminal.current?.getSelection() ?? "", readVisibleBufferText());
+    if (!payload.text) {
+      toast.error(payload.message);
+      return;
+    }
+    void copyTextToClipboard(payload.text).then((copied) => {
+      if (copied) toast.success(payload.message);
+      else toast.error("复制失败");
+    });
+    focusTerminalIfAppropriate();
+  };
+  const openPasteOverlay = () => {
+    setPasteDraft("");
+    setPasteOpen(true);
+  };
+  const pasteIntoTerminal = () => {
+    if (navigator.clipboard?.readText) {
+      void navigator.clipboard.readText().then((value) => {
+        if (value) {
+          sendInput(value, false);
+          focusTerminalIfAppropriate();
+          return;
+        }
+        openPasteOverlay();
+      }).catch(() => openPasteOverlay());
+      return;
+    }
+    openPasteOverlay();
+  };
+  const submitPasteOverlay = () => {
+    const value = pasteDraft;
+    setPasteOpen(false);
+    setPasteDraft("");
+    if (value) sendInput(value, false);
+    focusTerminalIfAppropriate();
+  };
+  const submitLine = () => {
+    if (lineComposing.current || !draft.trim()) return;
+    sendRaw(`${draft}\r`);
+    setDraft("");
+  };
+  const submitKeyboard = () => {
+    if (keyboardComposing.current) return;
+    const data = encodeTerminalKeyboardSubmit(keyboardDraft);
+    setKeyboardDraft("");
+    sendInput(data, false);
+    keyboardRef.current?.focus();
+  };
+  const downloadLog = () => {
+    const blob = new Blob([outputRef.current || readVisibleBufferText()], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${session.title || "terminal"}.log`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
   const runSearch = async (event: React.FormEvent) => {
     event.preventDefault();
     const query = searchQuery.trim();
-    if (!query) { setSearchHits([]); return; }
+    if (!query) {
+      setSearchHits([]);
+      return;
+    }
     try {
       const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/transcript?q=${encodeURIComponent(query)}&limit=100`);
       setSearchHits(result.items);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "搜索终端输出失败"); }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "搜索终端输出失败");
+    }
   };
   const loadEarlier = async () => {
     if (loadingEarlier || firstSeqRef.current <= 1) return;
@@ -161,22 +477,44 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     try {
       const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/history?beforeSeq=${firstSeqRef.current}&limit=2000`);
       const older = result.items.filter((item) => item.kind === "output").map((item) => item.data).join("");
-      if (!older) { firstSeqRef.current = 1; setFirstSeq(1); return; }
+      if (!older) {
+        firstSeqRef.current = 1;
+        setFirstSeq(1);
+        return;
+      }
       outputRef.current = `${older}${outputRef.current}`.slice(-4 * 1024 * 1024);
       firstSeqRef.current = result.items[0]?.seq ?? 1;
       setFirstSeq(firstSeqRef.current);
       const current = terminal.current;
-      if (current) { current.reset(); current.write(outputRef.current); current.scrollToBottom(); }
-    } catch (error) { toast.error(error instanceof Error ? error.message : "加载更早输出失败"); }
-    finally { setLoadingEarlier(false); }
+      if (current) {
+        current.reset();
+        current.write(outputRef.current);
+        current.scrollToBottom();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载更早输出失败");
+    } finally {
+      setLoadingEarlier(false);
+    }
   };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
       <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-muted px-3 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
         <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
-        <span>{connected ? `已连接 · PID ${session.pid ?? "—"}` : "正在恢复连接，终端仍在后台运行"}</span>
-        <span className="ml-auto hidden max-w-[45%] truncate font-mono text-muted-foreground sm:block dark:text-slate-500">{session.cwd}</span>
-        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" onClick={() => setSearchOpen((value) => !value)}><Search className="size-3.5" /></button>
+        <span className="min-w-0 truncate">{statusLabel(session, connected)}</span>
+        {session.state === "running" ? (
+          <span className="hidden shrink-0 sm:inline">
+            · 时长 <LiveDuration startedAt={session.createdAt} />
+          </span>
+        ) : null}
+        <span className="ml-auto hidden max-w-[30%] truncate font-mono dark:text-slate-500 sm:block" title={session.cwd}>{session.cwd}</span>
+        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
+          <Search className="size-3.5" />
+        </button>
+        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
+          <Download className="size-3.5" />
+        </button>
         {searchOpen && (
           <form className="absolute right-2 top-10 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
             <div className="flex gap-1.5">
@@ -196,6 +534,34 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
         <div ref={host} className="h-full" />
+        {pasteOpen ? (
+          <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
+            <label className="mb-1.5 block text-xs text-muted-foreground" htmlFor="terminal-chat-paste-input">粘贴到终端</label>
+            <textarea
+              id="terminal-chat-paste-input"
+              ref={pasteAreaRef}
+              value={pasteDraft}
+              autoFocus
+              rows={4}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="长按此处粘贴"
+              onChange={(event) => setPasteDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setPasteOpen(false);
+                }
+              }}
+              className="h-24 w-full resize-none rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" {...chromeActivateProps(() => { setPasteOpen(false); setPasteDraft(""); })}>取消</Button>
+              <Button type="button" size="sm" {...chromeActivateProps(submitPasteOverlay)}>发送</Button>
+            </div>
+          </div>
+        ) : null}
         {!atBottom && (
           <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
             <ArrowDown className="size-4" />
@@ -208,15 +574,105 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
         )}
       </div>
       <div className="shrink-0 border-t border-border bg-muted px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950">
-        <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden">
-          <button type="button" className={raw ? chromeKeyActiveClass : chromeKeyClass} onClick={() => setRaw((value) => !value)}><Keyboard className="mr-1 inline size-3.5" />{raw ? "直通键盘" : "命令行"}</button>
-          <button type="button" className={ctrl ? chromeKeyActiveClass : chromeKeyClass} onClick={() => setCtrl((value) => !value)}>Ctrl</button>
-          {(["C", "D", "L", "Z"] as const).map((key) => <button key={key} type="button" className={chromeKeyClass} onClick={() => sendControl(key)}>^{key}</button>)}
-          <button type="button" className={chromeKeyClass} onClick={() => send("\x1b")}>Esc</button>
+        <div className="flex items-center gap-1.5">
+          <button type="button" className={modifierClass(raw)} aria-pressed={raw} {...chromeActivateProps(() => setRaw((value) => !value))}>
+            <Keyboard className="size-3.5" /> {raw ? "直通" : "命令行"}
+          </button>
+          {raw ? (
+            <button type="button" className={modifierClass(keyboardOpen)} aria-pressed={keyboardOpen} aria-label={keyboardOpen ? "收起输入键盘" : "打开输入键盘"} {...chromeActivateProps(() => setKeyboardOpen((value) => !value))}>
+              {keyboardOpen ? "收起" : "输入"}
+            </button>
+          ) : null}
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain touch-pan-x pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+            <button type="button" className={modifierClass(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>
+              Ctrl{sticky.ctrl ? " *" : ""}
+            </button>
+            <button type="button" className={modifierClass(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}>
+              <Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}
+            </button>
+            <button type="button" className={modifierClass(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>
+              Shift{sticky.shift ? " *" : ""}
+            </button>
+            {shortcut("Esc", "\x1b")}
+            {shortcut("Tab", "\t")}
+            {shortcut("←", "\x1b[D", "方向左", true)}
+            {shortcut("↑", "\x1b[A", "方向上", true)}
+            {shortcut("↓", "\x1b[B", "方向下", true)}
+            {shortcut("→", "\x1b[C", "方向右", true)}
+            {shortcut("Home", "\x1b[H")}
+            {shortcut("End", "\x1b[F")}
+            {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`))}
+            <button type="button" className={chromeIconClass} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
+              <Copy className="size-4" />
+            </button>
+            <button type="button" className={chromeIconClass} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
+              <Clipboard className="size-4" />
+            </button>
+            <button type="button" className={chromeIconClass} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
+              <Eraser className="size-4" />
+            </button>
+          </div>
         </div>
+        {raw && keyboardOpen ? (
+          <form
+            className="mt-1.5 flex items-center gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitKeyboard();
+            }}
+          >
+            <input
+              {...terminalKeyboardFieldProps}
+              ref={keyboardRef}
+              value={keyboardDraft}
+              placeholder="中英文输入"
+              aria-label="终端输入键盘"
+              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+              onChange={(event) => setKeyboardDraft(event.target.value)}
+              onCompositionStart={() => { keyboardComposing.current = true; }}
+              onCompositionEnd={() => { keyboardComposing.current = false; }}
+              onKeyDown={(event) => {
+                if (!shouldSubmitTerminalKeyboard({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing || keyboardComposing.current,
+                  keyCode: event.nativeEvent.keyCode
+                })) return;
+                event.preventDefault();
+                submitKeyboard();
+              }}
+            />
+            <button type="submit" className={chromeKeyClass} aria-label="发送到终端">发送</button>
+          </form>
+        ) : null}
         {!raw && (
-          <form className="mt-1.5 flex gap-1.5" onSubmit={submit}>
-            <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="输入命令，Enter 发送" inputMode="text" enterKeyHint="send" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 dark:border-white/15 dark:bg-white/5 dark:text-slate-100" />
+          <form
+            className="mt-1.5 flex gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitLine();
+            }}
+          >
+            <input
+              {...terminalKeyboardFieldProps}
+              value={draft}
+              placeholder="输入命令，Enter 发送"
+              aria-label="终端命令"
+              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+              onChange={(event) => setDraft(event.target.value)}
+              onCompositionStart={() => { lineComposing.current = true; }}
+              onCompositionEnd={() => { lineComposing.current = false; }}
+              onKeyDown={(event) => {
+                if (!shouldSubmitTerminalKeyboard({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing || lineComposing.current,
+                  keyCode: event.nativeEvent.keyCode
+                })) return;
+                event.preventDefault();
+                submitLine();
+              }}
+            />
             <Button type="submit" size="sm" className="h-10 shrink-0">发送</Button>
           </form>
         )}
@@ -230,12 +686,35 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
   const [selectedId, setSelectedId] = useState("");
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
   const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
-  const create = useMutation({ mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }), onSuccess: (result) => { queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? []).filter((item) => item.id !== result.terminal.id)] })); void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] }); setSelectedId(result.terminal.id); onOpenSession?.(result.session.id); }, onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败") });
-  const restart = useMutation({ mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/restart`, { method: "POST" }), onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已重启"); }, onError: (error) => toast.error(error instanceof Error ? error.message : "重启终端失败") });
-  const stop = useMutation({ mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/stop`, { method: "POST" }), onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已停止"); }, onError: (error) => toast.error(error instanceof Error ? error.message : "停止终端失败") });
+  const create = useMutation({
+    mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }),
+    onSuccess: (result) => {
+      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? []).filter((item) => item.id !== result.terminal.id)] }));
+      void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] });
+      setSelectedId(result.terminal.id);
+      onOpenSession?.(result.session.id);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败")
+  });
+  const restart = useMutation({
+    mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/restart`, { method: "POST" }),
+    onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已重启"); },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "重启终端失败")
+  });
+  const stop = useMutation({
+    mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/stop`, { method: "POST" }),
+    onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已停止"); },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "停止终端失败")
+  });
   const items = sessions.data?.items ?? [];
   const selected = items.find((item) => item.id === selectedId) ?? items.find((item) => item.sessionId === sessionId) ?? items[0] ?? null;
   const update = useCallback((id: string, next: Partial<TerminalChatSession>) => queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => current ? { items: current.items.map((item) => item.id === id ? { ...item, ...next } : item) } : current), [project.id, queryClient]);
+  const configure = useMutation({
+    mutationFn: (input: { id: string; restartPolicy: "manual" | "on-unexpected-exit" }) =>
+      api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${input.id}`, { method: "PUT", body: JSON.stringify({ restartPolicy: input.restartPolicy }) }),
+    onSuccess: (result) => update(result.terminal.id, result.terminal),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "更新重启策略失败")
+  });
   const remove = useMutation({
     mutationFn: (item: TerminalChatSession) => api<{ ok: boolean }>(`/api/sessions/${item.sessionId}`, { method: "DELETE" }),
     onSuccess: (_result, item) => {
@@ -318,7 +797,17 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
         <>
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
             <span className="truncate">{selected.title} · {selected.profileId}</span>
-            <span className="ml-auto">{selected.state}</span>
+            {selected.state === "needs_attention" ? <span className="text-destructive">已暂停自动重启</span> : <span>{selected.state}</span>}
+            <select
+              aria-label="重启策略"
+              className="ml-auto h-7 max-w-40 rounded-lg border border-border bg-background px-2 text-xs"
+              value={selected.restartPolicy}
+              disabled={configure.isPending}
+              onChange={(event) => configure.mutate({ id: selected.id, restartPolicy: event.target.value as "manual" | "on-unexpected-exit" })}
+            >
+              <option value="manual">手动重启</option>
+              <option value="on-unexpected-exit">异常退出自动重启</option>
+            </select>
             <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button>
             <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
             <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="删除终端对话" onClick={() => closeTab(selected)} disabled={remove.isPending}><Delete className="size-3.5" /></Button>

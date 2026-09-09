@@ -115,6 +115,17 @@ describe("TerminalChatManager", () => {
     expect(manager.get(terminal.id)).toMatchObject({ state: "stopped", desiredState: "stopped" });
   });
 
+  it("updates restart policy without spawning another process", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    expect(manager.configure(terminal.id, { restartPolicy: "on-unexpected-exit" })).toMatchObject({
+      id: terminal.id,
+      restartPolicy: "on-unexpected-exit"
+    });
+    expect(ptyMocks.instances).toHaveLength(1);
+  });
+
   it("can create another terminal after the previous session is removed", () => {
     const { store, deleteSession } = makeStore();
     const manager = new TerminalChatManager(store);

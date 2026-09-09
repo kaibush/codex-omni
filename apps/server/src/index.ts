@@ -1711,6 +1711,18 @@ app.get("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) =
   const terminal = terminalChats.get(routeId(req));
   return terminal ?? reply.code(404).send({ error: "Terminal session not found" });
 });
+app.put("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) => {
+  const id = routeId(req);
+  const body = z.object({
+    title: z.string().trim().min(1).max(120).optional(),
+    restartPolicy: z.enum(["manual", "on-unexpected-exit"]).optional()
+  }).refine((value) => value.title !== undefined || value.restartPolicy !== undefined, "No changes provided").parse(req.body ?? {});
+  const patch: { title?: string; restartPolicy?: "manual" | "on-unexpected-exit" } = {};
+  if (body.title !== undefined) patch.title = body.title;
+  if (body.restartPolicy !== undefined) patch.restartPolicy = body.restartPolicy;
+  const terminal = terminalChats.configure(id, patch);
+  return terminal ? { terminal } : reply.code(404).send({ error: "Terminal session not found" });
+});
 app.post("/api/terminal-sessions/:id/restart", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   if (!terminalChats.restart(id)) return reply.code(404).send({ error: "Terminal session not found" });

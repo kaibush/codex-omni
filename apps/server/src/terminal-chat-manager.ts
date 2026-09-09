@@ -88,10 +88,20 @@ export class TerminalChatManager {
     return item?.row ? this.publicRow(item) : null;
   }
   rename(id: string, title: string) {
+    return this.configure(id, { title });
+  }
+  configure(id: string, patch: { title?: string; restartPolicy?: "manual" | "on-unexpected-exit" }) {
     const item = this.items.get(id);
     if (!item?.row) return null;
-    if (!this.persist(item, { title: title.trim().slice(0, 120) || item.row.title })) return null;
-    this.broadcast(item, { type: "terminal.state", terminalId: id, payload: { title: item.row.title } });
+    const next: TerminalPatch = {};
+    if (patch.title !== undefined) next.title = patch.title.trim().slice(0, 120) || item.row.title;
+    if (patch.restartPolicy) next.restartPolicy = patch.restartPolicy;
+    if (!Object.keys(next).length) return this.publicRow(item);
+    if (!this.persist(item, next)) return null;
+    if (next.title && this.store.getSession(item.row.sessionId)) {
+      this.store.updateSession(item.row.sessionId, { title: item.row.title });
+    }
+    this.broadcast(item, { type: "terminal.state", terminalId: id, payload: next });
     return this.publicRow(item);
   }
   private start(id: string, restoring: boolean) {
