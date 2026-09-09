@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/context/theme-provider";
 import { api, terminalChatWsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -32,6 +33,7 @@ import { LiveDuration } from "./WorkspaceStatus";
 import {
   chromePointerMovedTooFar,
   encodeTerminalKeyboardSubmit,
+  filterCommandHistory,
   isCoarsePointer,
   isDuplicateChromeClick,
   isTouchLikePointer,
@@ -40,7 +42,6 @@ import {
   shouldPreventChromePointerDefault,
   shouldSubmitTerminalKeyboard,
   terminalCopyPayload,
-  terminalKeyboardFieldProps,
   attachTerminalTouchScroll,
   xtermTheme
 } from "./terminal-chrome";
@@ -101,8 +102,9 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const lastPointerType = useRef<string | undefined>(undefined);
   const chromePointerStartX = useRef(0);
   const pasteAreaRef = useRef<HTMLTextAreaElement | null>(null);
-  const keyboardRef = useRef<HTMLInputElement | null>(null);
-  const keyboardComposing = useRef(false);
+  const lineRef = useRef<HTMLTextAreaElement | null>(null);
+  const historyPanelRef = useRef<HTMLDivElement | null>(null);
+  const historyButtonRef = useRef<HTMLSpanElement | null>(null);
   const lineComposing = useRef(false);
   const [connected, setConnected] = useState(false);
   const [raw, setRaw] = useState(false);
@@ -119,8 +121,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [searchHits, setSearchHits] = useState<TerminalHistoryItem[]>([]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [keyboardDraft, setKeyboardDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -177,15 +177,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     if (pasteOpen) pasteAreaRef.current?.focus();
   }, [pasteOpen]);
   useEffect(() => {
-    if (!keyboardOpen) {
-      keyboardRef.current?.blur();
-      return;
-    }
-    const timer = window.setTimeout(() => keyboardRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
-  }, [keyboardOpen]);
-
-  useEffect(() => {
     try {
       const stored = window.localStorage.getItem(`terminal-command-history:${session.id}`);
       const parsed: unknown = stored ? JSON.parse(stored) : null;
@@ -241,6 +232,37 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       return !open;
     });
   };
+  const applyHistory = (item: string) => {
+    setDraft(item);
+    setHistoryOpen(false);
+    setHistoryQuery("");
+    window.setTimeout(() => {
+      lineRef.current?.focus();
+      const length = item.length;
+      lineRef.current?.setSelectionRange(length, length);
+    }, 0);
+  };
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onPointerDown = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target)) return;
+      setHistoryOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setHistoryOpen(false);
+      setHistoryQuery("");
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [historyOpen]);
 
   useEffect(() => {
     const element = host.current;
@@ -504,15 +526,10 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const submitLine = () => {
     if (lineComposing.current || !draft.trim()) return;
     rememberCommand(draft);
-    sendRaw(`${draft}\r`);
+    sendRaw(encodeTerminalKeyboardSubmit(draft));
     setDraft("");
-  };
-  const submitKeyboard = () => {
-    if (keyboardComposing.current) return;
-    const data = encodeTerminalKeyboardSubmit(keyboardDraft);
-    setKeyboardDraft("");
-    sendInput(data, false);
-    keyboardRef.current?.focus();
+    setHistoryOpen(false);
+    setHistoryQuery("");
   };
   const downloadLog = () => {
     const blob = new Blob([outputRef.current || readVisibleBufferText()], { type: "text/plain;charset=utf-8" });
@@ -565,6 +582,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       setLoadingEarlier(false);
     }
   };
+
+  const visibleHistory = filterCommandHistory(commandHistory, historyQuery);
 
   const shortcutControls = (
     <>
@@ -658,108 +677,114 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           </button>
         )}
       </div>
-      <div className="shrink-0 border-t border-border bg-background px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950 sm:px-3">
-        <div className="composer-shell mx-auto max-w-5xl overflow-visible rounded-2xl p-2.5 shadow-sm sm:p-3">
-        <div className="flex items-center gap-1.5">
-          <button type="button" className={modifierClass(raw)} aria-pressed={raw} {...chromeActivateProps(() => setRaw((value) => !value))}>
-            <Keyboard className="size-3.5" /> {raw ? "直通" : "命令行"}
-          </button>
-          {raw ? (
-            <button type="button" className={modifierClass(keyboardOpen)} aria-pressed={keyboardOpen} aria-label={keyboardOpen ? "收起输入键盘" : "打开输入键盘"} {...chromeActivateProps(() => setKeyboardOpen((value) => !value))}>
-              {keyboardOpen ? "收起" : "输入"}
-            </button>
-          ) : null}
-          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain touch-pan-x pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden md:hidden">
-            {shortcutControls}
-            <button type="button" className={chromeIconClass} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
-              <Copy className="size-4" />
-            </button>
-            <button type="button" className={chromeIconClass} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
-              <Clipboard className="size-4" />
-            </button>
-            <button type="button" className={chromeIconClass} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
-              <Eraser className="size-4" />
-            </button>
-          </div>
-        </div>
-        <div className="relative mt-1.5 flex gap-1.5">
-          {!raw && (
-            <div className="relative min-w-0 flex-1">
-              <input
-                {...terminalKeyboardFieldProps}
-                value={draft}
-                placeholder="输入命令，Enter 发送"
-                aria-label="终端命令"
-                className="h-11 w-full rounded-xl border border-border bg-background px-3 pr-10 text-base text-foreground outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/15 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-                onChange={(event) => setDraft(event.target.value)}
-                onCompositionStart={() => { lineComposing.current = true; }}
-                onCompositionEnd={() => { lineComposing.current = false; }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowUp" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
-                    event.preventDefault();
-                    const current = commandHistory.findIndex((item) => item === draft);
-                    const next = commandHistory[current < 0 ? 0 : Math.min(current + 1, commandHistory.length - 1)];
-                    if (next) setDraft(next);
-                    return;
-                  }
-                  if (event.key === "ArrowDown" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
-                    event.preventDefault();
-                    const current = commandHistory.findIndex((item) => item === draft);
-                    const previous = current > 0 ? commandHistory[current - 1] : undefined;
-                    if (previous !== undefined) setDraft(previous);
-                    else if (current === 0) setDraft("");
-                    return;
-                  }
-                  if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || lineComposing.current, keyCode: event.nativeEvent.keyCode })) return;
-                  event.preventDefault();
-                  submitLine();
-                }}
-              />
-              <button type="button" className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="打开命令历史" title="命令历史" onClick={toggleHistory}>
-                <HistoryIcon className="size-4" />
-              </button>
-              {historyOpen && (
-                <div className="absolute bottom-full left-0 z-30 mb-2 w-full rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900">
-                  <div className="flex items-center gap-1.5">
-                    <Search className="ml-1 size-3.5 text-muted-foreground" />
-                    <input autoFocus value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索命令历史" className="h-8 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none" />
-                    {historyLoading ? <LoaderCircle className="mr-1 size-3.5 animate-spin text-muted-foreground" /> : null}
-                  </div>
-                  <div className="mt-1 max-h-48 overflow-y-auto overscroll-contain">
-                    {(commandHistory.filter((item) => !historyQuery.trim() || item.toLowerCase().includes(historyQuery.trim().toLowerCase())).slice(0, 50)).map((item, index) => (
-                      <button key={`${item}-${index}`} type="button" className="flex w-full items-start rounded-lg px-2 py-2 text-left font-mono text-xs hover:bg-muted" onClick={() => { setDraft(item); setHistoryOpen(false); setHistoryQuery(""); }}>
-                        <span className="mr-2 shrink-0 text-muted-foreground">{index + 1}</span>
-                        <span className="min-w-0 break-words">{item}</span>
-                      </button>
-                    ))}
-                    {!commandHistory.length ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无命令历史</p> : null}
-                  </div>
+      <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-3">
+        <div className="composer-shell overflow-visible rounded-2xl p-3">
+          <div className="relative">
+            {historyOpen ? (
+              <div ref={historyPanelRef} className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900">
+                <div className="flex items-center gap-1.5 rounded-lg bg-muted/60 px-2 dark:bg-white/5">
+                  <Search className="size-3.5 text-muted-foreground" />
+                  <input autoFocus value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索命令历史" className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+                  {historyLoading ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : visibleHistory.length ? <span className="text-[11px] text-muted-foreground">{visibleHistory.length}</span> : null}
                 </div>
-              )}
-            </div>
-          )}
-          {raw && keyboardOpen ? (
-            <input
-              {...terminalKeyboardFieldProps}
-              ref={keyboardRef}
-              value={keyboardDraft}
-              placeholder="中英文输入"
-              aria-label="终端输入键盘"
-              className="h-11 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/15 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-              onChange={(event) => setKeyboardDraft(event.target.value)}
-              onCompositionStart={() => { keyboardComposing.current = true; }}
-              onCompositionEnd={() => { keyboardComposing.current = false; }}
+                <div className="mt-1 max-h-56 overflow-y-auto overscroll-contain">
+                  {visibleHistory.map((item, index) => (
+                    <button key={`${item}-${index}`} type="button" className="flex w-full items-start rounded-lg px-2 py-2 text-left font-mono text-xs hover:bg-muted" onClick={() => applyHistory(item)}>
+                      <span className="mr-2 shrink-0 text-muted-foreground">{index + 1}</span>
+                      <span className="min-w-0 break-words">{item}</span>
+                    </button>
+                  ))}
+                  {!commandHistory.length ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无命令历史</p> : null}
+                  {commandHistory.length > 0 && visibleHistory.length === 0 ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">没有匹配的命令</p> : null}
+                </div>
+              </div>
+            ) : null}
+            <Textarea
+              ref={lineRef}
+              rows={2}
+              value={draft}
+              placeholder="输入命令，Enter 发送，Shift+Enter 换行"
+              aria-label="终端命令"
+              inputMode="text"
+              enterKeyHint="send"
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              lang="zh-CN"
+              className="max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-2 py-1 font-mono text-base leading-6 shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent sm:min-h-14 sm:text-sm"
+              onChange={(event) => setDraft(event.target.value)}
+              onCompositionStart={() => { lineComposing.current = true; }}
+              onCompositionEnd={() => { lineComposing.current = false; }}
               onKeyDown={(event) => {
-                if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || keyboardComposing.current, keyCode: event.nativeEvent.keyCode })) return;
+                const canCycleHistory = !draft.includes("\n") && !event.shiftKey && !event.ctrlKey && !event.metaKey;
+                if (event.key === "ArrowUp" && canCycleHistory) {
+                  event.preventDefault();
+                  const current = commandHistory.findIndex((item) => item === draft);
+                  const next = commandHistory[current < 0 ? 0 : Math.min(current + 1, commandHistory.length - 1)];
+                  if (next) setDraft(next);
+                  return;
+                }
+                if (event.key === "ArrowDown" && canCycleHistory) {
+                  event.preventDefault();
+                  const current = commandHistory.findIndex((item) => item === draft);
+                  const previous = current > 0 ? commandHistory[current - 1] : undefined;
+                  if (previous !== undefined) setDraft(previous);
+                  else if (current === 0) setDraft("");
+                  return;
+                }
+                if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || lineComposing.current, keyCode: event.nativeEvent.keyCode })) return;
                 event.preventDefault();
-                submitKeyboard();
+                submitLine();
               }}
             />
-          ) : null}
-          <Button type="button" size="icon" className="size-11 shrink-0 rounded-xl" aria-label="发送到终端" onClick={raw ? submitKeyboard : submitLine} disabled={raw ? !keyboardDraft : !draft.trim()}>
-            <Send className="size-4" />
-          </Button>
-        </div>
+          </div>
+          <div className="composer-toolbar">
+            <div className="composer-context">
+              <Button
+                type="button"
+                variant="outline"
+                className="composer-runtime-btn h-8 rounded-lg px-2.5"
+                aria-pressed={raw}
+                title={raw ? "直通：按键直接进入终端" : "命令行：在输入框发送完整命令"}
+                {...chromeActivateProps(() => setRaw((value) => !value))}
+              >
+                <Keyboard className="size-3.5" />
+                <span>{raw ? "直通" : "命令行"}</span>
+              </Button>
+              <div className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
+                {shortcutControls}
+                <button type="button" className={chromeIconClass} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
+                  <Copy className="size-4" />
+                </button>
+                <button type="button" className={chromeIconClass} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
+                  <Clipboard className="size-4" />
+                </button>
+                <button type="button" className={chromeIconClass} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
+                  <Eraser className="size-4" />
+                </button>
+              </div>
+            </div>
+            <div className="composer-actions">
+              <span ref={historyButtonRef} className="inline-flex">
+                <Button
+                  type="button"
+                  variant={historyOpen ? "secondary" : "outline"}
+                  className="h-8 rounded-lg px-2.5"
+                  aria-label="命令历史"
+                  aria-expanded={historyOpen}
+                  title="命令历史"
+                  onClick={toggleHistory}
+                >
+                  {historyLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <HistoryIcon className="size-3.5" />}
+                  历史
+                </Button>
+              </span>
+              <Button type="button" size="icon" className="size-8 rounded-lg" aria-label="发送到终端" onClick={submitLine} disabled={!draft.trim()}>
+                <Send className="size-4" />
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
       <div className="group absolute right-0 top-1/2 z-20 hidden -translate-y-1/2 md:block">

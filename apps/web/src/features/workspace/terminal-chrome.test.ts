@@ -3,6 +3,7 @@ import {
   isCoarsePointer,
   chromePointerMovedTooFar,
   encodeTerminalKeyboardSubmit,
+  filterCommandHistory,
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
@@ -130,6 +131,19 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalKeyboardSubmit("ls")).toBe("ls\r");
     expect(encodeTerminalKeyboardSubmit("echo hi\n")).toBe("echo hi\r");
     expect(encodeTerminalKeyboardSubmit("one\ntwo")).toBe("one\rtwo\r");
+  });
+});
+
+describe("command history search", () => {
+  const items = ["git status", "git log --oneline", "ls -la", "npm test"];
+
+  it("returns the newest items first up to the limit", () => {
+    expect(filterCommandHistory(items, "", 2)).toEqual(["git status", "git log --oneline"]);
+  });
+
+  it("filters by substring without changing order", () => {
+    expect(filterCommandHistory(items, "GIT")).toEqual(["git status", "git log --oneline"]);
+    expect(filterCommandHistory(items, "  test ")).toEqual(["npm test"]);
   });
 });
 

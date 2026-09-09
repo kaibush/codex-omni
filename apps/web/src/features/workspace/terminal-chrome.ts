@@ -100,6 +100,12 @@ export function encodeTerminalKeyboardSubmit(value: string): string {
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
 }
 
+export function filterCommandHistory(items: readonly string[], query: string, limit = 50) {
+  const needle = query.trim().toLowerCase();
+  const matched = needle ? items.filter((item) => item.toLowerCase().includes(needle)) : [...items];
+  return matched.slice(0, limit);
+}
+
 export function touchScrollLines(dy: number, lineHeight: number, leftover: number) {
   const height = Math.max(1, lineHeight);
   const next = leftover + dy / height;
