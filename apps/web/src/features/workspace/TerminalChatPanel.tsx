@@ -52,11 +52,13 @@ type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
 const chromeKeyClass =
-  "inline-flex h-10 min-w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-xs font-medium text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
+  "inline-flex h-8 min-w-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-xs font-medium text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
 const chromeIconClass =
-  "inline-flex h-10 min-w-10 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
+  "inline-flex h-8 min-w-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
+const padKeyClass =
+  "inline-flex h-8 min-w-0 w-full touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-1 text-[11px] font-medium text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
 const modifierClass = (pressed: boolean) =>
-  `inline-flex h-10 min-w-14 shrink-0 touch-manipulation items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium select-none ${
+  `inline-flex h-8 min-w-14 shrink-0 touch-manipulation items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium select-none ${
     pressed
       ? "border-sky-500 bg-sky-500/15 text-sky-800 dark:border-sky-400 dark:bg-sky-400/20 dark:text-sky-100"
       : "border-border bg-background text-foreground dark:border-white/15 dark:bg-white/5 dark:text-slate-200"
@@ -471,8 +473,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     },
     onDoubleClick: () => toggleModifier(key, true)
   });
-  const shortcut = (label: string, data: string, title?: string, repeat = false) => (
-    <button type="button" className={chromeKeyClass} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, false); focusTerminalIfAppropriate(); }, repeat)}>
+  const shortcut = (label: string, data: string, title?: string, repeat = false, className = chromeKeyClass) => (
+    <button type="button" className={className} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, false); focusTerminalIfAppropriate(); }, repeat)}>
       {label}
     </button>
   );
@@ -601,6 +603,32 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`))}
     </>
   );
+  const padModifier = (pressed: boolean) =>
+    `${modifierClass(pressed)} min-w-0 w-full px-1 text-[11px]`;
+  const shortcutPad = (
+    <div className="flex w-[13.25rem] flex-col gap-1 p-1.5">
+      <div className="grid grid-cols-3 gap-1">
+        <button type="button" className={padModifier(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
+        <button type="button" className={padModifier(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}>Alt{sticky.alt ? " *" : ""}</button>
+        <button type="button" className={padModifier(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {shortcut("Esc", "\x1b", undefined, false, padKeyClass)}
+        {shortcut("Tab", "\t", undefined, false, padKeyClass)}
+        {shortcut("Home", "\x1b[H", undefined, false, padKeyClass)}
+        {shortcut("End", "\x1b[F", undefined, false, padKeyClass)}
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {shortcut("←", "\x1b[D", "方向左", true, padKeyClass)}
+        {shortcut("↑", "\x1b[A", "方向上", true, padKeyClass)}
+        {shortcut("↓", "\x1b[B", "方向下", true, padKeyClass)}
+        {shortcut("→", "\x1b[C", "方向右", true, padKeyClass)}
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`, false, padKeyClass))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
@@ -636,7 +664,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           </form>
         )}
       </div>
-      <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="absolute inset-0 p-2 sm:p-3">
         <div ref={host} className="h-full touch-none overscroll-contain" />
         {pasteOpen ? (
           <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
@@ -676,6 +705,17 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
             {loadingEarlier ? "加载中" : "加载更早输出"}
           </button>
         )}
+        </div>
+        <aside className="absolute inset-y-2 right-0 z-20 hidden md:block">
+          <div className="group relative flex h-full items-center justify-end">
+            <button type="button" className="relative z-10 grid size-9 place-items-center rounded-l-lg border border-r-0 border-border/80 bg-card/95 text-muted-foreground shadow-lg backdrop-blur hover:bg-muted dark:border-white/15 dark:bg-slate-900/95" aria-label="显示快捷键" title="显示快捷键" aria-expanded={shortcutDockOpen} onClick={() => setShortcutDockOpen((value) => !value)}>
+              <Keyboard className="size-4" />
+            </button>
+            <div className={`absolute right-9 top-1/2 max-h-full -translate-y-1/2 overflow-y-auto rounded-l-xl border border-r-0 border-border/80 bg-card/95 shadow-lg backdrop-blur transition dark:border-white/15 dark:bg-slate-900/95 ${shortcutDockOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100"}`}>
+              {shortcutPad}
+            </div>
+          </div>
+        </aside>
       </div>
       <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-3">
         <div className="composer-shell overflow-visible rounded-2xl p-3">
@@ -785,14 +825,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               </Button>
             </div>
           </div>
-        </div>
-      </div>
-      <div className="group absolute right-0 top-1/2 z-20 hidden -translate-y-1/2 md:block">
-        <button type="button" className="grid size-9 place-items-center rounded-l-lg border border-r-0 border-border/80 bg-card/95 text-muted-foreground shadow-lg backdrop-blur hover:bg-muted dark:border-white/15 dark:bg-slate-900/95" aria-label="显示快捷键" title="显示快捷键" onClick={() => setShortcutDockOpen((value) => !value)}>
-          <Keyboard className="size-4" />
-        </button>
-        <div className={`absolute right-9 top-0 flex max-h-[min(28rem,70vh)] -translate-y-0 flex-col items-center gap-1 overflow-y-auto rounded-l-xl border border-r-0 border-border/80 bg-card/95 p-1 shadow-lg backdrop-blur transition dark:border-white/15 dark:bg-slate-900/95 ${shortcutDockOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100"}`}>
-          {shortcutControls}
         </div>
       </div>
     </div>
