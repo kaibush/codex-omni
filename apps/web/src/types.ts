@@ -125,6 +125,7 @@ export type Project = {
 export type Session = {
   id: string;
   projectId: string;
+  kind?: "chat" | "terminal-chat";
   threadId: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
@@ -293,6 +294,29 @@ export type ProjectTerminal = {
   exitedAt: number | null;
   exitCode: number | null;
   signal: number | null;
+  subscriberCount: number;
+};
+export type TerminalChatSession = {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  profileId: string;
+  title: string;
+  cwd: string;
+  desiredState: "running" | "stopped";
+  state: "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
+  restartPolicy: "manual" | "on-unexpected-exit";
+  pid: number | null;
+  lastSeq: number;
+  lastOutputAt: number | null;
+  lastExitCode: number | null;
+  lastSignal: number | null;
+  restartCount: number;
+  nextRestartAt: number | null;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
+  stoppedAt: number | null;
   subscriberCount: number;
 };
 

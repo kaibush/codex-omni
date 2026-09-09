@@ -240,6 +240,10 @@ export function WorkspaceHeader({
               <TerminalSquare />
               <span className="hidden sm:inline">终端</span>
             </TabsTrigger>
+            <TabsTrigger value="terminal-chat" className="px-2.5 text-xs sm:px-3">
+              <TerminalSquare />
+              <span className="hidden sm:inline">终端对话</span>
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         {activeSession ? (

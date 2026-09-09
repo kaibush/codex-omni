@@ -103,7 +103,7 @@ export function WorkspaceComposer({
   activeProject,
   enhanceNonce = 0
 }: {
-  workspaceView: "chat" | "files" | "git" | "terminal";
+  workspaceView: "chat" | "files" | "git" | "terminal" | "terminal-chat";
   activeSession: { id: string } | undefined;
   dragActive: boolean;
   setDragActive: Dispatch<SetStateAction<boolean>>;

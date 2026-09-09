@@ -42,6 +42,7 @@ export type ProjectRow = {
 export type SessionRow = {
   id: string;
   projectId: string;
+  kind: "chat" | "terminal-chat";
   threadId: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
@@ -57,6 +58,36 @@ export type SessionRow = {
   tags: string[];
   createdAt: number;
   updatedAt: number;
+};
+export type TerminalSessionRow = {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  profileId: string;
+  title: string;
+  cwd: string;
+  desiredState: "running" | "stopped";
+  state: "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
+  restartPolicy: "manual" | "on-unexpected-exit";
+  pid: number | null;
+  lastSeq: number;
+  lastOutputAt: number | null;
+  lastExitCode: number | null;
+  lastSignal: number | null;
+  restartCount: number;
+  restartWindowStartedAt: number | null;
+  nextRestartAt: number | null;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
+  stoppedAt: number | null;
+};
+export type TerminalEventRow = {
+  terminalId: string;
+  seq: number;
+  kind: "output" | "input" | "resize" | "state" | "marker";
+  data: string;
+  createdAt: number;
 };
 export type MessageRow = {
   id: string;
@@ -323,7 +354,7 @@ export class Store {
     this.db
       .exec(`CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'codex',model TEXT,base_url TEXT,api_key TEXT,config_toml TEXT,auth_json TEXT,env_json TEXT,is_default INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY,name TEXT NOT NULL,display_path TEXT NOT NULL,real_path TEXT NOT NULL UNIQUE,provider_id TEXT REFERENCES providers(id) ON DELETE SET NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,thread_id TEXT,title TEXT NOT NULL,status TEXT NOT NULL,provider_id TEXT REFERENCES providers(id) ON DELETE SET NULL,parent_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,continuation_mode TEXT,last_message_at INTEGER,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,thread_id TEXT,title TEXT NOT NULL,status TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'chat',provider_id TEXT REFERENCES providers(id) ON DELETE SET NULL,parent_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,continuation_mode TEXT,last_message_at INTEGER,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,content TEXT NOT NULL,provider_id TEXT,event_type TEXT,created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id,updated_at DESC); CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id,created_at);`);
@@ -340,6 +371,8 @@ export class Store {
     if (!sessionColumns.has("icon")) this.db.exec("ALTER TABLE sessions ADD COLUMN icon TEXT");
     if (!sessionColumns.has("tags_json"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN tags_json TEXT");
+    if (!sessionColumns.has("kind"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
     const projectColumns = new Set(
       (this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(
         (column) => column.name
@@ -468,6 +501,39 @@ export class Store {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_queued_turns_session ON queued_turns(session_id,created_at,id);
+      CREATE TABLE IF NOT EXISTS terminal_sessions(
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        desired_state TEXT NOT NULL DEFAULT 'running',
+        state TEXT NOT NULL DEFAULT 'provisioning',
+        restart_policy TEXT NOT NULL DEFAULT 'manual',
+        pid INTEGER,
+        last_seq INTEGER NOT NULL DEFAULT 0,
+        last_output_at INTEGER,
+        last_exit_code INTEGER,
+        last_signal INTEGER,
+        restart_count INTEGER NOT NULL DEFAULT 0,
+        restart_window_started_at INTEGER,
+        next_restart_at INTEGER,
+        last_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        stopped_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_id,updated_at DESC);
+      CREATE TABLE IF NOT EXISTS terminal_events(
+        terminal_id TEXT NOT NULL REFERENCES terminal_sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(terminal_id,seq)
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_events_created ON terminal_events(terminal_id,created_at);
     `);
     const runColumns = new Set(
       (this.db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>).map(
@@ -782,7 +848,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -813,7 +879,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -930,7 +996,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -959,6 +1025,7 @@ export class Store {
   createSession(input: {
     projectId: string;
     title?: string;
+    kind?: "chat" | "terminal-chat";
     providerId?: string | null;
     parentSessionId?: string | null;
     continuationMode?: string | null;
@@ -967,13 +1034,14 @@ export class Store {
       id = nanoid();
     this.db
       .prepare(
-        "INSERT INTO sessions(id,project_id,title,status,provider_id,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+        "INSERT INTO sessions(id,project_id,title,status,kind,provider_id,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
       )
       .run(
         id,
         input.projectId,
         input.title ?? DEFAULT_SESSION_TITLE,
         "idle",
+        input.kind ?? "chat",
         input.providerId ?? null,
         input.parentSessionId ?? null,
         input.continuationMode ?? null,
@@ -983,6 +1051,56 @@ export class Store {
         now
       );
     return this.getSession(id)!;
+  }
+  createTerminalSession(input: {
+    projectId: string;
+    sessionId: string;
+    profileId: string;
+    title: string;
+    cwd: string;
+    restartPolicy?: "manual" | "on-unexpected-exit";
+  }): TerminalSessionRow {
+    const now = Date.now();
+    const id = nanoid();
+    this.db
+      .prepare(
+        `INSERT INTO terminal_sessions(id,session_id,project_id,profile_id,title,cwd,desired_state,state,restart_policy,created_at,updated_at)
+         VALUES(@id,@sessionId,@projectId,@profileId,@title,@cwd,'running','provisioning',@restartPolicy,@now,@now)`
+      )
+      .run({ ...input, id, restartPolicy: input.restartPolicy ?? "manual", now });
+    return this.getTerminalSession(id)!;
+  }
+  getTerminalSession(id: string): TerminalSessionRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt
+         FROM terminal_sessions WHERE id=?`
+      )
+      .get(id) as TerminalSessionRow | undefined;
+  }
+  getTerminalSessionBySession(sessionId: string) {
+    return this.db
+      .prepare("SELECT id FROM terminal_sessions WHERE session_id=?")
+      .get(sessionId) as { id: string } | undefined;
+  }
+  listTerminalSessions(projectId?: string) {
+    const query = `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt FROM terminal_sessions ${projectId ? "WHERE project_id=?" : ""} ORDER BY updated_at DESC,id DESC`;
+    return (projectId ? this.db.prepare(query).all(projectId) : this.db.prepare(query).all()) as TerminalSessionRow[];
+  }
+  updateTerminalSession(id: string, input: Partial<Pick<TerminalSessionRow, "title" | "desiredState" | "state" | "restartPolicy" | "pid" | "lastSeq" | "lastOutputAt" | "lastExitCode" | "lastSignal" | "restartCount" | "restartWindowStartedAt" | "nextRestartAt" | "lastError" | "stoppedAt">>) {
+    const fields = Object.keys(input).map((key) => `${key.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}=@${key}`).join(",");
+    if (!fields) return this.getTerminalSession(id);
+    this.db.prepare(`UPDATE terminal_sessions SET ${fields},updated_at=@now WHERE id=@id`).run({ ...input, id, now: Date.now() });
+    return this.getTerminalSession(id);
+  }
+  addTerminalEvent(input: Omit<TerminalEventRow, "createdAt"> & { createdAt?: number }) {
+    this.db.prepare("INSERT OR REPLACE INTO terminal_events(terminal_id,seq,kind,data,created_at) VALUES(?,?,?,?,?)").run(input.terminalId, input.seq, input.kind, input.data, input.createdAt ?? Date.now());
+  }
+  listTerminalEvents(terminalId: string, afterSeq = 0, limit = 5000) {
+    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq>? ORDER BY seq LIMIT ?").all(terminalId, afterSeq, Math.min(Math.max(limit, 1), 20000)) as TerminalEventRow[];
+  }
+  listTerminalEventsBefore(terminalId: string, beforeSeq: number, limit = 5000) {
+    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq<? ORDER BY seq DESC LIMIT ?").all(terminalId, beforeSeq, Math.min(Math.max(limit, 1), 20000)).reverse() as TerminalEventRow[];
   }
   updateSession(
     id: string,

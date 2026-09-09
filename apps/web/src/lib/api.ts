@@ -20,6 +20,8 @@ export const wsUrl = () =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`;
 export const terminalWsUrl = () =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/terminal/ws`;
+export const terminalChatWsUrl = () =>
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/terminal-chat/ws`;
 
 export async function apiUpload<T>(url: string, body: BodyInit): Promise<T> {
   const headers = new Headers();

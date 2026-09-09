@@ -1,0 +1,124 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, SquareTerminal, Square } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { api, terminalChatWsUrl } from "@/lib/api";
+import type { Project, TerminalChatSession } from "@/types";
+
+type SessionList = { items: TerminalChatSession[] };
+type Profile = { id: string; name: string; executable: string; args: string[] };
+
+const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
+
+function TerminalChatViewport({ session, onChange }: { session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
+  const host = useRef<HTMLDivElement>(null);
+  const terminal = useRef<Terminal | null>(null);
+  const socket = useRef<WebSocket | null>(null);
+  const lastSeq = useRef(0);
+  const reconnect = useRef<number | null>(null);
+  const attempts = useRef(0);
+  const rawRef = useRef(false);
+  const ctrlRef = useRef(false);
+  const [connected, setConnected] = useState(false);
+  const [raw, setRaw] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [ctrl, setCtrl] = useState(false);
+
+  const send = useCallback((data: string) => {
+    if (!data) return;
+    const ws = socket.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "terminal.input", terminalId: session.id, data }));
+  }, [session.id]);
+
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const instance = new Terminal({ cursorBlink: true, fontSize: window.innerWidth < 640 ? 12 : 13, lineHeight: 1.2, scrollback: 5000, disableStdin: false, fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace', theme: { background: "#090d14", foreground: "#dce5f2", cursor: "#7dd3fc", selectionBackground: "#1d4ed880" } });
+    const fit = new FitAddon();
+    instance.loadAddon(fit);
+    instance.open(element);
+    terminal.current = instance;
+    const fitTerminal = () => {
+      fit.fit();
+      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "terminal.resize", terminalId: session.id, cols: instance.cols, rows: instance.rows }));
+    };
+    const observer = new ResizeObserver(fitTerminal);
+    observer.observe(element);
+    const dataSubscription = instance.onData((data) => { if (rawRef.current) send(ctrlRef.current && data.length === 1 ? control(data) : data); });
+    let disposed = false;
+    const connect = () => {
+      if (disposed) return;
+      const ws = new WebSocket(terminalChatWsUrl());
+      socket.current = ws;
+      ws.onopen = () => { attempts.current = 0; setConnected(true); ws.send(JSON.stringify({ type: "terminal.subscribe", terminalId: session.id, lastSeq: lastSeq.current })); fitTerminal(); };
+      ws.onmessage = (event) => {
+        const message = JSON.parse(String(event.data));
+        if (message.terminalId && message.terminalId !== session.id) return;
+        if (message.type === "terminal.snapshot") {
+          if (!message.payload?.replay) instance.reset();
+          if (message.payload?.output) instance.write(String(message.payload.output));
+          if (typeof message.seq === "number") lastSeq.current = message.seq;
+          if (message.payload?.terminal) onChange(message.payload.terminal);
+        } else if (message.type === "terminal.output") {
+          if (typeof message.seq === "number" && message.seq <= lastSeq.current) return;
+          instance.write(String(message.payload?.data ?? ""));
+          if (typeof message.seq === "number") lastSeq.current = message.seq;
+        } else if (message.type === "terminal.exit") {
+          onChange({ state: "exited", pid: null, lastExitCode: message.payload?.exitCode ?? null });
+          instance.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
+        } else if (message.type === "terminal.state") onChange(message.payload ?? {});
+      };
+      ws.onclose = () => { if (disposed) return; setConnected(false); attempts.current += 1; reconnect.current = window.setTimeout(connect, Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4))); };
+      ws.onerror = () => setConnected(false);
+    };
+    connect();
+    return () => { disposed = true; if (reconnect.current) window.clearTimeout(reconnect.current); observer.disconnect(); dataSubscription.dispose(); socket.current?.close(); instance.dispose(); terminal.current = null; };
+  }, [onChange, send, session.id]);
+
+  useEffect(() => { rawRef.current = raw; ctrlRef.current = ctrl; }, [ctrl, raw]);
+  const submit = (event: React.FormEvent) => { event.preventDefault(); if (!draft.trim()) return; send(`${draft}\r`); setDraft(""); };
+  const sendControl = (key: string) => send(control(key));
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#090d14] text-slate-100">
+    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-white/10 bg-slate-950 px-3 text-[11px] text-slate-300">
+      <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
+      <span>{connected ? `已连接 · PID ${session.pid ?? "—"}` : "正在恢复连接，终端仍在后台运行"}</span>
+      <span className="ml-auto hidden max-w-[45%] truncate font-mono text-slate-500 sm:block">{session.cwd}</span>
+    </div>
+    <div ref={host} className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3" />
+    <div className="shrink-0 border-t border-white/10 bg-slate-950 px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">
+      <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden">
+        <button type="button" className={`h-9 shrink-0 rounded-lg border px-3 text-xs ${raw ? "border-sky-400 bg-sky-400/15" : "border-white/15 bg-white/5"}`} onClick={() => setRaw((value) => !value)}><Keyboard className="mr-1 inline size-3.5" />{raw ? "直通键盘" : "命令行"}</button>
+        <button type="button" className={`h-9 shrink-0 rounded-lg border px-3 text-xs ${ctrl ? "border-sky-400 bg-sky-400/15" : "border-white/15 bg-white/5"}`} onClick={() => setCtrl((value) => !value)}>Ctrl</button>
+        {(["C", "D", "L", "Z"] as const).map((key) => <button key={key} type="button" className="h-9 shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 text-xs" onClick={() => sendControl(key)}>^{key}</button>)}
+        <button type="button" className="h-9 shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 text-xs" onClick={() => send("\x1b")}>Esc</button>
+      </div>
+      {!raw && <form className="mt-1.5 flex gap-1.5" onSubmit={submit}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="输入命令，Enter 发送" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-10 min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-3 text-base text-slate-100 outline-none focus:border-sky-400" /><Button type="submit" size="sm" className="h-10 shrink-0">发送</Button></form>}
+    </div>
+  </div>;
+}
+
+export function TerminalChatPanel({ project }: { project: Project }) {
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState("");
+  const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
+  const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
+  const create = useMutation({ mutationFn: (profileId: string) => api<{ session: unknown; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }), onSuccess: (result) => { queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? [])] })); void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] }); setSelectedId(result.terminal.id); }, onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败") });
+  const restart = useMutation({ mutationFn: (id: string) => api(`/api/terminal-sessions/${id}/restart`, { method: "POST" }) });
+  const stop = useMutation({ mutationFn: (id: string) => api(`/api/terminal-sessions/${id}/stop`, { method: "POST" }) });
+  const items = sessions.data?.items ?? [];
+  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  useEffect(() => { if (!selectedId && items[0]) setSelectedId(items[0].id); }, [items, selectedId]);
+  const update = useCallback((id: string, next: Partial<TerminalChatSession>) => queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => current ? { items: current.items.map((item) => item.id === id ? { ...item, ...next } : item) } : current), [project.id, queryClient]);
+  return <section className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-3"><SquareTerminal className="size-4 shrink-0 text-primary" /><div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{items.map((item) => <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs ${selected?.id === item.id ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"}`}><span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />{item.title}</button>)}</div>
+      <select aria-label="选择终端 profile" className="hidden h-8 rounded-lg border border-border bg-background px-2 text-xs sm:block" defaultValue="shell" onChange={(event) => create.mutate(event.target.value)} disabled={create.isPending}>{(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>新建 {profile.name}</option>)}</select>
+      <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}</Button>
+      <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-4 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
+    </div>
+    {selected ? <><div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground"><span className="truncate">{selected.title} · {selected.profileId}</span><span className="ml-auto">{selected.state}</span><Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button><Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button></div><TerminalChatViewport key={selected.id} session={selected} onChange={(next) => update(selected.id, next)} /></> : <div className="grid min-h-0 flex-1 place-items-center px-6 text-center"><div><SquareTerminal className="mx-auto size-10 text-muted-foreground" /><p className="mt-3 text-sm font-medium">新建一个终端对话</p><p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p><Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button></div></div>}
+  </section>;
+}

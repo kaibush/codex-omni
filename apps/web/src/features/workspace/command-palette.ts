@@ -3,7 +3,7 @@ export type PaletteGroup = "command" | "session" | "message" | "file" | "git" | 
 export type PaletteAction =
   | { type: "new-session" }
   | { type: "new-project" }
-  | { type: "open-view"; view: "chat" | "files" | "git" | "terminal" }
+  | { type: "open-view"; view: "chat" | "files" | "git" | "terminal" | "terminal-chat" }
   | { type: "open-settings" }
   | { type: "open-providers" }
   | { type: "open-running-center" }

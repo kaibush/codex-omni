@@ -137,6 +137,11 @@ const TerminalPanel = lazy(() =>
     default: module.TerminalPanel
   }))
 );
+const TerminalChatPanel = lazy(() =>
+  import("@/features/workspace/TerminalChatPanel").then((module) => ({
+    default: module.TerminalChatPanel
+  }))
+);
 
 export function Workspace() {
   const qc = useQueryClient();
@@ -1126,6 +1131,9 @@ export function Workspace() {
       : null) ??
     sessions.data?.find((s) => s.id === sessionId && s.projectId === projectId) ??
     null;
+  useEffect(() => {
+    if (activeSession?.kind === "terminal-chat") setWorkspaceView("terminal-chat");
+  }, [activeSession?.id, activeSession?.kind]);
   const sessionLoading = Boolean(sessionId) && detail.isPending;
   const selectedProvider = providers.data?.find((p) => p.id === providerId) ?? null;
   const loadOlderMessages = useCallback(async () => {
@@ -2156,7 +2164,7 @@ export function Workspace() {
               deleteSession={deleteSession}
               setSendNotice={setSendNotice}
             />
-            <WorkspaceTimeline
+            {workspaceView !== "terminal-chat" && <WorkspaceTimeline
               key={`${projectId}:${sessionId}`}
               workspaceView={workspaceView}
               messageHits={messageHits}
@@ -2208,14 +2216,14 @@ export function Workspace() {
               startSessionPending={startSession.isPending}
               recentSessions={projectSessions.filter((session) => !session.archivedAt).slice(0, 12)}
               sessionsPending={sessions.isPending}
-              onOpenSession={(id) => openWorkspace(projectId, id, false, "chat")}
+              onOpenSession={(id) => openWorkspace(projectId, id, false, projectSessions.find((session) => session.id === id)?.kind === "terminal-chat" ? "terminal-chat" : "chat")}
               runState={runState}
               connection={connection}
               sendNotice={sendNotice}
               saveWorkspaceSettings={saveWorkspaceSettings}
               loadFullMessage={loadFullMessage}
-            />
-            <WorkspaceComposer
+            />}
+            {workspaceView !== "terminal-chat" && <WorkspaceComposer
               workspaceView={workspaceView}
               activeSession={activeSession ?? undefined}
               dragActive={dragActive}
@@ -2269,7 +2277,7 @@ export function Workspace() {
               sendNotice={sendNotice}
               activeProject={activeProject}
               enhanceNonce={enhanceNonce}
-            />
+            />}
             {activeProject && (workspaceView === "files" || workspaceView === "git") && (
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ProjectFilesPanel
@@ -2298,6 +2306,15 @@ export function Workspace() {
                   }
                 >
                   <TerminalPanel project={activeProject} />
+                </Suspense>
+              </div>
+            )}
+            {activeProject && workspaceView === "terminal-chat" && (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Suspense
+                  fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
+                >
+                  <TerminalChatPanel project={activeProject} />
                 </Suspense>
               </div>
             )}

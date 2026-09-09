@@ -47,6 +47,7 @@ import {
 import { nextRunAt, startScheduledJobs } from "./scheduled-jobs.js";
 import { RunManager } from "./run-manager.js";
 import { TerminalManager, terminalHostLabel } from "./terminal-manager.js";
+import { TerminalChatManager, terminalProfiles } from "./terminal-chat-manager.js";
 import { compactMessageForClient } from "./session-history.js";
 import { backfillSessionRolloutTools } from "./session-rollout.js";
 import { searchWorkspace } from "./workspace-search.js";
@@ -141,8 +142,10 @@ const providerHome = (provider: ProviderRow) =>
   });
 const runs = new RunManager(store, runtimeRoot);
 const terminals = new TerminalManager();
+const terminalChats = new TerminalChatManager(store);
 const updateCheck = new UpdateCheckService();
 runs.reconcileStartup();
+terminalChats.restore();
 const stopScheduledJobs =
   process.env.CODEX_OMNI_INSTANCE === "dev" ? () => undefined : startScheduledJobs(store, runs);
 const getProjectRoot = async (projectId: string) => {
@@ -975,12 +978,13 @@ app.get("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
 });
 app.post("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
   const body = z
-    .object({ title: z.string().optional(), providerId: z.string().nullable().optional() })
+    .object({ title: z.string().optional(), providerId: z.string().nullable().optional(), kind: z.enum(["chat", "terminal-chat"]).optional() })
     .parse(req.body ?? {});
   return store.createSession({
     projectId: routeId(req),
     ...(body.title !== undefined ? { title: body.title } : {}),
-    ...(body.providerId !== undefined ? { providerId: body.providerId } : {})
+    ...(body.providerId !== undefined ? { providerId: body.providerId } : {}),
+    ...(body.kind !== undefined ? { kind: body.kind } : {})
   });
 });
 app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
@@ -1123,6 +1127,8 @@ app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   const session = store.getSession(id);
   if (!session) return reply.code(404).send({ error: "Session not found" });
   runs.cancel(id);
+  const terminalSession = store.getTerminalSessionBySession(id);
+  if (terminalSession) terminalChats.stop(terminalSession.id);
   store.deleteSession(id);
   return { ok: true };
 });
@@ -1670,6 +1676,47 @@ app.delete("/api/terminals/:id", { preHandler: auth }, async (req, reply) => {
   if (!deleted) return reply.code(404).send({ error: "Terminal not found" });
   return { ok: true };
 });
+app.get("/api/terminal-profiles", { preHandler: auth }, async () => ({ profiles: terminalProfiles() }));
+app.get("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req, reply) => {
+  const projectId = routeId(req);
+  if (!store.getProject(projectId)) return reply.code(404).send({ error: "Project not found" });
+  return { items: terminalChats.list(projectId) };
+});
+app.post("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req, reply) => {
+  const projectId = routeId(req);
+  const { rootPath } = await getProjectRoot(projectId);
+  const body = z.object({
+    title: z.string().trim().max(120).optional(),
+    profileId: z.string().min(1).default("shell"),
+    restartPolicy: z.enum(["manual", "on-unexpected-exit"]).default("manual")
+  }).parse(req.body ?? {});
+  const session = store.createSession({ projectId, title: body.title || `${body.profileId} 终端`, kind: "terminal-chat" });
+  try {
+    const terminal = terminalChats.create({ projectId, sessionId: session.id, title: session.title, cwd: rootPath, profileId: body.profileId, restartPolicy: body.restartPolicy });
+    return { session, terminal };
+  } catch (error) {
+    store.deleteSession(session.id);
+    return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+app.get("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) => {
+  const terminal = terminalChats.get(routeId(req));
+  return terminal ?? reply.code(404).send({ error: "Terminal session not found" });
+});
+app.post("/api/terminal-sessions/:id/restart", { preHandler: auth }, async (req, reply) => {
+  if (!terminalChats.restart(routeId(req))) return reply.code(404).send({ error: "Terminal session not found" });
+  return { ok: true };
+});
+app.post("/api/terminal-sessions/:id/stop", { preHandler: auth }, async (req, reply) => {
+  if (!terminalChats.stop(routeId(req))) return reply.code(404).send({ error: "Terminal session not found" });
+  return { ok: true };
+});
+app.get("/api/terminal-sessions/:id/history", { preHandler: auth }, async (req, reply) => {
+  const id = routeId(req);
+  if (!terminalChats.get(id)) return reply.code(404).send({ error: "Terminal session not found" });
+  const query = z.object({ afterSeq: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(20000).default(5000) }).parse(req.query ?? {});
+  return { items: store.listTerminalEvents(id, query.afterSeq, query.limit) };
+});
 app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown, clientId?: string, sessionId?: string) => {
     if (socket.readyState !== socket.OPEN) return;
@@ -1722,6 +1769,11 @@ const terminalCommandSchema = z.discriminatedUnion("type", [
     rows: z.number().int().min(5).max(200)
   })
 ]);
+const terminalChatCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("terminal.subscribe"), terminalId: z.string().min(1), lastSeq: z.number().int().min(0).optional() }),
+  z.object({ type: z.literal("terminal.input"), terminalId: z.string().min(1), data: z.string().max(256 * 1024) }),
+  z.object({ type: z.literal("terminal.resize"), terminalId: z.string().min(1), cols: z.number().int().min(20).max(400), rows: z.number().int().min(5).max(200) })
+]);
 app.get("/api/terminal/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown) => {
     if (socket.readyState !== socket.OPEN) return;
@@ -1749,11 +1801,27 @@ app.get("/api/terminal/ws", { websocket: true, preValidation: auth }, (socket) =
   });
   socket.on("close", () => terminals.unsubscribeSocket(socket));
 });
+app.get("/api/terminal-chat/ws", { websocket: true, preValidation: auth }, (socket) => {
+  const sendError = (error: unknown) => {
+    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "terminal.error", payload: { message: error instanceof Error ? error.message : String(error) } }));
+  };
+  socket.on("message", (data: unknown) => {
+    try {
+      const command = terminalChatCommandSchema.parse(JSON.parse(String(data)));
+      if (command.type === "terminal.subscribe") terminalChats.subscribe(command.terminalId, socket, command.lastSeq ?? 0);
+      else if (command.type === "terminal.input") {
+        if (!terminalChats.input(command.terminalId, command.data)) throw new Error("Terminal session is not running");
+      } else if (!terminalChats.resize(command.terminalId, command.cols, command.rows)) throw new Error("Terminal session is not running");
+    } catch (error) { sendError(error); }
+  });
+  socket.on("close", () => terminalChats.unsubscribeSocket(socket));
+});
 app.addHook("onClose", async () => {
   stopScheduledJobs();
   await updateCheck.stop();
   runs.shutdown();
   terminals.shutdown();
+  terminalChats.shutdown();
   store.db.close();
 });
 const staticDir = resolveStaticDir();

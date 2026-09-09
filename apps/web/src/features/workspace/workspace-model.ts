@@ -9,7 +9,7 @@ import type { TaskState } from "@/lib/task-state";
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
 export type RunState = TaskState;
 export type QueuedCommand = { id: string; sessionId: string; data: string; message: string };
-export type WorkspaceView = "chat" | "files" | "git" | "terminal";
+export type WorkspaceView = "chat" | "files" | "git" | "terminal" | "terminal-chat";
 export type ReplayCursor = { requestId: string; lastSeq: number };
 
 export const SESSION_PAGE_SIZE = 50;

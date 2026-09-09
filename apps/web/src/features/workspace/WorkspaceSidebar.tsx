@@ -194,7 +194,7 @@ export function WorkspaceSidebar({
     projectId: string,
     sessionId?: string,
     replace?: boolean,
-    view?: "chat" | "files" | "git" | "terminal"
+    view?: "chat" | "files" | "git" | "terminal" | "terminal-chat"
   ) => void;
   renamingProjectId: string;
   setRenamingProjectId: Dispatch<SetStateAction<string>>;
@@ -699,7 +699,7 @@ export function WorkspaceSidebar({
                                     type="button"
                                     title={s.title}
                                     onClick={() => {
-                                      openWorkspace(projectId, s.id, false, "chat");
+                                      openWorkspace(projectId, s.id, false, s.kind === "terminal-chat" ? "terminal-chat" : "chat");
                                       if (isMobile) setSidebar(false);
                                     }}
                                     onDoubleClick={() => beginRenameSession(s)}

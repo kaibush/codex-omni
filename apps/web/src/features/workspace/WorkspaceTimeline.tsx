@@ -132,7 +132,7 @@ export function WorkspaceTimeline({
   saveWorkspaceSettings,
   loadFullMessage
 }: {
-  workspaceView: "chat" | "files" | "git" | "terminal";
+  workspaceView: "chat" | "files" | "git" | "terminal" | "terminal-chat";
   messageHits: Array<{ projectId: string; sessionId: string; messageId: string }>;
   highlightMessageId: string;
   jumpMessageHit: (offset: number) => void;
@@ -161,7 +161,7 @@ export function WorkspaceTimeline({
   workspaceSettings: WorkspaceSettings;
   providerNames: Map<string, string>;
   forkSessionFrom: (messageId?: string, sourceId?: string) => void;
-  setWorkspaceView: (view: "chat" | "files" | "git" | "terminal") => void;
+  setWorkspaceView: (view: "chat" | "files" | "git" | "terminal" | "terminal-chat") => void;
   setOpenFileRequest: (value: { path: string; line: number | null } | null) => void;
   setInput: Dispatch<SetStateAction<string>>;
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
