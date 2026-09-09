@@ -1417,8 +1417,14 @@ export function Workspace() {
         current ? { items: current.items.filter((item) => item.sessionId !== id) } : current
       );
       if (sessionId === id) {
-        const next = remaining[0];
-        openWorkspace(projectId, next?.id ?? "", true, next?.kind === "terminal-chat" ? "terminal-chat" : "chat");
+        const deleted = (sessions.data ?? []).find((session) => session.id === id);
+        if (deleted?.kind === "terminal-chat" || workspaceView === "terminal-chat") {
+          const next = remaining.find((session) => session.kind === "terminal-chat");
+          openWorkspace(projectId, next?.id ?? "", true, "terminal-chat");
+        } else {
+          const next = remaining[0];
+          openWorkspace(projectId, next?.id ?? "", true, next?.kind === "terminal-chat" ? "terminal-chat" : "chat");
+        }
       }
       void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
       void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", projectId] });
