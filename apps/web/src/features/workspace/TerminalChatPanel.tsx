@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   ArrowDown,
+  ChevronUp,
   Clipboard,
   Command,
   Copy,
@@ -107,8 +108,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const onChangeRef = useRef(onChange);
   const outputRef = useRef("");
   const firstSeqRef = useRef(1);
-  const loadingEarlierRef = useRef(false);
-  const revealEarlierRef = useRef<() => void>(() => {});
   const pageVisibleRef = useRef(document.visibilityState === "visible");
   const lastPointerType = useRef<string | undefined>(undefined);
   const chromePointerStartX = useRef(0);
@@ -132,9 +131,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [atBottom, setAtBottom] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [firstSeq, setFirstSeq] = useState(1);
-  const [earlierVisible, setEarlierVisible] = useState(false);
-  const earlierPinned = useRef(false);
-  const earlierHideTimer = useRef<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<TerminalHistoryItem[]>([]);
@@ -323,7 +319,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     const scrollSubscription = instance.onScroll(() => {
       const buffer = instance.buffer.active;
       setAtBottom(buffer.viewportY >= buffer.baseY);
-      if (buffer.viewportY <= 0 && firstSeqRef.current > 1) revealEarlierRef.current();
     });
     let disposed = false;
     const applyChange = (next: Partial<TerminalChatSession>) => onChangeRef.current(next);
@@ -351,14 +346,10 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           if (typeof message.payload?.firstSeq === "number") {
             firstSeqRef.current = message.payload.firstSeq;
             setFirstSeq(message.payload.firstSeq);
-            if (message.payload.firstSeq > 1) revealEarlierRef.current();
           }
           if (typeof message.seq === "number") lastSeq.current = message.seq;
           if (message.payload?.terminal) applyChange(message.payload.terminal);
-          if (message.payload?.truncated) {
-            instance.write("\r\n\x1b[90m[仅显示最近输出，可加载更早历史]\x1b[0m\r\n");
-            revealEarlierRef.current();
-          }
+          if (message.payload?.truncated) instance.write("\r\n\x1b[90m[仅显示最近输出，可加载更早历史]\x1b[0m\r\n");
         } else if (message.type === "terminal.output") {
           if (typeof message.seq === "number" && message.seq <= lastSeq.current) return;
           instance.write(String(message.payload?.data ?? ""));
@@ -592,40 +583,9 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       toast.error(error instanceof Error ? error.message : "搜索终端输出失败");
     }
   };
-  const hideEarlierSoon = () => {
-    if (earlierHideTimer.current) window.clearTimeout(earlierHideTimer.current);
-    earlierHideTimer.current = window.setTimeout(() => {
-      if (!earlierPinned.current && !loadingEarlierRef.current) setEarlierVisible(false);
-    }, 2800);
-  };
-  const revealEarlier = () => {
-    if (firstSeqRef.current <= 1 && !loadingEarlierRef.current) {
-      setEarlierVisible(false);
-      return;
-    }
-    setEarlierVisible(true);
-    hideEarlierSoon();
-  };
-  revealEarlierRef.current = revealEarlier;
-  loadingEarlierRef.current = loadingEarlier;
-  useEffect(() => {
-    return () => {
-      if (earlierHideTimer.current) window.clearTimeout(earlierHideTimer.current);
-    };
-  }, []);
-  useEffect(() => {
-    if (firstSeq <= 1 && !loadingEarlier) {
-      setEarlierVisible(false);
-      return;
-    }
-    if (loadingEarlier) setEarlierVisible(true);
-    else hideEarlierSoon();
-  }, [firstSeq, loadingEarlier]);
-
   const loadEarlier = async () => {
     if (loadingEarlier || firstSeqRef.current <= 1) return;
     setLoadingEarlier(true);
-    setEarlierVisible(true);
     try {
       const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/history?beforeSeq=${firstSeqRef.current}&limit=2000`);
       const older = result.items.filter((item) => item.kind === "output").map((item) => item.data).join("");
@@ -755,6 +715,17 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           </span>
         ) : null}
         <span className="ml-auto hidden max-w-[30%] truncate font-mono dark:text-slate-500 sm:block" title={session.cwd}>{session.cwd}</span>
+        <button
+          type="button"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10"
+          aria-label="加载更早输出"
+          title={firstSeq > 1 ? "加载更早输出" : "已是最早输出"}
+          disabled={loadingEarlier || firstSeq <= 1}
+          {...chromeActivateProps(() => { void loadEarlier(); })}
+        >
+          {loadingEarlier ? <LoaderCircle className="size-3.5 animate-spin" /> : <ChevronUp className="size-3.5" />}
+          <span>{loadingEarlier ? "加载中" : "更早"}</span>
+        </button>
         <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
           <Search className="size-3.5" />
         </button>
@@ -786,24 +757,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
             <ArrowDown className="size-4" />
           </button>
         )}
-        {firstSeq > 1 ? (
-          <div
-            className="absolute left-0 top-0 z-10 h-11 w-44"
-            onPointerEnter={() => { earlierPinned.current = true; revealEarlier(); }}
-            onPointerLeave={() => { earlierPinned.current = false; hideEarlierSoon(); }}
-          >
-            <button
-              type="button"
-              className={`absolute left-3 top-3 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-foreground shadow-sm transition duration-200 dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-200 ${earlierVisible || loadingEarlier ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0"}`}
-              onClick={() => void loadEarlier()}
-              disabled={loadingEarlier}
-              aria-hidden={!(earlierVisible || loadingEarlier)}
-              tabIndex={earlierVisible || loadingEarlier ? 0 : -1}
-            >
-              {loadingEarlier ? "加载中" : "加载更早输出"}
-            </button>
-          </div>
-        ) : null}
         </div>
       </div>
       <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8">
