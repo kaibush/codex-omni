@@ -228,6 +228,10 @@ export function WorkspaceHeader({
               <MessageSquareText />
               <span className="hidden sm:inline">对话</span>
             </TabsTrigger>
+            <TabsTrigger value="terminal-chat" className="px-2.5 text-xs sm:px-3">
+              <TerminalSquare />
+              <span className="hidden sm:inline">终端对话</span>
+            </TabsTrigger>
             <TabsTrigger value="files" className="px-2.5 text-xs sm:px-3">
               <Files />
               <span className="hidden sm:inline">{dirtyCount ? `文件 ${dirtyCount}` : "文件"}</span>
@@ -239,10 +243,6 @@ export function WorkspaceHeader({
             <TabsTrigger value="terminal" className="px-2.5 text-xs sm:px-3">
               <TerminalSquare />
               <span className="hidden sm:inline">终端</span>
-            </TabsTrigger>
-            <TabsTrigger value="terminal-chat" className="px-2.5 text-xs sm:px-3">
-              <TerminalSquare />
-              <span className="hidden sm:inline">终端对话</span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -340,7 +340,14 @@ export function WorkspaceHeader({
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() => {
-                  if (!window.confirm(`删除对话「${activeSession.title}」？`)) return;
+                  if (
+                    !window.confirm(
+                      activeSession.kind === "terminal-chat"
+                        ? `删除终端对话「${activeSession.title}」？进程会被停止。`
+                        : `删除对话「${activeSession.title}」？`
+                    )
+                  )
+                    return;
                   deleteSession.mutate(activeSession.id);
                 }}
               >

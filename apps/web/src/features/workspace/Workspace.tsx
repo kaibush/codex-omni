@@ -1299,6 +1299,11 @@ export function Workspace() {
       openWorkspace(projectId, chatSession?.id ?? "", false, "chat");
       return;
     }
+    if (view === "terminal-chat" && activeSession?.kind !== "terminal-chat") {
+      const terminalSession = projectSessions.find((session) => session.kind === "terminal-chat");
+      openWorkspace(projectId, terminalSession?.id ?? "", false, "terminal-chat");
+      return;
+    }
     setWorkspaceView(view);
   };
   const runPaletteAction = (action: PaletteAction) => {

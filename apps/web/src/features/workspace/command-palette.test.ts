@@ -20,7 +20,7 @@ describe("command palette matching", () => {
       filterPaletteItems(PALETTE_COMMANDS, "审批").some((item) => item.id === "cmd:open-approvals")
     ).toBe(true);
     expect(
-      filterPaletteItems(PALETTE_COMMANDS, "转到行").some((item) => item.id === "cmd:goto-line")
+      filterPaletteItems(PALETTE_COMMANDS, "终端对话").some((item) => item.id === "cmd:open-terminal-chat")
     ).toBe(true);
     expect(
       filterPaletteItems(PALETTE_COMMANDS, "强化").some((item) => item.id === "cmd:enhance-prompt")

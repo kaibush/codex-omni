@@ -99,3 +99,19 @@ export function encodeTerminalKeyboardSubmit(value: string): string {
   if (!normalized) return "\r";
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
 }
+
+export function xtermTheme(theme: "light" | "dark") {
+  return theme === "dark"
+    ? {
+        background: "#090d14",
+        foreground: "#dce5f2",
+        cursor: "#7dd3fc",
+        selectionBackground: "#1d4ed880"
+      }
+    : {
+        background: "#fbfdff",
+        foreground: "#172033",
+        cursor: "#0369a1",
+        selectionBackground: "#93c5fd80"
+      };
+}

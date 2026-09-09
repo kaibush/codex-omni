@@ -12,7 +12,8 @@ import {
   sliceVisibleLines,
   terminalCopyPayload,
   terminalKeyboardFieldProps,
-  visibleBufferText
+  visibleBufferText,
+  xtermTheme
 } from "./terminal-chrome";
 
 describe("visible buffer extraction", () => {
@@ -128,5 +129,14 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalKeyboardSubmit("ls")).toBe("ls\r");
     expect(encodeTerminalKeyboardSubmit("echo hi\n")).toBe("echo hi\r");
     expect(encodeTerminalKeyboardSubmit("one\ntwo")).toBe("one\rtwo\r");
+  });
+});
+
+describe("xterm theme", () => {
+  it("uses a light canvas in light mode and a dark canvas in dark mode", () => {
+    expect(xtermTheme("light").background).toBe("#fbfdff");
+    expect(xtermTheme("light").foreground).toBe("#172033");
+    expect(xtermTheme("dark").background).toBe("#090d14");
+    expect(xtermTheme("dark").foreground).toBe("#dce5f2");
   });
 });

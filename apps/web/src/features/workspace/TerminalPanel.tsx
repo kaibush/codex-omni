@@ -41,7 +41,8 @@ import {
   shouldPreventChromePointerDefault,
   shouldSubmitTerminalKeyboard,
   terminalCopyPayload,
-  terminalKeyboardFieldProps
+  terminalKeyboardFieldProps,
+  xtermTheme
 } from "./terminal-chrome";
 
 type TerminalList = { host: string; items: ProjectTerminal[] };
@@ -170,20 +171,7 @@ function TerminalViewport({
       lineHeight: 1.2,
       scrollback: 2_000,
       allowTransparency: false,
-      theme:
-        resolvedTheme === "dark"
-          ? {
-              background: "#090d14",
-              foreground: "#dce5f2",
-              cursor: "#7dd3fc",
-              selectionBackground: "#1d4ed880"
-            }
-          : {
-              background: "#fbfdff",
-              foreground: "#172033",
-              cursor: "#0369a1",
-              selectionBackground: "#93c5fd80"
-            }
+      theme: xtermTheme(resolvedTheme)
     });
     const fit = new FitAddon();
     instance.loadAddon(fit);

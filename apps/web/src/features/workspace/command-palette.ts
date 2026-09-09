@@ -69,6 +69,14 @@ export const PALETTE_COMMANDS: PaletteItem[] = [
     action: { type: "open-view", view: "chat" }
   },
   {
+    id: "cmd:open-terminal-chat",
+    group: "command",
+    title: "打开终端对话",
+    subtitle: "切换到 CLI 终端对话",
+    keywords: ["terminal-chat", "cli", "终端对话", "dkzddh", "zddh"],
+    action: { type: "open-view", view: "terminal-chat" }
+  },
+  {
     id: "cmd:open-files",
     group: "command",
     title: "打开文件",

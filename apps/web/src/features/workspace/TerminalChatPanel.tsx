@@ -3,21 +3,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { ArrowDown, Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, SquareTerminal, Square } from "lucide-react";
+import { ArrowDown, Delete, Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, Square, SquareTerminal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/context/theme-provider";
 import { api, terminalChatWsUrl } from "@/lib/api";
 import type { Project, Session, TerminalChatSession } from "@/types";
+import { xtermTheme } from "./terminal-chrome";
 
 type SessionList = { items: TerminalChatSession[] };
 type Profile = { id: string; name: string; executable: string; args: string[] };
 type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?: number };
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
+const chromeKeyClass =
+  "h-9 shrink-0 rounded-lg border border-border bg-background px-3 text-xs text-foreground dark:border-white/15 dark:bg-white/5 dark:text-slate-200";
+const chromeKeyActiveClass =
+  "h-9 shrink-0 rounded-lg border border-sky-500 bg-sky-500/15 px-3 text-xs text-sky-800 dark:border-sky-400 dark:bg-sky-400/15 dark:text-sky-100";
 
 function TerminalChatViewport({ session, onChange }: { session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
+  const { resolvedTheme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
   const socket = useRef<WebSocket | null>(null);
   const lastSeq = useRef(0);
   const reconnect = useRef<number | null>(null);
@@ -50,7 +59,15 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const instance = new Terminal({ cursorBlink: true, fontSize: window.innerWidth < 640 ? 12 : 13, lineHeight: 1.2, scrollback: 5000, disableStdin: false, fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace', theme: { background: "#090d14", foreground: "#dce5f2", cursor: "#7dd3fc", selectionBackground: "#1d4ed880" } });
+    const instance = new Terminal({
+      cursorBlink: true,
+      fontSize: window.innerWidth < 640 ? 12 : 13,
+      lineHeight: 1.2,
+      scrollback: 5000,
+      disableStdin: false,
+      fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+      theme: xtermTheme(resolvedThemeRef.current)
+    });
     const fit = new FitAddon();
     instance.loadAddon(fit);
     instance.open(element);
@@ -123,6 +140,9 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     return () => { disposed = true; document.removeEventListener("visibilitychange", onVisibilityChange); if (reconnect.current) window.clearTimeout(reconnect.current); observer.disconnect(); dataSubscription.dispose(); scrollSubscription.dispose(); socket.current?.close(); instance.dispose(); terminal.current = null; };
   }, [send, session.id]);
 
+  useEffect(() => {
+    if (terminal.current) terminal.current.options.theme = xtermTheme(resolvedTheme);
+  }, [resolvedTheme]);
   useEffect(() => { rawRef.current = raw; ctrlRef.current = ctrl; }, [ctrl, raw]);
   const submit = (event: React.FormEvent) => { event.preventDefault(); if (!draft.trim()) return; send(`${draft}\r`); setDraft(""); };
   const sendControl = (key: string) => send(control(key));
@@ -150,25 +170,59 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     } catch (error) { toast.error(error instanceof Error ? error.message : "加载更早输出失败"); }
     finally { setLoadingEarlier(false); }
   };
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#090d14] text-slate-100">
-    <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-white/10 bg-slate-950 px-3 text-[11px] text-slate-300">
-      <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
-      <span>{connected ? `已连接 · PID ${session.pid ?? "—"}` : "正在恢复连接，终端仍在后台运行"}</span>
-      <span className="ml-auto hidden max-w-[45%] truncate font-mono text-slate-500 sm:block">{session.cwd}</span>
-      <button type="button" className="grid size-7 place-items-center rounded-lg text-slate-300 hover:bg-white/10" aria-label="搜索终端历史" onClick={() => setSearchOpen((value) => !value)}><Search className="size-3.5" /></button>
-      {searchOpen && <form className="absolute right-2 top-10 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-white/15 bg-slate-900 p-2 shadow-xl" onSubmit={runSearch}><div className="flex gap-1.5"><input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索终端历史" className="h-8 min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-2 text-xs text-slate-100 outline-none" /><Button type="submit" size="sm" className="h-8">搜索</Button></div><div className="mt-2 max-h-52 overflow-y-auto text-[11px] text-slate-300">{searchHits.length ? searchHits.map((hit) => <div key={`${hit.seq}-${hit.createdAt}`} className="border-t border-white/10 py-1.5"><span className="mr-1 text-slate-500">#{hit.seq}</span><span className="break-words">{hit.data.slice(0, 240)}</span></div>) : <span className="text-slate-500">输入关键词搜索</span>}</div></form>}
-    </div>
-    <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3"><div ref={host} className="h-full" />{!atBottom && <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-white/15 bg-slate-900/90 text-slate-100 shadow-lg" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}><ArrowDown className="size-4" /></button>}{firstSeq > 1 && <button type="button" className="absolute left-3 top-3 rounded-lg border border-white/15 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-200" onClick={() => void loadEarlier()} disabled={loadingEarlier}>{loadingEarlier ? "加载中" : "加载更早输出"}</button>}</div>
-    <div className="shrink-0 border-t border-white/10 bg-slate-950 px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">
-      <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden">
-        <button type="button" className={`h-9 shrink-0 rounded-lg border px-3 text-xs ${raw ? "border-sky-400 bg-sky-400/15" : "border-white/15 bg-white/5"}`} onClick={() => setRaw((value) => !value)}><Keyboard className="mr-1 inline size-3.5" />{raw ? "直通键盘" : "命令行"}</button>
-        <button type="button" className={`h-9 shrink-0 rounded-lg border px-3 text-xs ${ctrl ? "border-sky-400 bg-sky-400/15" : "border-white/15 bg-white/5"}`} onClick={() => setCtrl((value) => !value)}>Ctrl</button>
-        {(["C", "D", "L", "Z"] as const).map((key) => <button key={key} type="button" className="h-9 shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 text-xs" onClick={() => sendControl(key)}>^{key}</button>)}
-        <button type="button" className="h-9 shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 text-xs" onClick={() => send("\x1b")}>Esc</button>
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
+      <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-muted px-3 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
+        <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
+        <span>{connected ? `已连接 · PID ${session.pid ?? "—"}` : "正在恢复连接，终端仍在后台运行"}</span>
+        <span className="ml-auto hidden max-w-[45%] truncate font-mono text-muted-foreground sm:block dark:text-slate-500">{session.cwd}</span>
+        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" onClick={() => setSearchOpen((value) => !value)}><Search className="size-3.5" /></button>
+        {searchOpen && (
+          <form className="absolute right-2 top-10 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
+            <div className="flex gap-1.5">
+              <input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索终端历史" className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100" />
+              <Button type="submit" size="sm" className="h-8">搜索</Button>
+            </div>
+            <div className="mt-2 max-h-52 overflow-y-auto text-[11px] text-muted-foreground dark:text-slate-300">
+              {searchHits.length ? searchHits.map((hit) => (
+                <div key={`${hit.seq}-${hit.createdAt}`} className="border-t border-border py-1.5 dark:border-white/10">
+                  <span className="mr-1 text-muted-foreground">#{hit.seq}</span>
+                  <span className="break-words">{hit.data.slice(0, 240)}</span>
+                </div>
+              )) : <span className="text-muted-foreground">输入关键词搜索</span>}
+            </div>
+          </form>
+        )}
       </div>
-      {!raw && <form className="mt-1.5 flex gap-1.5" onSubmit={submit}><input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="输入命令，Enter 发送" inputMode="text" enterKeyHint="send" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-10 min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-3 text-base text-slate-100 outline-none focus:border-sky-400" /><Button type="submit" size="sm" className="h-10 shrink-0">发送</Button></form>}
+      <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
+        <div ref={host} className="h-full" />
+        {!atBottom && (
+          <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
+            <ArrowDown className="size-4" />
+          </button>
+        )}
+        {firstSeq > 1 && (
+          <button type="button" className="absolute left-3 top-3 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-foreground dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-200" onClick={() => void loadEarlier()} disabled={loadingEarlier}>
+            {loadingEarlier ? "加载中" : "加载更早输出"}
+          </button>
+        )}
+      </div>
+      <div className="shrink-0 border-t border-border bg-muted px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950">
+        <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden">
+          <button type="button" className={raw ? chromeKeyActiveClass : chromeKeyClass} onClick={() => setRaw((value) => !value)}><Keyboard className="mr-1 inline size-3.5" />{raw ? "直通键盘" : "命令行"}</button>
+          <button type="button" className={ctrl ? chromeKeyActiveClass : chromeKeyClass} onClick={() => setCtrl((value) => !value)}>Ctrl</button>
+          {(["C", "D", "L", "Z"] as const).map((key) => <button key={key} type="button" className={chromeKeyClass} onClick={() => sendControl(key)}>^{key}</button>)}
+          <button type="button" className={chromeKeyClass} onClick={() => send("\x1b")}>Esc</button>
+        </div>
+        {!raw && (
+          <form className="mt-1.5 flex gap-1.5" onSubmit={submit}>
+            <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="输入命令，Enter 发送" inputMode="text" enterKeyHint="send" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 dark:border-white/15 dark:bg-white/5 dark:text-slate-100" />
+            <Button type="submit" size="sm" className="h-10 shrink-0">发送</Button>
+          </form>
+        )}
+      </div>
     </div>
-  </div>;
+  );
 }
 
 export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { project: Project; sessionId?: string; onOpenSession?: (sessionId: string) => void }) {
@@ -182,6 +236,27 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
   const items = sessions.data?.items ?? [];
   const selected = items.find((item) => item.id === selectedId) ?? items.find((item) => item.sessionId === sessionId) ?? items[0] ?? null;
   const update = useCallback((id: string, next: Partial<TerminalChatSession>) => queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => current ? { items: current.items.map((item) => item.id === id ? { ...item, ...next } : item) } : current), [project.id, queryClient]);
+  const remove = useMutation({
+    mutationFn: (item: TerminalChatSession) => api<{ ok: boolean }>(`/api/sessions/${item.sessionId}`, { method: "DELETE" }),
+    onSuccess: (_result, item) => {
+      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) =>
+        current ? { items: current.items.filter((session) => session.id !== item.id) } : current
+      );
+      queryClient.setQueriesData<Session[]>({ queryKey: ["sessions", project.id] }, (current) =>
+        (current ?? []).filter((session) => session.id !== item.sessionId)
+      );
+      void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] });
+      void queryClient.invalidateQueries({ queryKey: ["terminal-chat-sessions", project.id] });
+      void queryClient.removeQueries({ queryKey: ["session", item.sessionId] });
+      const remaining = queryClient.getQueryData<SessionList>(["terminal-chat-sessions", project.id])?.items ?? [];
+      if (selectedId === item.id) {
+        const next = remaining[0];
+        setSelectedId(next?.id ?? "");
+        onOpenSession?.(next?.sessionId ?? "");
+      }
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "删除终端对话失败")
+  });
   const selectedChange = useCallback((next: Partial<TerminalChatSession>) => {
     if (selected) update(selected.id, next);
   }, [selected, update]);
@@ -193,12 +268,73 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
     }
     if (selectedId) setSelectedId("");
   }, [items, selectedId, sessionId]);
-  return <section className="flex h-full min-h-0 flex-col bg-background">
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-3"><SquareTerminal className="size-4 shrink-0 text-primary" /><div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{items.map((item) => <button key={item.id} type="button" onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs ${selected?.id === item.id ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"}`}><span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />{item.title}</button>)}</div>
-      <select aria-label="选择终端 profile" className="h-8 max-w-36 rounded-lg border border-border bg-background px-2 text-xs" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}><option value="" disabled>新建终端</option>{(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
-      <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}</Button>
-      <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-4 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
-    </div>
-    {selected ? <><div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground"><span className="truncate">{selected.title} · {selected.profileId}</span><span className="ml-auto">{selected.state}</span><Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button><Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button></div><TerminalChatViewport key={selected.id} session={selected} onChange={selectedChange} /></> : <div className="grid min-h-0 flex-1 place-items-center px-6 text-center"><div><SquareTerminal className="mx-auto size-10 text-muted-foreground" /><p className="mt-3 text-sm font-medium">新建一个终端对话</p><p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p><Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button></div></div>}
-  </section>;
+  const closeTab = (item: TerminalChatSession) => {
+    const running = item.state === "running" || item.desiredState === "running";
+    if (!window.confirm(running ? `删除终端对话「${item.title}」？进程会被停止。` : `删除终端对话「${item.title}」？`)) return;
+    remove.mutate(item);
+  };
+  return (
+    <section className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-3">
+        <SquareTerminal className="size-4 shrink-0 text-primary" />
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className={`flex h-8 shrink-0 items-center rounded-lg border text-xs ${
+                selected?.id === item.id
+                  ? "border-primary/30 bg-primary/10 text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              <button
+                type="button"
+                className="flex h-full items-center gap-1.5 px-2"
+                onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
+              >
+                <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
+                <span className="max-w-28 truncate">{item.title}</span>
+              </button>
+              <button
+                type="button"
+                className="grid size-7 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                aria-label={`关闭 ${item.title}`}
+                disabled={remove.isPending}
+                onClick={() => closeTab(item)}
+              >
+                <Delete className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <select aria-label="选择终端 profile" className="h-8 max-w-36 rounded-lg border border-border bg-background px-2 text-xs" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
+          <option value="" disabled>新建终端</option>
+          {(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+        </select>
+        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}</Button>
+        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-4 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
+      </div>
+      {selected ? (
+        <>
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
+            <span className="truncate">{selected.title} · {selected.profileId}</span>
+            <span className="ml-auto">{selected.state}</span>
+            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button>
+            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
+            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="删除终端对话" onClick={() => closeTab(selected)} disabled={remove.isPending}><Delete className="size-3.5" /></Button>
+          </div>
+          <TerminalChatViewport key={selected.id} session={selected} onChange={selectedChange} />
+        </>
+      ) : (
+        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
+          <div>
+            <SquareTerminal className="mx-auto size-10 text-muted-foreground" />
+            <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
+            <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
+            <Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
