@@ -11,12 +11,14 @@ import {
   Delete,
   Download,
   Eraser,
+  History as HistoryIcon,
   Keyboard,
   LoaderCircle,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
   Square,
   SquareTerminal
 } from "lucide-react";
@@ -119,6 +121,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [pasteDraft, setPasteDraft] = useState("");
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardDraft, setKeyboardDraft] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [shortcutDockOpen, setShortcutDockOpen] = useState(false);
 
   const sendRaw = useCallback((data: string) => {
     if (!data) return;
@@ -177,6 +184,63 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     const timer = window.setTimeout(() => keyboardRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [keyboardOpen]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(`terminal-command-history:${session.id}`);
+      const parsed: unknown = stored ? JSON.parse(stored) : null;
+      if (Array.isArray(parsed)) setCommandHistory(parsed.filter((item): item is string => typeof item === "string").slice(0, 200));
+    } catch {
+      setCommandHistory([]);
+    }
+  }, [session.id]);
+
+  const rememberCommand = (value: string) => {
+    const command = value.trim();
+    if (!command) return;
+    setCommandHistory((current) => {
+      const next = [command, ...current.filter((item) => item !== command)].slice(0, 200);
+      try {
+        window.localStorage.setItem(`terminal-command-history:${session.id}`, JSON.stringify(next));
+      } catch {
+        // Storage can be unavailable in private browsing.
+      }
+      return next;
+    });
+  };
+
+  const loadCommandHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/history?limit=5000`);
+      const serverCommands = result.items
+        .filter((item) => item.kind === "input")
+        .map((item) => item.data.replace(/[\r\n]+$/g, "").trim())
+        .filter(Boolean);
+      setCommandHistory((current) => {
+        const next = [...serverCommands.reverse(), ...current]
+          .filter((item, index, list) => item && list.indexOf(item) === index)
+          .slice(0, 200);
+        try {
+          window.localStorage.setItem(`terminal-command-history:${session.id}`, JSON.stringify(next));
+        } catch {
+          // Storage can be unavailable in private browsing.
+        }
+        return next;
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "读取终端命令历史失败");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const toggleHistory = () => {
+    setHistoryOpen((open) => {
+      if (!open) void loadCommandHistory();
+      return !open;
+    });
+  };
 
   useEffect(() => {
     const element = host.current;
@@ -439,6 +503,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   };
   const submitLine = () => {
     if (lineComposing.current || !draft.trim()) return;
+    rememberCommand(draft);
     sendRaw(`${draft}\r`);
     setDraft("");
   };
@@ -501,8 +566,25 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     }
   };
 
+  const shortcutControls = (
+    <>
+      <button type="button" className={modifierClass(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
+      <button type="button" className={modifierClass(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}><Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}</button>
+      <button type="button" className={modifierClass(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
+      {shortcut("Esc", "\x1b")}
+      {shortcut("Tab", "\t")}
+      {shortcut("←", "\x1b[D", "方向左", true)}
+      {shortcut("↑", "\x1b[A", "方向上", true)}
+      {shortcut("↓", "\x1b[B", "方向下", true)}
+      {shortcut("→", "\x1b[C", "方向右", true)}
+      {shortcut("Home", "\x1b[H")}
+      {shortcut("End", "\x1b[F")}
+      {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`))}
+    </>
+  );
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
       <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-muted px-3 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
         <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
         <span className="min-w-0 truncate">{statusLabel(session, connected)}</span>
@@ -576,7 +658,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           </button>
         )}
       </div>
-      <div className="shrink-0 border-t border-border bg-muted px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950">
+      <div className="shrink-0 border-t border-border bg-background px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))] dark:border-white/10 dark:bg-slate-950 sm:px-3">
+        <div className="composer-shell mx-auto max-w-5xl overflow-visible rounded-2xl p-2.5 shadow-sm sm:p-3">
         <div className="flex items-center gap-1.5">
           <button type="button" className={modifierClass(raw)} aria-pressed={raw} {...chromeActivateProps(() => setRaw((value) => !value))}>
             <Keyboard className="size-3.5" /> {raw ? "直通" : "命令行"}
@@ -586,25 +669,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               {keyboardOpen ? "收起" : "输入"}
             </button>
           ) : null}
-          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain touch-pan-x pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
-            <button type="button" className={modifierClass(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>
-              Ctrl{sticky.ctrl ? " *" : ""}
-            </button>
-            <button type="button" className={modifierClass(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}>
-              <Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}
-            </button>
-            <button type="button" className={modifierClass(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>
-              Shift{sticky.shift ? " *" : ""}
-            </button>
-            {shortcut("Esc", "\x1b")}
-            {shortcut("Tab", "\t")}
-            {shortcut("←", "\x1b[D", "方向左", true)}
-            {shortcut("↑", "\x1b[A", "方向上", true)}
-            {shortcut("↓", "\x1b[B", "方向下", true)}
-            {shortcut("→", "\x1b[C", "方向右", true)}
-            {shortcut("Home", "\x1b[H")}
-            {shortcut("End", "\x1b[F")}
-            {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`))}
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain touch-pan-x pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden md:hidden">
+            {shortcutControls}
             <button type="button" className={chromeIconClass} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
               <Copy className="size-4" />
             </button>
@@ -616,69 +682,93 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
             </button>
           </div>
         </div>
-        {raw && keyboardOpen ? (
-          <form
-            className="mt-1.5 flex items-center gap-1.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitKeyboard();
-            }}
-          >
+        <div className="relative mt-1.5 flex gap-1.5">
+          {!raw && (
+            <div className="relative min-w-0 flex-1">
+              <input
+                {...terminalKeyboardFieldProps}
+                value={draft}
+                placeholder="输入命令，Enter 发送"
+                aria-label="终端命令"
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 pr-10 text-base text-foreground outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/15 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+                onChange={(event) => setDraft(event.target.value)}
+                onCompositionStart={() => { lineComposing.current = true; }}
+                onCompositionEnd={() => { lineComposing.current = false; }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+                    event.preventDefault();
+                    const current = commandHistory.findIndex((item) => item === draft);
+                    const next = commandHistory[current < 0 ? 0 : Math.min(current + 1, commandHistory.length - 1)];
+                    if (next) setDraft(next);
+                    return;
+                  }
+                  if (event.key === "ArrowDown" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+                    event.preventDefault();
+                    const current = commandHistory.findIndex((item) => item === draft);
+                    const previous = current > 0 ? commandHistory[current - 1] : undefined;
+                    if (previous !== undefined) setDraft(previous);
+                    else if (current === 0) setDraft("");
+                    return;
+                  }
+                  if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || lineComposing.current, keyCode: event.nativeEvent.keyCode })) return;
+                  event.preventDefault();
+                  submitLine();
+                }}
+              />
+              <button type="button" className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="打开命令历史" title="命令历史" onClick={toggleHistory}>
+                <HistoryIcon className="size-4" />
+              </button>
+              {historyOpen && (
+                <div className="absolute bottom-full left-0 z-30 mb-2 w-full rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900">
+                  <div className="flex items-center gap-1.5">
+                    <Search className="ml-1 size-3.5 text-muted-foreground" />
+                    <input autoFocus value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索命令历史" className="h-8 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none" />
+                    {historyLoading ? <LoaderCircle className="mr-1 size-3.5 animate-spin text-muted-foreground" /> : null}
+                  </div>
+                  <div className="mt-1 max-h-48 overflow-y-auto overscroll-contain">
+                    {(commandHistory.filter((item) => !historyQuery.trim() || item.toLowerCase().includes(historyQuery.trim().toLowerCase())).slice(0, 50)).map((item, index) => (
+                      <button key={`${item}-${index}`} type="button" className="flex w-full items-start rounded-lg px-2 py-2 text-left font-mono text-xs hover:bg-muted" onClick={() => { setDraft(item); setHistoryOpen(false); setHistoryQuery(""); }}>
+                        <span className="mr-2 shrink-0 text-muted-foreground">{index + 1}</span>
+                        <span className="min-w-0 break-words">{item}</span>
+                      </button>
+                    ))}
+                    {!commandHistory.length ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无命令历史</p> : null}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {raw && keyboardOpen ? (
             <input
               {...terminalKeyboardFieldProps}
               ref={keyboardRef}
               value={keyboardDraft}
               placeholder="中英文输入"
               aria-label="终端输入键盘"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/15 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
               onChange={(event) => setKeyboardDraft(event.target.value)}
               onCompositionStart={() => { keyboardComposing.current = true; }}
               onCompositionEnd={() => { keyboardComposing.current = false; }}
               onKeyDown={(event) => {
-                if (!shouldSubmitTerminalKeyboard({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  isComposing: event.nativeEvent.isComposing || keyboardComposing.current,
-                  keyCode: event.nativeEvent.keyCode
-                })) return;
+                if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || keyboardComposing.current, keyCode: event.nativeEvent.keyCode })) return;
                 event.preventDefault();
                 submitKeyboard();
               }}
             />
-            <button type="submit" className={chromeKeyClass} aria-label="发送到终端">发送</button>
-          </form>
-        ) : null}
-        {!raw && (
-          <form
-            className="mt-1.5 flex gap-1.5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitLine();
-            }}
-          >
-            <input
-              {...terminalKeyboardFieldProps}
-              value={draft}
-              placeholder="输入命令，Enter 发送"
-              aria-label="终端命令"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-base text-foreground outline-none focus:border-sky-400 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-              onChange={(event) => setDraft(event.target.value)}
-              onCompositionStart={() => { lineComposing.current = true; }}
-              onCompositionEnd={() => { lineComposing.current = false; }}
-              onKeyDown={(event) => {
-                if (!shouldSubmitTerminalKeyboard({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  isComposing: event.nativeEvent.isComposing || lineComposing.current,
-                  keyCode: event.nativeEvent.keyCode
-                })) return;
-                event.preventDefault();
-                submitLine();
-              }}
-            />
-            <Button type="submit" size="sm" className="h-10 shrink-0">发送</Button>
-          </form>
-        )}
+          ) : null}
+          <Button type="button" size="icon" className="size-11 shrink-0 rounded-xl" aria-label="发送到终端" onClick={raw ? submitKeyboard : submitLine} disabled={raw ? !keyboardDraft : !draft.trim()}>
+            <Send className="size-4" />
+          </Button>
+        </div>
+        </div>
+      </div>
+      <div className="group absolute right-0 top-1/2 z-20 hidden -translate-y-1/2 md:block">
+        <button type="button" className="grid size-9 place-items-center rounded-l-lg border border-r-0 border-border/80 bg-card/95 text-muted-foreground shadow-lg backdrop-blur hover:bg-muted dark:border-white/15 dark:bg-slate-900/95" aria-label="显示快捷键" title="显示快捷键" onClick={() => setShortcutDockOpen((value) => !value)}>
+          <Keyboard className="size-4" />
+        </button>
+        <div className={`absolute right-9 top-0 flex max-h-[min(28rem,70vh)] -translate-y-0 flex-col items-center gap-1 overflow-y-auto rounded-l-xl border border-r-0 border-border/80 bg-card/95 p-1 shadow-lg backdrop-blur transition dark:border-white/15 dark:bg-slate-900/95 ${shortcutDockOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100"}`}>
+          {shortcutControls}
+        </div>
       </div>
     </div>
   );
