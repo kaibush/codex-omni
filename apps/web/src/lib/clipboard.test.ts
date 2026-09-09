@@ -40,7 +40,7 @@ describe("copyTextToClipboard", () => {
     expect(document.querySelector("textarea")).toBeNull();
   });
 
-  it("uses the synchronous fallback before an iOS Clipboard API rejection", async () => {
+  it("keeps an iOS fallback inside the Clipboard API gesture", async () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "iPhone" });
     const writeText = vi.fn(async () => Promise.reject(new Error("blocked")));
     Object.defineProperty(navigator, "clipboard", {
@@ -55,7 +55,7 @@ describe("copyTextToClipboard", () => {
 
     await expect(copyTextToClipboard("ios text")).resolves.toBe(true);
     expect(execCommand).toHaveBeenCalledWith("copy");
-    expect(writeText).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledWith("ios text");
   });
 
   it("keeps the fallback textarea inside the viewport for iOS", async () => {

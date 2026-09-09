@@ -2,10 +2,8 @@ function copyUsingDomSelection(text: string) {
   if (typeof document === "undefined" || !document.body) return false;
   const textarea = document.createElement("textarea");
   textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.setAttribute("aria-hidden", "true");
   textarea.style.cssText =
-    "position:fixed;top:0;left:0;width:2px;height:2px;margin:0;padding:0;border:0;opacity:0;z-index:2147483647;font-size:16px;line-height:1;background:transparent;color:transparent;pointer-events:none;";
+    "position:fixed;top:0;left:0;width:2em;height:2em;margin:0;padding:0;border:0;outline:0;box-shadow:none;opacity:0.01;z-index:2147483647;font-size:16px;line-height:1;background:transparent;color:transparent;";
   document.body.appendChild(textarea);
   textarea.focus();
   textarea.select();
@@ -28,17 +26,23 @@ function isIosDevice() {
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
-  // Keep the synchronous fallback inside the originating click/touch gesture.
-  // iOS Safari may reject Clipboard API calls after the gesture has completed.
-  if (isIosDevice() && copyUsingDomSelection(text)) return true;
-
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+  const writeText = typeof navigator !== "undefined" ? navigator.clipboard?.writeText : undefined;
+  if (writeText) {
     try {
-      await navigator.clipboard.writeText(text);
-      return true;
+      // Invoke Clipboard API before yielding so iOS keeps the originating gesture.
+      const pending = writeText.call(navigator.clipboard, text);
+      const synchronousFallback = isIosDevice() ? copyUsingDomSelection(text) : false;
+      try {
+        await pending;
+        return true;
+      } catch {
+        // iOS Safari, HTTP, and permission policies may block the Clipboard API.
+        if (synchronousFallback) return true;
+      }
     } catch {
-      // iOS Safari, HTTP, and permission policies may block the Clipboard API.
+      // Some WebViews throw synchronously when Clipboard API is unavailable.
     }
   }
-  return copyUsingDomSelection(text);
+  if (copyUsingDomSelection(text)) return true;
+  return false;
 }
