@@ -24,6 +24,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/context/theme-provider";
 import { api, terminalChatWsUrl } from "@/lib/api";
@@ -33,6 +41,7 @@ import { LiveDuration } from "./WorkspaceStatus";
 import {
   chromePointerMovedTooFar,
   encodeTerminalKeyboardSubmit,
+  encodeTerminalModifiedInput,
   filterCommandHistory,
   isCoarsePointer,
   isDuplicateChromeClick,
@@ -51,8 +60,6 @@ type Profile = { id: string; name: string; executable: string; args: string[] };
 type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?: number };
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
-const chromeKeyClass =
-  "inline-flex h-8 min-w-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-xs font-medium text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
 const chromeIconClass =
   "inline-flex h-8 min-w-8 shrink-0 touch-manipulation items-center justify-center rounded-lg border border-border bg-background px-2 text-foreground select-none active:bg-muted dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:active:bg-white/15";
 const padKeyClass =
@@ -107,6 +114,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const lineRef = useRef<HTMLTextAreaElement | null>(null);
   const historyPanelRef = useRef<HTMLDivElement | null>(null);
   const historyButtonRef = useRef<HTMLSpanElement | null>(null);
+  const shortcutPanelRef = useRef<HTMLDivElement | null>(null);
+  const shortcutButtonRef = useRef<HTMLSpanElement | null>(null);
+  const comboRef = useRef<HTMLInputElement | null>(null);
+  const comboComposing = useRef(false);
+  const comboKeySent = useRef(false);
   const lineComposing = useRef(false);
   const [connected, setConnected] = useState(false);
   const [raw, setRaw] = useState(false);
@@ -127,7 +139,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [historyQuery, setHistoryQuery] = useState("");
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [shortcutDockOpen, setShortcutDockOpen] = useState(false);
+  const [shortcutOpen, setShortcutOpen] = useState(false);
+  const [comboDraft, setComboDraft] = useState("");
 
   const sendRaw = useCallback((data: string) => {
     if (!data) return;
@@ -136,19 +149,9 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   }, [session.id]);
 
   const sendInput = useCallback((rawData: string, applyLatchedModifiers = true) => {
-    let data = rawData;
-    if (applyLatchedModifiers && shiftRef.current) {
-      const arrows: Record<string, string> = {
-        "\x1b[A": "\x1b[1;2A",
-        "\x1b[B": "\x1b[1;2B",
-        "\x1b[C": "\x1b[1;2C",
-        "\x1b[D": "\x1b[1;2D"
-      };
-      if (arrows[rawData]) data = arrows[rawData];
-      else if (rawData.length === 1) data = rawData.toUpperCase();
-    }
-    if (applyLatchedModifiers && ctrlRef.current && data.length === 1) data = control(data);
-    if (applyLatchedModifiers && altRef.current) data = `\x1b${data}`;
+    const data = applyLatchedModifiers
+      ? encodeTerminalModifiedInput(rawData, { ctrl: ctrlRef.current, alt: altRef.current, shift: shiftRef.current })
+      : rawData;
     if (applyLatchedModifiers) {
       if (ctrlRef.current && !stickyRef.current.ctrl) {
         ctrlRef.current = false;
@@ -175,6 +178,10 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     rawRef.current = raw;
     if (terminal.current) terminal.current.options.disableStdin = !raw;
   }, [raw]);
+  useEffect(() => {
+    if (!shortcutOpen || !(ctrl || alt || shift)) return;
+    comboRef.current?.focus();
+  }, [shortcutOpen, ctrl, alt, shift]);
   useEffect(() => {
     if (pasteOpen) pasteAreaRef.current?.focus();
   }, [pasteOpen]);
@@ -229,10 +236,16 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   };
 
   const toggleHistory = () => {
+    setShortcutOpen(false);
     setHistoryOpen((open) => {
       if (!open) void loadCommandHistory();
       return !open;
     });
+  };
+  const toggleShortcuts = () => {
+    setHistoryOpen(false);
+    setHistoryQuery("");
+    setShortcutOpen((open) => !open);
   };
   const applyHistory = (item: string) => {
     setDraft(item);
@@ -246,17 +259,20 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   };
 
   useEffect(() => {
-    if (!historyOpen) return;
+    if (!historyOpen && !shortcutOpen) return;
     const onPointerDown = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target)) return;
+      if (historyOpen && (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target))) return;
+      if (shortcutOpen && (shortcutPanelRef.current?.contains(target) || shortcutButtonRef.current?.contains(target))) return;
       setHistoryOpen(false);
+      setShortcutOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setHistoryOpen(false);
       setHistoryQuery("");
+      setShortcutOpen(false);
     };
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
@@ -264,7 +280,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [historyOpen]);
+  }, [historyOpen, shortcutOpen]);
 
   useEffect(() => {
     const element = host.current;
@@ -473,11 +489,17 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     },
     onDoubleClick: () => toggleModifier(key, true)
   });
-  const shortcut = (label: string, data: string, title?: string, repeat = false, className = chromeKeyClass) => (
-    <button type="button" className={className} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, false); focusTerminalIfAppropriate(); }, repeat)}>
+  const shortcut = (label: string, data: string, title?: string, repeat = false, className = padKeyClass, applyModifiers = true) => (
+    <button type="button" className={className} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, applyModifiers); focusTerminalIfAppropriate(); }, repeat)}>
       {label}
     </button>
   );
+  const sendComboValue = (value: string) => {
+    const chars = [...value];
+    if (!chars.length) return;
+    for (const char of chars) sendInput(char);
+    setComboDraft("");
+  };
   const readVisibleBufferText = () => {
     const term = terminal.current;
     const buffer = term?.buffer.active;
@@ -500,28 +522,29 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     });
     focusTerminalIfAppropriate();
   };
-  const openPasteOverlay = () => {
-    setPasteDraft("");
-    setPasteOpen(true);
-  };
-  const pasteIntoTerminal = () => {
-    if (navigator.clipboard?.readText) {
-      void navigator.clipboard.readText().then((value) => {
-        if (value) {
-          sendInput(value, false);
-          focusTerminalIfAppropriate();
-          return;
-        }
-        openPasteOverlay();
-      }).catch(() => openPasteOverlay());
-      return;
-    }
-    openPasteOverlay();
-  };
-  const submitPasteOverlay = () => {
-    const value = pasteDraft;
+  const closePasteDialog = () => {
     setPasteOpen(false);
     setPasteDraft("");
+  };
+  const openPasteDialog = () => {
+    setHistoryOpen(false);
+    setHistoryQuery("");
+    setShortcutOpen(false);
+    setPasteDraft("");
+    setPasteOpen(true);
+    if (!navigator.clipboard?.readText) return;
+    void navigator.clipboard.readText().then((value) => {
+      if (value) setPasteDraft(value);
+    }).catch(() => {
+      // iOS / insecure origins cannot read the clipboard; the dialog is the fallback.
+    });
+  };
+  const pasteIntoTerminal = () => {
+    openPasteDialog();
+  };
+  const submitPasteDialog = () => {
+    const value = pasteDraft;
+    closePasteDialog();
     if (value) sendInput(value, false);
     focusTerminalIfAppropriate();
   };
@@ -532,6 +555,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     setDraft("");
     setHistoryOpen(false);
     setHistoryQuery("");
+    setShortcutOpen(false);
   };
   const downloadLog = () => {
     const blob = new Blob([outputRef.current || readVisibleBufferText()], { type: "text/plain;charset=utf-8" });
@@ -586,32 +610,70 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   };
 
   const visibleHistory = filterCommandHistory(commandHistory, historyQuery);
+  const modifierChord = [ctrl ? "Ctrl" : null, alt ? "Alt" : null, shift ? "Shift" : null].filter(Boolean).join("+");
 
-  const shortcutControls = (
-    <>
-      <button type="button" className={modifierClass(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
-      <button type="button" className={modifierClass(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}><Command className="size-3.5" /> Alt{sticky.alt ? " *" : ""}</button>
-      <button type="button" className={modifierClass(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
-      {shortcut("Esc", "\x1b")}
-      {shortcut("Tab", "\t")}
-      {shortcut("←", "\x1b[D", "方向左", true)}
-      {shortcut("↑", "\x1b[A", "方向上", true)}
-      {shortcut("↓", "\x1b[B", "方向下", true)}
-      {shortcut("→", "\x1b[C", "方向右", true)}
-      {shortcut("Home", "\x1b[H")}
-      {shortcut("End", "\x1b[F")}
-      {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`))}
-    </>
-  );
   const padModifier = (pressed: boolean) =>
     `${modifierClass(pressed)} min-w-0 w-full px-1 text-[11px]`;
   const shortcutPad = (
-    <div className="flex w-[13.25rem] flex-col gap-1 p-1.5">
+    <div className="flex w-[18rem] flex-col gap-1.5 p-2">
       <div className="grid grid-cols-3 gap-1">
-        <button type="button" className={padModifier(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定" : "Ctrl"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
-        <button type="button" className={padModifier(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定" : "Alt"} {...modifierButtonProps("alt")}>Alt{sticky.alt ? " *" : ""}</button>
-        <button type="button" className={padModifier(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定" : "Shift"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
+        <button type="button" className={padModifier(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定，再点一次取消" : "Ctrl：点按后输入字母，例如 A 发送 Ctrl+A"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
+        <button type="button" className={padModifier(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定，再点一次取消" : "Alt：点按后输入字母，例如 X 发送 Alt+X"} {...modifierButtonProps("alt")}>Alt{sticky.alt ? " *" : ""}</button>
+        <button type="button" className={padModifier(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定，再点一次取消" : "Shift：点按后输入字母或方向键"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
       </div>
+      <label className="flex h-8 items-center rounded-lg border border-border bg-background px-2 dark:border-white/15 dark:bg-white/5">
+        {modifierChord ? <span className="mr-1 shrink-0 text-[11px] font-medium text-sky-700 dark:text-sky-300">{modifierChord}+</span> : null}
+        <input
+          ref={comboRef}
+          value={comboDraft}
+          aria-label={modifierChord ? `输入字符发送 ${modifierChord} 组合键` : "输入字符立即发送到终端"}
+          placeholder={modifierChord ? "输入 A" : "输入字符，例如 A"}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+          onCompositionStart={() => { comboComposing.current = true; }}
+          onCompositionEnd={(event) => {
+            comboComposing.current = false;
+            sendComboValue(event.currentTarget.value);
+          }}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (comboKeySent.current) {
+              comboKeySent.current = false;
+              setComboDraft("");
+              return;
+            }
+            if (comboComposing.current) {
+              setComboDraft(next);
+              return;
+            }
+            if (!next) {
+              setComboDraft("");
+              return;
+            }
+            sendComboValue(next);
+          }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || comboComposing.current) return;
+            if (event.key === "Enter") {
+              event.preventDefault();
+              sendInput("\r");
+              return;
+            }
+            if (event.key.length === 1 && !event.metaKey) {
+              event.preventDefault();
+              comboKeySent.current = true;
+              sendInput(event.key);
+              setComboDraft("");
+            }
+          }}
+        />
+      </label>
+      <p className="px-0.5 text-[11px] leading-4 text-muted-foreground">
+        {modifierChord ? `${modifierChord} 已按下，输入 A 即发送 ${modifierChord}+A` : "先点 Ctrl / Alt / Shift，再输入字符发送组合键"}
+      </p>
       <div className="grid grid-cols-4 gap-1">
         {shortcut("Esc", "\x1b", undefined, false, padKeyClass)}
         {shortcut("Tab", "\t", undefined, false, padKeyClass)}
@@ -625,7 +687,18 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
         {shortcut("→", "\x1b[C", "方向右", true, padKeyClass)}
       </div>
       <div className="grid grid-cols-4 gap-1">
-        {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`, false, padKeyClass))}
+        {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`, false, padKeyClass, false))}
+      </div>
+      <div className="grid grid-cols-3 gap-1 border-t border-border pt-1 dark:border-white/10">
+        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
+          <Copy className="size-4" />
+        </button>
+        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
+          <Clipboard className="size-4" />
+        </button>
+        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
+          <Eraser className="size-4" />
+        </button>
       </div>
     </div>
   );
@@ -667,34 +740,6 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute inset-0 p-2 sm:p-3">
         <div ref={host} className="h-full touch-none overscroll-contain" />
-        {pasteOpen ? (
-          <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
-            <label className="mb-1.5 block text-xs text-muted-foreground" htmlFor="terminal-chat-paste-input">粘贴到终端</label>
-            <textarea
-              id="terminal-chat-paste-input"
-              ref={pasteAreaRef}
-              value={pasteDraft}
-              autoFocus
-              rows={4}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="长按此处粘贴"
-              onChange={(event) => setPasteDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setPasteOpen(false);
-                }
-              }}
-              className="h-24 w-full resize-none rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-            />
-            <div className="mt-2 flex justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" {...chromeActivateProps(() => { setPasteOpen(false); setPasteDraft(""); })}>取消</Button>
-              <Button type="button" size="sm" {...chromeActivateProps(submitPasteOverlay)}>发送</Button>
-            </div>
-          </div>
-        ) : null}
         {!atBottom && (
           <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
             <ArrowDown className="size-4" />
@@ -706,20 +751,16 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           </button>
         )}
         </div>
-        <aside className="absolute inset-y-2 right-0 z-20 hidden md:block">
-          <div className="group relative flex h-full items-center justify-end">
-            <button type="button" className="relative z-10 grid size-9 place-items-center rounded-l-lg border border-r-0 border-border/80 bg-card/95 text-muted-foreground shadow-lg backdrop-blur hover:bg-muted dark:border-white/15 dark:bg-slate-900/95" aria-label="显示快捷键" title="显示快捷键" aria-expanded={shortcutDockOpen} onClick={() => setShortcutDockOpen((value) => !value)}>
-              <Keyboard className="size-4" />
-            </button>
-            <div className={`absolute right-9 top-1/2 max-h-full -translate-y-1/2 overflow-y-auto rounded-l-xl border border-r-0 border-border/80 bg-card/95 shadow-lg backdrop-blur transition dark:border-white/15 dark:bg-slate-900/95 ${shortcutDockOpen ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100"}`}>
-              {shortcutPad}
-            </div>
-          </div>
-        </aside>
       </div>
-      <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-3">
-        <div className="composer-shell overflow-visible rounded-2xl p-3">
+      <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8">
+        <div className="chat-content-width mx-auto">
+          <div className="composer-shell overflow-visible rounded-2xl p-3">
           <div className="relative">
+            {shortcutOpen ? (
+              <div ref={shortcutPanelRef} className="absolute bottom-full left-0 z-30 mb-2 rounded-xl border border-border bg-card shadow-xl dark:border-white/15 dark:bg-slate-900">
+                {shortcutPad}
+              </div>
+            ) : null}
             {historyOpen ? (
               <div ref={historyPanelRef} className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900">
                 <div className="flex items-center gap-1.5 rounded-lg bg-muted/60 px-2 dark:bg-white/5">
@@ -757,6 +798,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               onCompositionStart={() => { lineComposing.current = true; }}
               onCompositionEnd={() => { lineComposing.current = false; }}
               onKeyDown={(event) => {
+                if ((ctrl || alt) && !event.metaKey && !lineComposing.current && !event.nativeEvent.isComposing && event.key.length === 1) {
+                  event.preventDefault();
+                  sendInput(event.key);
+                  return;
+                }
                 const canCycleHistory = !draft.includes("\n") && !event.shiftKey && !event.ctrlKey && !event.metaKey;
                 if (event.key === "ArrowUp" && canCycleHistory) {
                   event.preventDefault();
@@ -784,7 +830,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               <Button
                 type="button"
                 variant="outline"
-                className="composer-runtime-btn h-8 rounded-lg px-2.5"
+                className="composer-runtime-btn h-8 shrink-0 rounded-lg px-2.5"
                 aria-pressed={raw}
                 title={raw ? "直通：按键直接进入终端" : "命令行：在输入框发送完整命令"}
                 {...chromeActivateProps(() => setRaw((value) => !value))}
@@ -792,18 +838,21 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
                 <Keyboard className="size-3.5" />
                 <span>{raw ? "直通" : "命令行"}</span>
               </Button>
-              <div className="flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
-                {shortcutControls}
-                <button type="button" className={chromeIconClass} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
-                  <Copy className="size-4" />
-                </button>
-                <button type="button" className={chromeIconClass} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
-                  <Clipboard className="size-4" />
-                </button>
-                <button type="button" className={chromeIconClass} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
-                  <Eraser className="size-4" />
-                </button>
-              </div>
+              <span ref={shortcutButtonRef} className="inline-flex shrink-0">
+                <Button
+                  type="button"
+                  variant={shortcutOpen || ctrl || alt || shift ? "secondary" : "outline"}
+                  className="h-8 rounded-lg px-2.5"
+                  aria-label="终端快捷键"
+                  aria-haspopup="dialog"
+                  aria-expanded={shortcutOpen}
+                  title="终端快捷键"
+                  onClick={toggleShortcuts}
+                >
+                  <Command className="size-3.5" />
+                  快捷
+                </Button>
+              </span>
             </div>
             <div className="composer-actions">
               <span ref={historyButtonRef} className="inline-flex">
@@ -825,8 +874,39 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               </Button>
             </div>
           </div>
+          </div>
         </div>
       </div>
+      <Dialog open={pasteOpen} onOpenChange={(open) => { if (!open) closePasteDialog(); }}>
+        <DialogContent
+          className="sm:max-w-lg"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            pasteAreaRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>粘贴到终端</DialogTitle>
+            <DialogDescription>可直接粘贴或长按输入框，确认后再发送到终端。</DialogDescription>
+          </DialogHeader>
+          <textarea
+            id="terminal-chat-paste-input"
+            ref={pasteAreaRef}
+            value={pasteDraft}
+            rows={8}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="在此粘贴文本"
+            onChange={(event) => setPasteDraft(event.target.value)}
+            className="min-h-40 w-full resize-y rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" className="h-8 rounded-lg" {...chromeActivateProps(closePasteDialog)}>取消</Button>
+            <Button type="button" className="h-8 rounded-lg" disabled={!pasteDraft} {...chromeActivateProps(submitPasteDialog)}>发送到终端</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

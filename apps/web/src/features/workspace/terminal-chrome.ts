@@ -100,6 +100,46 @@ export function encodeTerminalKeyboardSubmit(value: string): string {
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
 }
 
+export type TerminalInputModifiers = {
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+};
+
+const CSI_CURSOR: Record<string, string> = {
+  "\x1b[A": "A",
+  "\x1b[B": "B",
+  "\x1b[C": "C",
+  "\x1b[D": "D",
+  "\x1b[H": "H",
+  "\x1b[F": "F"
+};
+
+export function encodeTerminalModifiedInput(
+  rawData: string,
+  modifiers: TerminalInputModifiers = {}
+): string {
+  if (!rawData) return rawData;
+  const ctrl = Boolean(modifiers.ctrl);
+  const alt = Boolean(modifiers.alt);
+  const shift = Boolean(modifiers.shift);
+  if (!ctrl && !alt && !shift) return rawData;
+  if (rawData === "\t" && shift && !ctrl && !alt) return "\x1b[Z";
+  const cursor = CSI_CURSOR[rawData];
+  if (cursor) {
+    const bits = (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0);
+    return bits ? `\x1b[1;${bits + 1}${cursor}` : rawData;
+  }
+  let data = rawData;
+  if (shift && data.length === 1 && data.charCodeAt(0) < 128) data = data.toUpperCase();
+  if (ctrl && data.length === 1) {
+    const code = data.toUpperCase().charCodeAt(0);
+    if (code < 128) data = String.fromCharCode(code & 31);
+  }
+  if (alt) data = `\x1b${data}`;
+  return data;
+}
+
 export function filterCommandHistory(items: readonly string[], query: string, limit = 50) {
   const needle = query.trim().toLowerCase();
   const matched = needle ? items.filter((item) => item.toLowerCase().includes(needle)) : [...items];

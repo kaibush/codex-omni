@@ -3,6 +3,7 @@ import {
   isCoarsePointer,
   chromePointerMovedTooFar,
   encodeTerminalKeyboardSubmit,
+  encodeTerminalModifiedInput,
   filterCommandHistory,
   isDuplicateChromeClick,
   isTouchLikePointer,
@@ -131,6 +132,20 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalKeyboardSubmit("ls")).toBe("ls\r");
     expect(encodeTerminalKeyboardSubmit("echo hi\n")).toBe("echo hi\r");
     expect(encodeTerminalKeyboardSubmit("one\ntwo")).toBe("one\rtwo\r");
+  });
+
+  it("encodes latched Ctrl/Alt/Shift onto the next character", () => {
+    expect(encodeTerminalModifiedInput("a")).toBe("a");
+    expect(encodeTerminalModifiedInput("a", { ctrl: true })).toBe("\x01");
+    expect(encodeTerminalModifiedInput("A", { ctrl: true })).toBe("\x01");
+    expect(encodeTerminalModifiedInput("a", { shift: true })).toBe("A");
+    expect(encodeTerminalModifiedInput("a", { alt: true })).toBe("\x1ba");
+    expect(encodeTerminalModifiedInput("a", { ctrl: true, alt: true })).toBe("\x1b\x01");
+    expect(encodeTerminalModifiedInput("\x1b[A", { shift: true })).toBe("\x1b[1;2A");
+    expect(encodeTerminalModifiedInput("\x1b[A", { ctrl: true })).toBe("\x1b[1;5A");
+    expect(encodeTerminalModifiedInput("\t", { shift: true })).toBe("\x1b[Z");
+    expect(encodeTerminalModifiedInput("[", { ctrl: true })).toBe("\x1b");
+    expect(encodeTerminalModifiedInput("中", { ctrl: true })).toBe("中");
   });
 });
 
