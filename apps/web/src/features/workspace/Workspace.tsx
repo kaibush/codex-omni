@@ -1293,6 +1293,11 @@ export function Workspace() {
     else setNewSessionOpen(true);
   };
   const changeWorkspaceView = (view: WorkspaceView) => {
+    if (view === "chat" && activeSession?.kind === "terminal-chat") {
+      const chatSession = projectSessions.find((session) => session.kind !== "terminal-chat");
+      openWorkspace(projectId, chatSession?.id ?? "", false, "chat");
+      return;
+    }
     setWorkspaceView(view);
   };
   const runPaletteAction = (action: PaletteAction) => {
@@ -2314,7 +2319,11 @@ export function Workspace() {
                 <Suspense
                   fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
                 >
-                  <TerminalChatPanel project={activeProject} />
+                  <TerminalChatPanel
+                    project={activeProject}
+                    sessionId={sessionId}
+                    onOpenSession={(nextSessionId) => openWorkspace(projectId, nextSessionId, false, "terminal-chat")}
+                  />
                 </Suspense>
               </div>
             )}

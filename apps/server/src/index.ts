@@ -932,6 +932,7 @@ app.delete("/api/projects/:id", { preHandler: auth }, async (req, reply) => {
   const project = store.getProject(id);
   if (!project) return reply.code(404).send({ error: "Project not found" });
   for (const session of store.listSessions(id)) runs.cancel(session.id);
+  terminalChats.closeProject(id);
   terminals.closeProject(id);
   store.deleteProject(id);
   return { ok: true };
@@ -1052,7 +1053,7 @@ app.put("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     })
     .refine((value) => Object.keys(value).length > 0, "No changes provided")
     .parse(req.body ?? {});
-  return store.updateSession(id, {
+  const updated = store.updateSession(id, {
     ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.pinned !== undefined ? { pinnedAt: input.pinned ? Date.now() : null } : {}),
     ...(input.archived !== undefined ? { archivedAt: input.archived ? Date.now() : null } : {}),
@@ -1060,6 +1061,11 @@ app.put("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     ...(input.icon !== undefined ? { icon: input.icon || null } : {}),
     ...(input.tags !== undefined ? { tagsJson: JSON.stringify(input.tags) } : {})
   });
+  if (input.title !== undefined && current.kind === "terminal-chat") {
+    const terminalSession = store.getTerminalSessionBySession(id);
+    if (terminalSession) terminalChats.rename(terminalSession.id, input.title);
+  }
+  return updated;
 });
 app.get("/api/sessions/:id/export", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
@@ -1704,18 +1710,20 @@ app.get("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) =
   return terminal ?? reply.code(404).send({ error: "Terminal session not found" });
 });
 app.post("/api/terminal-sessions/:id/restart", { preHandler: auth }, async (req, reply) => {
-  if (!terminalChats.restart(routeId(req))) return reply.code(404).send({ error: "Terminal session not found" });
-  return { ok: true };
+  const id = routeId(req);
+  if (!terminalChats.restart(id)) return reply.code(404).send({ error: "Terminal session not found" });
+  return { ok: true, terminal: terminalChats.get(id) };
 });
 app.post("/api/terminal-sessions/:id/stop", { preHandler: auth }, async (req, reply) => {
-  if (!terminalChats.stop(routeId(req))) return reply.code(404).send({ error: "Terminal session not found" });
-  return { ok: true };
+  const id = routeId(req);
+  if (!terminalChats.stop(id)) return reply.code(404).send({ error: "Terminal session not found" });
+  return { ok: true, terminal: terminalChats.get(id) };
 });
 app.get("/api/terminal-sessions/:id/history", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   if (!terminalChats.get(id)) return reply.code(404).send({ error: "Terminal session not found" });
-  const query = z.object({ afterSeq: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(20000).default(5000) }).parse(req.query ?? {});
-  return { items: store.listTerminalEvents(id, query.afterSeq, query.limit) };
+  const query = z.object({ afterSeq: z.coerce.number().int().min(0).default(0), beforeSeq: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(20000).default(5000) }).parse(req.query ?? {});
+  return { items: query.beforeSeq === undefined ? store.listTerminalEvents(id, query.afterSeq, query.limit) : store.listTerminalEventsBefore(id, query.beforeSeq, query.limit) };
 });
 app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown, clientId?: string, sessionId?: string) => {
