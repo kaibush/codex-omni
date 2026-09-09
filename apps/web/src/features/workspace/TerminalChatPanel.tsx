@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { ArrowDown, Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, SquareTerminal, Square } from "lucide-react";
+import { ArrowDown, Keyboard, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, SquareTerminal, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api, terminalChatWsUrl } from "@/lib/api";
@@ -11,7 +11,7 @@ import type { Project, Session, TerminalChatSession } from "@/types";
 
 type SessionList = { items: TerminalChatSession[] };
 type Profile = { id: string; name: string; executable: string; args: string[] };
-type TerminalHistoryItem = { seq: number; kind: string; data: string };
+type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?: number };
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
 
@@ -35,6 +35,9 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [atBottom, setAtBottom] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [firstSeq, setFirstSeq] = useState(1);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<TerminalHistoryItem[]>([]);
 
   const send = useCallback((data: string) => {
     if (!data) return;
@@ -95,6 +98,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
           applyChange({ state: "exited", pid: null, lastExitCode: message.payload?.exitCode ?? null });
           instance.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
         } else if (message.type === "terminal.state") applyChange(message.payload ?? {});
+        else if (message.type === "terminal.marker") {
+          const marker = `\r\n\x1b[90m[${String(message.payload?.text ?? "状态更新")}]\x1b[0m\r\n`;
+          instance.write(marker);
+          outputRef.current = `${outputRef.current}${marker}`.slice(-4 * 1024 * 1024);
+        }
       };
       ws.onclose = () => { if (disposed || !pageVisibleRef.current) return; setConnected(false); attempts.current += 1; reconnect.current = window.setTimeout(connect, Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4))); };
       ws.onerror = () => setConnected(false);
@@ -118,6 +126,15 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   useEffect(() => { rawRef.current = raw; ctrlRef.current = ctrl; }, [ctrl, raw]);
   const submit = (event: React.FormEvent) => { event.preventDefault(); if (!draft.trim()) return; send(`${draft}\r`); setDraft(""); };
   const sendControl = (key: string) => send(control(key));
+  const runSearch = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) { setSearchHits([]); return; }
+    try {
+      const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/transcript?q=${encodeURIComponent(query)}&limit=100`);
+      setSearchHits(result.items);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "搜索终端输出失败"); }
+  };
   const loadEarlier = async () => {
     if (loadingEarlier || firstSeqRef.current <= 1) return;
     setLoadingEarlier(true);
@@ -134,10 +151,12 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     finally { setLoadingEarlier(false); }
   };
   return <div className="flex min-h-0 flex-1 flex-col bg-[#090d14] text-slate-100">
-    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-white/10 bg-slate-950 px-3 text-[11px] text-slate-300">
+    <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-white/10 bg-slate-950 px-3 text-[11px] text-slate-300">
       <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
       <span>{connected ? `已连接 · PID ${session.pid ?? "—"}` : "正在恢复连接，终端仍在后台运行"}</span>
       <span className="ml-auto hidden max-w-[45%] truncate font-mono text-slate-500 sm:block">{session.cwd}</span>
+      <button type="button" className="grid size-7 place-items-center rounded-lg text-slate-300 hover:bg-white/10" aria-label="搜索终端历史" onClick={() => setSearchOpen((value) => !value)}><Search className="size-3.5" /></button>
+      {searchOpen && <form className="absolute right-2 top-10 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-white/15 bg-slate-900 p-2 shadow-xl" onSubmit={runSearch}><div className="flex gap-1.5"><input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索终端历史" className="h-8 min-w-0 flex-1 rounded-lg border border-white/15 bg-white/5 px-2 text-xs text-slate-100 outline-none" /><Button type="submit" size="sm" className="h-8">搜索</Button></div><div className="mt-2 max-h-52 overflow-y-auto text-[11px] text-slate-300">{searchHits.length ? searchHits.map((hit) => <div key={`${hit.seq}-${hit.createdAt}`} className="border-t border-white/10 py-1.5"><span className="mr-1 text-slate-500">#{hit.seq}</span><span className="break-words">{hit.data.slice(0, 240)}</span></div>) : <span className="text-slate-500">输入关键词搜索</span>}</div></form>}
     </div>
     <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3"><div ref={host} className="h-full" />{!atBottom && <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-white/15 bg-slate-900/90 text-slate-100 shadow-lg" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}><ArrowDown className="size-4" /></button>}{firstSeq > 1 && <button type="button" className="absolute left-3 top-3 rounded-lg border border-white/15 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-200" onClick={() => void loadEarlier()} disabled={loadingEarlier}>{loadingEarlier ? "加载中" : "加载更早输出"}</button>}</div>
     <div className="shrink-0 border-t border-white/10 bg-slate-950 px-2 py-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">

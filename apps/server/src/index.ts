@@ -1725,6 +1725,12 @@ app.get("/api/terminal-sessions/:id/history", { preHandler: auth }, async (req, 
   const query = z.object({ afterSeq: z.coerce.number().int().min(0).default(0), beforeSeq: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(20000).default(5000) }).parse(req.query ?? {});
   return { items: query.beforeSeq === undefined ? store.listTerminalEvents(id, query.afterSeq, query.limit) : store.listTerminalEventsBefore(id, query.beforeSeq, query.limit) };
 });
+app.get("/api/terminal-sessions/:id/transcript", { preHandler: auth }, async (req, reply) => {
+  const id = routeId(req);
+  if (!terminalChats.get(id)) return reply.code(404).send({ error: "Terminal session not found" });
+  const query = z.object({ q: z.string().trim().min(1).max(200), limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query ?? {});
+  return { items: store.searchTerminalEvents(id, query.q, query.limit) };
+});
 app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown, clientId?: string, sessionId?: string) => {
     if (socket.readyState !== socket.OPEN) return;

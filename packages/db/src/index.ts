@@ -1102,6 +1102,13 @@ export class Store {
   listTerminalEventsBefore(terminalId: string, beforeSeq: number, limit = 5000) {
     return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq<? ORDER BY seq DESC LIMIT ?").all(terminalId, beforeSeq, Math.min(Math.max(limit, 1), 20000)).reverse() as TerminalEventRow[];
   }
+  searchTerminalEvents(terminalId: string, query: string, limit = 100) {
+    const value = `%${query.replace(/[\\%_]/g, (part) => `\\${part}`)}%`;
+    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND data LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?").all(terminalId, value, Math.min(Math.max(limit, 1), 500)) as TerminalEventRow[];
+  }
+  pruneTerminalEvents(terminalId: string, keep = 100_000) {
+    this.db.prepare("DELETE FROM terminal_events WHERE terminal_id=? AND seq < COALESCE((SELECT MAX(seq) FROM terminal_events WHERE terminal_id=?) - ?, 0)").run(terminalId, terminalId, Math.max(1000, keep));
+  }
   updateSession(
     id: string,
     input: Partial<

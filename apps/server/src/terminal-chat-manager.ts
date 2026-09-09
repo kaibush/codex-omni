@@ -26,6 +26,7 @@ export class TerminalChatManager {
     for (const row of this.store.listTerminalSessions()) {
       const item = { row, process: null, subscribers: new Set<WebSocket>(), timer: null, generation: 0 };
       this.items.set(row.id, item);
+      if (row.desiredState === "running" && row.lastSeq > 0) this.marker(item, "Server 已重启，正在恢复终端进程");
       if (row.desiredState === "running") this.start(row.id, true);
     }
   }
@@ -103,7 +104,14 @@ export class TerminalChatManager {
     const seq = item.row.lastSeq + 1;
     item.row = this.store.updateTerminalSession(item.row.id, { lastSeq: seq, lastOutputAt: Date.now() })!;
     this.store.addTerminalEvent({ terminalId: item.row.id, seq, kind: "output", data });
+    if (seq % 100 === 0) this.store.pruneTerminalEvents(item.row.id);
     this.broadcast(item, { type: "terminal.output", terminalId: item.row.id, seq, payload: { data } });
+  }
+  private marker(item: Managed, text: string) {
+    const seq = item.row.lastSeq + 1;
+    item.row = this.store.updateTerminalSession(item.row.id, { lastSeq: seq, lastOutputAt: Date.now() })!;
+    this.store.addTerminalEvent({ terminalId: item.row.id, seq, kind: "marker", data: text });
+    this.broadcast(item, { type: "terminal.marker", terminalId: item.row.id, seq, payload: { text } });
   }
   private exited(item: Managed, exitCode: number, signal: number | null) {
     item.process = null;
@@ -136,6 +144,9 @@ export class TerminalChatManager {
     const item = this.items.get(id);
     if (!item?.process || item.row.state !== "running") return false;
     item.process.write(data);
+    const seq = item.row.lastSeq + 1;
+    item.row = this.store.updateTerminalSession(id, { lastSeq: seq, lastOutputAt: Date.now() })!;
+    this.store.addTerminalEvent({ terminalId: id, seq, kind: "input", data });
     return true;
   }
   resize(id: string, cols: number, rows: number) {
