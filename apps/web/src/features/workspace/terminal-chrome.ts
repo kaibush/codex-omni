@@ -100,6 +100,63 @@ export function encodeTerminalKeyboardSubmit(value: string): string {
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
 }
 
+export function touchScrollLines(dy: number, lineHeight: number, leftover: number) {
+  const height = Math.max(1, lineHeight);
+  const next = leftover + dy / height;
+  const lines = next > 0 ? Math.floor(next) : Math.ceil(next);
+  return { lines, leftover: next - lines };
+}
+
+export function attachTerminalTouchScroll(
+  element: HTMLElement,
+  getTerminal: () => { rows: number; scrollLines: (count: number) => void } | null
+) {
+  let lastY = 0;
+  let leftover = 0;
+  let tracking = false;
+  const onStart = (event: TouchEvent) => {
+    if (event.touches.length !== 1) {
+      tracking = false;
+      leftover = 0;
+      return;
+    }
+    tracking = true;
+    leftover = 0;
+    lastY = event.touches[0]!.clientY;
+  };
+  const onMove = (event: TouchEvent) => {
+    if (!tracking || event.touches.length !== 1) return;
+    const term = getTerminal();
+    if (!term || term.rows <= 0) return;
+    const y = event.touches[0]!.clientY;
+    const dy = lastY - y;
+    lastY = y;
+    const { lines, leftover: nextLeftover } = touchScrollLines(
+      dy,
+      element.clientHeight / term.rows,
+      leftover
+    );
+    leftover = nextLeftover;
+    if (lines === 0) return;
+    term.scrollLines(lines);
+    event.preventDefault();
+  };
+  const onEnd = () => {
+    tracking = false;
+    leftover = 0;
+  };
+  element.addEventListener("touchstart", onStart, { passive: true });
+  element.addEventListener("touchmove", onMove, { passive: false });
+  element.addEventListener("touchend", onEnd);
+  element.addEventListener("touchcancel", onEnd);
+  return () => {
+    element.removeEventListener("touchstart", onStart);
+    element.removeEventListener("touchmove", onMove);
+    element.removeEventListener("touchend", onEnd);
+    element.removeEventListener("touchcancel", onEnd);
+  };
+}
+
 export function xtermTheme(theme: "light" | "dark") {
   return theme === "dark"
     ? {

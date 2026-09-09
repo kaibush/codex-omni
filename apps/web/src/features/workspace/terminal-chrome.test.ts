@@ -12,6 +12,7 @@ import {
   sliceVisibleLines,
   terminalCopyPayload,
   terminalKeyboardFieldProps,
+  touchScrollLines,
   visibleBufferText,
   xtermTheme
 } from "./terminal-chrome";
@@ -138,5 +139,18 @@ describe("xterm theme", () => {
     expect(xtermTheme("light").foreground).toBe("#172033");
     expect(xtermTheme("dark").background).toBe("#090d14");
     expect(xtermTheme("dark").foreground).toBe("#dce5f2");
+  });
+});
+
+describe("touch scroll", () => {
+  it("turns finger movement into whole terminal lines and keeps the remainder", () => {
+    expect(touchScrollLines(20, 10, 0)).toEqual({ lines: 2, leftover: 0 });
+    expect(touchScrollLines(6, 10, 0)).toEqual({ lines: 0, leftover: 0.6 });
+    const accumulated = touchScrollLines(6, 10, 0.6);
+    expect(accumulated.lines).toBe(1);
+    expect(accumulated.leftover).toBeCloseTo(0.2);
+    const backward = touchScrollLines(-12, 10, 0);
+    expect(backward.lines).toBe(-1);
+    expect(backward.leftover).toBeCloseTo(-0.2);
   });
 });

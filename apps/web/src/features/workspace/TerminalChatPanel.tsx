@@ -39,6 +39,7 @@ import {
   shouldSubmitTerminalKeyboard,
   terminalCopyPayload,
   terminalKeyboardFieldProps,
+  attachTerminalTouchScroll,
   xtermTheme
 } from "./terminal-chrome";
 
@@ -194,6 +195,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     instance.open(element);
     terminal.current = instance;
     instance.options.disableStdin = !rawRef.current;
+    const detachTouchScroll = attachTerminalTouchScroll(element, () => terminal.current);
     const fitTerminal = () => {
       try {
         fit.fit();
@@ -284,6 +286,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (reconnect.current) window.clearTimeout(reconnect.current);
       observer.disconnect();
+      detachTouchScroll();
       dataSubscription.dispose();
       scrollSubscription.dispose();
       socket.current?.close();
@@ -533,7 +536,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
         )}
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
-        <div ref={host} className="h-full" />
+        <div ref={host} className="h-full touch-none overscroll-contain" />
         {pasteOpen ? (
           <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
             <label className="mb-1.5 block text-xs text-muted-foreground" htmlFor="terminal-chat-paste-input">粘贴到终端</label>

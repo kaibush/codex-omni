@@ -42,6 +42,7 @@ import {
   shouldSubmitTerminalKeyboard,
   terminalCopyPayload,
   terminalKeyboardFieldProps,
+  attachTerminalTouchScroll,
   xtermTheme
 } from "./terminal-chrome";
 
@@ -177,6 +178,7 @@ function TerminalViewport({
     instance.loadAddon(fit);
     instance.open(element);
     xterm.current = instance;
+    const detachTouchScroll = attachTerminalTouchScroll(element, () => xterm.current);
     const fitAndResize = () => {
       try {
         fit.fit();
@@ -298,6 +300,7 @@ function TerminalViewport({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (reconnectTimer.current !== null) window.clearTimeout(reconnectTimer.current);
       resizeObserver.disconnect();
+      detachTouchScroll();
       dataSubscription.dispose();
       const ws = socket.current;
       socket.current = null;
@@ -633,7 +636,7 @@ function TerminalViewport({
         </div>
       ) : null}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={host} className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3" />
+        <div ref={host} className="min-h-0 flex-1 touch-none overscroll-contain overflow-hidden p-2 sm:p-3" />
         {pasteOpen ? (
           <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg border border-border bg-background p-3 shadow-lg dark:border-white/10 dark:bg-[#090d14]">
             <label
