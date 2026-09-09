@@ -307,6 +307,24 @@ describe("Store", () => {
     expect(store.listSessions(project.id)).toEqual([]);
   });
 
+  it("cascades terminal sessions when a session is deleted", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = store.createSession({ projectId: project.id, title: "shell 终端", kind: "terminal-chat" });
+    const terminal = store.createTerminalSession({
+      projectId: project.id,
+      sessionId: session.id,
+      profileId: "shell",
+      title: session.title,
+      cwd: "/tmp"
+    });
+    store.addTerminalEvent({ terminalId: terminal.id, seq: 1, kind: "output", data: "hello" });
+    expect(store.deleteSession(session.id)).toBe(true);
+    expect(store.getTerminalSession(terminal.id)).toBeUndefined();
+    expect(store.listTerminalSessions(project.id)).toEqual([]);
+    expect(store.listTerminalEvents(terminal.id)).toEqual([]);
+  });
+
   it("deletes a project and cascades sessions and messages", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });

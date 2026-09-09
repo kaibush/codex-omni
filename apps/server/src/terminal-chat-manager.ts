@@ -6,6 +6,7 @@ import { buildTerminalEnv, resolveTerminalRuntime } from "./terminal-shell.js";
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
 type Profile = { id: string; name: string; executable: string; args: string[] };
 type Managed = { row: TerminalSessionRow; process: IPty | null; subscribers: Set<WebSocket>; timer: NodeJS.Timeout | null; generation: number };
+type TerminalPatch = Parameters<Store["updateTerminalSession"]>[1];
 
 const PROFILES: Profile[] = [
   { id: "codex", name: "Codex", executable: "codex", args: [] },
@@ -43,11 +44,33 @@ export class TerminalChatManager {
   private profile(id: string) {
     return PROFILES.find((profile) => profile.id === id);
   }
+  private persist(item: Managed, patch: TerminalPatch) {
+    const next = this.store.updateTerminalSession(item.row.id, patch);
+    if (!next) {
+      this.dispose(item.row.id);
+      return false;
+    }
+    item.row = next;
+    return true;
+  }
+  private dispose(id: string, signal: NodeJS.Signals = "SIGTERM") {
+    const item = this.items.get(id);
+    if (!item) return false;
+    if (item.timer) clearTimeout(item.timer);
+    item.timer = null;
+    item.generation += 1;
+    if (item.process) {
+      try { item.process.kill(signal); } catch { /* already gone */ }
+      item.process = null;
+    }
+    this.items.delete(id);
+    return true;
+  }
 
   create(input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string; restartPolicy?: "manual" | "on-unexpected-exit" }) {
     if (!this.profile(input.profileId)) throw new Error("不支持的终端 profile");
-    if ([...this.items.values()].filter((item) => item.row.projectId === input.projectId && item.row.desiredState === "running").length >= 12)
-      throw new Error("每个工程最多同时运行 12 个终端对话");
+    const running = [...this.items.values()].filter((item) => item.row?.projectId === input.projectId && item.row?.desiredState === "running").length;
+    if (running >= 12) throw new Error("每个工程最多同时运行 12 个终端对话");
     const row = this.store.createTerminalSession(input);
     const item: Managed = { row, process: null, subscribers: new Set(), timer: null, generation: 0 };
     this.items.set(row.id, item);
@@ -56,22 +79,24 @@ export class TerminalChatManager {
   }
 
   list(projectId?: string) {
-    return (projectId ? [...this.items.values()].filter((item) => item.row.projectId === projectId) : [...this.items.values()]).map((item) => this.publicRow(item));
+    return [...this.items.values()]
+      .filter((item) => item.row && (!projectId || item.row.projectId === projectId))
+      .map((item) => this.publicRow(item));
   }
   get(id: string) {
     const item = this.items.get(id);
-    return item ? this.publicRow(item) : null;
+    return item?.row ? this.publicRow(item) : null;
   }
   rename(id: string, title: string) {
     const item = this.items.get(id);
-    if (!item) return null;
-    item.row = this.store.updateTerminalSession(id, { title: title.trim().slice(0, 120) || item.row.title })!;
+    if (!item?.row) return null;
+    if (!this.persist(item, { title: title.trim().slice(0, 120) || item.row.title })) return null;
     this.broadcast(item, { type: "terminal.state", terminalId: id, payload: { title: item.row.title } });
     return this.publicRow(item);
   }
   private start(id: string, restoring: boolean) {
     const item = this.items.get(id);
-    if (this.shuttingDown || !item || item.process || item.row.desiredState !== "running") return;
+    if (this.shuttingDown || !item?.row || item.process || item.row.desiredState !== "running") return;
     const profile = this.profile(item.row.profileId);
     if (!profile) return this.fail(item, "找不到终端 profile");
     const runtime = resolveTerminalRuntime();
@@ -87,7 +112,10 @@ export class TerminalChatManager {
         env: buildTerminalEnv({ shell: executable, terminalId: id, home: runtime.home, username: runtime.username })
       });
       item.process = child;
-      item.row = this.store.updateTerminalSession(id, { state: "running", pid: child.pid, lastError: null, nextRestartAt: null })!;
+      if (!this.persist(item, { state: "running", pid: child.pid, lastError: null, nextRestartAt: null })) {
+        try { child.kill("SIGTERM"); } catch { /* already gone */ }
+        return;
+      }
       this.updateSessionStatus(item, "running");
       this.broadcast(item, { type: "terminal.state", terminalId: id, payload: { state: "running", pid: child.pid, restoring } });
       child.onData((data) => { if (item.generation === generation) this.output(item, data); });
@@ -97,55 +125,60 @@ export class TerminalChatManager {
     }
   }
   private updateSessionStatus(item: Managed, status: "idle" | "running" | "failed") {
+    if (!item.row || !this.store.getSession(item.row.sessionId)) return;
     this.store.updateSession(item.row.sessionId, { status });
   }
   private output(item: Managed, data: string) {
-    if (!data) return;
+    if (!data || !item.row || !this.items.has(item.row.id)) return;
     const seq = item.row.lastSeq + 1;
-    item.row = this.store.updateTerminalSession(item.row.id, { lastSeq: seq, lastOutputAt: Date.now() })!;
+    if (!this.persist(item, { lastSeq: seq, lastOutputAt: Date.now() })) return;
     this.store.addTerminalEvent({ terminalId: item.row.id, seq, kind: "output", data });
     if (seq % 100 === 0) this.store.pruneTerminalEvents(item.row.id);
     this.broadcast(item, { type: "terminal.output", terminalId: item.row.id, seq, payload: { data } });
   }
   private marker(item: Managed, text: string) {
+    if (!item.row) return;
     const seq = item.row.lastSeq + 1;
-    item.row = this.store.updateTerminalSession(item.row.id, { lastSeq: seq, lastOutputAt: Date.now() })!;
+    if (!this.persist(item, { lastSeq: seq, lastOutputAt: Date.now() })) return;
     this.store.addTerminalEvent({ terminalId: item.row.id, seq, kind: "marker", data: text });
     this.broadcast(item, { type: "terminal.marker", terminalId: item.row.id, seq, payload: { text } });
   }
   private exited(item: Managed, exitCode: number, signal: number | null) {
     item.process = null;
+    if (!item.row || !this.items.has(item.row.id)) return;
     const now = Date.now();
-    item.row = this.store.updateTerminalSession(item.row.id, { state: "exited", pid: null, lastExitCode: exitCode, lastSignal: signal, lastError: null })!;
+    if (!this.persist(item, { state: "exited", pid: null, lastExitCode: exitCode, lastSignal: signal, lastError: null })) return;
     this.updateSessionStatus(item, exitCode === 0 ? "idle" : "failed");
     this.broadcast(item, { type: "terminal.exit", terminalId: item.row.id, seq: item.row.lastSeq, payload: { exitCode, signal } });
     if (item.row.desiredState === "running" && item.row.restartPolicy === "on-unexpected-exit" && exitCode !== 0) {
       const withinWindow = item.row.restartWindowStartedAt && now - item.row.restartWindowStartedAt < RESTART_WINDOW;
       const count = withinWindow ? item.row.restartCount : 0;
       if (count >= MAX_RESTARTS) {
-        item.row = this.store.updateTerminalSession(item.row.id, { state: "needs_attention", nextRestartAt: null })!;
+        if (!this.persist(item, { state: "needs_attention", nextRestartAt: null })) return;
         this.updateSessionStatus(item, "failed");
         this.broadcast(item, { type: "terminal.state", terminalId: item.row.id, payload: { state: "needs_attention", reason: "restart-circuit-open" } });
         return;
       }
       const delay = [1000, 2000, 5000, 15000][count] ?? 15000;
-      item.row = this.store.updateTerminalSession(item.row.id, { state: "provisioning", restartCount: count + 1, restartWindowStartedAt: withinWindow ? item.row.restartWindowStartedAt : now, nextRestartAt: now + delay })!;
+      if (!this.persist(item, { state: "provisioning", restartCount: count + 1, restartWindowStartedAt: withinWindow ? item.row.restartWindowStartedAt : now, nextRestartAt: now + delay })) return;
       this.updateSessionStatus(item, "running");
-      item.timer = setTimeout(() => { item.timer = null; this.start(item.row.id, false); }, delay);
+      const terminalId = item.row.id;
+      item.timer = setTimeout(() => { item.timer = null; this.start(terminalId, false); }, delay);
     }
   }
   private fail(item: Managed, message: string) {
     item.process = null;
-    item.row = this.store.updateTerminalSession(item.row.id, { state: "failed", pid: null, lastError: message })!;
+    if (!item.row || !this.items.has(item.row.id)) return;
+    if (!this.persist(item, { state: "failed", pid: null, lastError: message })) return;
     this.updateSessionStatus(item, "failed");
     this.broadcast(item, { type: "terminal.state", terminalId: item.row.id, payload: { state: "failed", reason: message } });
   }
   input(id: string, data: string) {
     const item = this.items.get(id);
-    if (!item?.process || item.row.state !== "running") return false;
+    if (!item?.process || !item.row || item.row.state !== "running") return false;
     item.process.write(data);
     const seq = item.row.lastSeq + 1;
-    item.row = this.store.updateTerminalSession(id, { lastSeq: seq, lastOutputAt: Date.now() })!;
+    if (!this.persist(item, { lastSeq: seq, lastOutputAt: Date.now() })) return false;
     this.store.addTerminalEvent({ terminalId: id, seq, kind: "input", data });
     return true;
   }
@@ -157,11 +190,11 @@ export class TerminalChatManager {
   }
   restart(id: string) {
     const item = this.items.get(id);
-    if (!item) return false;
+    if (!item?.row) return false;
     if (item.timer) clearTimeout(item.timer);
     item.timer = null;
     item.generation += 1;
-    item.row = this.store.updateTerminalSession(id, { desiredState: "running", state: "provisioning", restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null })!;
+    if (!this.persist(item, { desiredState: "running", state: "provisioning", restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null })) return false;
     if (item.process) { try { item.process.kill("SIGTERM"); } catch { /* exited */ } }
     item.process = null;
     this.start(id, false);
@@ -169,20 +202,23 @@ export class TerminalChatManager {
   }
   stop(id: string) {
     const item = this.items.get(id);
-    if (!item) return false;
+    if (!item?.row) return false;
     if (item.timer) clearTimeout(item.timer);
     item.timer = null;
     item.generation += 1;
-    item.row = this.store.updateTerminalSession(id, { desiredState: "stopped", state: "stopped", nextRestartAt: null, stoppedAt: Date.now() })!;
+    if (!this.persist(item, { desiredState: "stopped", state: "stopped", nextRestartAt: null, stoppedAt: Date.now() })) return true;
     this.updateSessionStatus(item, "idle");
     if (item.process) { try { item.process.kill("SIGINT"); } catch { /* exited */ } }
     item.process = null;
     this.broadcast(item, { type: "terminal.state", terminalId: id, payload: { state: "stopped" } });
     return true;
   }
+  remove(id: string) {
+    return this.dispose(id, "SIGINT");
+  }
   subscribe(id: string, socket: WebSocket, lastSeq = 0) {
     const item = this.items.get(id);
-    if (!item) throw new Error("Terminal session not found");
+    if (!item?.row) throw new Error("Terminal session not found");
     item.subscribers.add(socket);
     const limit = 5000;
     const events = lastSeq > 0
@@ -193,7 +229,7 @@ export class TerminalChatManager {
     this.send(socket, { type: "terminal.snapshot", terminalId: id, seq: item.row.lastSeq, payload: { terminal: this.publicRow(item), output: events.filter((event) => event.kind === "output").map((event) => event.data).join(""), firstSeq, replay: lastSeq > 0 && complete, truncated: !complete } });
   }
   closeProject(projectId: string) {
-    for (const item of [...this.items.values()]) if (item.row.projectId === projectId) this.stop(item.row.id);
+    for (const item of [...this.items.values()]) if (item.row?.projectId === projectId) this.remove(item.row.id);
   }
   unsubscribeSocket(socket: WebSocket) { for (const item of this.items.values()) item.subscribers.delete(socket); }
   shutdown() {

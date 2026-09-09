@@ -173,21 +173,25 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
 
 export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { project: Project; sessionId?: string; onOpenSession?: (sessionId: string) => void }) {
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState(sessionId);
+  const [selectedId, setSelectedId] = useState("");
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
   const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
-  const create = useMutation({ mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }), onSuccess: (result) => { queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? [])] })); void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] }); setSelectedId(result.terminal.id); onOpenSession?.(result.session.id); }, onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败") });
+  const create = useMutation({ mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }), onSuccess: (result) => { queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? []).filter((item) => item.id !== result.terminal.id)] })); void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] }); setSelectedId(result.terminal.id); onOpenSession?.(result.session.id); }, onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败") });
   const restart = useMutation({ mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/restart`, { method: "POST" }), onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已重启"); }, onError: (error) => toast.error(error instanceof Error ? error.message : "重启终端失败") });
   const stop = useMutation({ mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/stop`, { method: "POST" }), onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已停止"); }, onError: (error) => toast.error(error instanceof Error ? error.message : "停止终端失败") });
   const items = sessions.data?.items ?? [];
-  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  const selected = items.find((item) => item.id === selectedId) ?? items.find((item) => item.sessionId === sessionId) ?? items[0] ?? null;
   const update = useCallback((id: string, next: Partial<TerminalChatSession>) => queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => current ? { items: current.items.map((item) => item.id === id ? { ...item, ...next } : item) } : current), [project.id, queryClient]);
   const selectedChange = useCallback((next: Partial<TerminalChatSession>) => {
     if (selected) update(selected.id, next);
   }, [selected, update]);
   useEffect(() => {
-    if (sessionId && items.some((item) => item.id === sessionId)) setSelectedId(sessionId);
-    else if (!selectedId && items[0]) setSelectedId(items[0].id);
+    const matched = items.find((item) => item.sessionId === sessionId) ?? items.find((item) => item.id === selectedId) ?? items[0];
+    if (matched) {
+      if (matched.id !== selectedId) setSelectedId(matched.id);
+      return;
+    }
+    if (selectedId) setSelectedId("");
   }, [items, selectedId, sessionId]);
   return <section className="flex h-full min-h-0 flex-col bg-background">
     <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-3"><SquareTerminal className="size-4 shrink-0 text-primary" /><div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{items.map((item) => <button key={item.id} type="button" onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs ${selected?.id === item.id ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-accent"}`}><span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />{item.title}</button>)}</div>

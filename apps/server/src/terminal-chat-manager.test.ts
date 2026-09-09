@@ -31,7 +31,7 @@ vi.mock("node-pty", () => ({
   })
 }));
 
-import type { Store, TerminalSessionRow } from "@codex-omni/db";
+import { Store, type TerminalSessionRow } from "@codex-omni/db";
 import { TerminalChatManager } from "./terminal-chat-manager.js";
 
 const row = (overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow => ({
@@ -39,19 +39,40 @@ const row = (overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow =>
 });
 
 function makeStore() {
-  let current = row();
+  const rows = new Map<string, TerminalSessionRow>();
+  const sessions = new Set<string>(["session-1"]);
   const events: Array<{ terminalId: string; seq: number; kind: string; data: string }> = [];
+  let nextId = 1;
   return {
     store: {
-      listTerminalSessions: () => [],
-      createTerminalSession: () => current,
-      updateTerminalSession: (_id: string, input: Partial<TerminalSessionRow>) => { current = { ...current, ...input }; return current; },
+      listTerminalSessions: () => [...rows.values()],
+      createTerminalSession: (input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string }) => {
+        const created = row({ id: `terminal-${nextId++}`, ...input, state: "provisioning" });
+        rows.set(created.id, created);
+        sessions.add(created.sessionId);
+        return created;
+      },
+      updateTerminalSession: (id: string, input: Partial<TerminalSessionRow>) => {
+        const current = rows.get(id);
+        if (!current) return undefined;
+        const next = { ...current, ...input };
+        rows.set(id, next);
+        return next;
+      },
+      getSession: (id: string) => sessions.has(id) ? { id } : undefined,
       updateSession: vi.fn(),
       addTerminalEvent: (event: typeof events[number]) => events.push(event),
       listTerminalEvents: (_id: string, after: number) => events.filter((event) => event.seq > after),
-      listTerminalEventsBefore: (_id: string, before: number) => events.filter((event) => event.seq < before)
+      listTerminalEventsBefore: (_id: string, before: number) => events.filter((event) => event.seq < before),
+      pruneTerminalEvents: vi.fn(),
+      deleteRow: (id: string) => { rows.delete(id); }
     } as unknown as Store,
-    events
+    events,
+    deleteRow: (id: string) => { rows.delete(id); },
+    deleteSession: (id: string) => {
+      sessions.delete(id);
+      for (const [terminalId, current] of [...rows]) if (current.sessionId === id) rows.delete(terminalId);
+    }
   };
 }
 
@@ -92,5 +113,48 @@ describe("TerminalChatManager", () => {
     manager.stop(terminal.id);
     ptyMocks.instances[0]!.emitExit(1, 2);
     expect(manager.get(terminal.id)).toMatchObject({ state: "stopped", desiredState: "stopped" });
+  });
+
+  it("can create another terminal after the previous session is removed", () => {
+    const { store, deleteSession } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const first = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    manager.remove(first.id);
+    deleteSession("session-1");
+    ptyMocks.instances[0]!.emitExit(0);
+    const second = manager.create({ projectId: "project-1", sessionId: "session-2", title: "New shell", cwd: "/tmp", profileId: "shell" });
+    expect(second.sessionId).toBe("session-2");
+    expect(manager.list("project-1")).toHaveLength(1);
+    expect(manager.get(first.id)).toBeNull();
+  });
+
+  it("drops cascaded terminals instead of crashing on the next create", () => {
+    const { store, deleteRow } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const first = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    deleteRow(first.id);
+    ptyMocks.instances[0]!.emitExit(1);
+    expect(manager.get(first.id)).toBeNull();
+    const second = manager.create({ projectId: "project-1", sessionId: "session-2", title: "New shell", cwd: "/tmp", profileId: "shell" });
+    expect(second.projectId).toBe("project-1");
+    expect(manager.list("project-1").map((item) => item.id)).toEqual([second.id]);
+  });
+});
+
+describe("TerminalChatManager with sqlite", () => {
+  it("creates a new terminal after the previous session is deleted", () => {
+    const db = new Store(":memory:");
+    const project = db.createProject({ name: "Demo", displayPath: "/tmp", realPath: "/tmp" });
+    const session = db.createSession({ projectId: project.id, title: "shell 终端", kind: "terminal-chat" });
+    const manager = new TerminalChatManager(db);
+    const first = manager.create({ projectId: project.id, sessionId: session.id, title: session.title, cwd: "/tmp", profileId: "shell" });
+    manager.remove(first.id);
+    db.deleteSession(session.id);
+    expect(db.getTerminalSession(first.id)).toBeUndefined();
+    const nextSession = db.createSession({ projectId: project.id, title: "shell 终端", kind: "terminal-chat" });
+    const second = manager.create({ projectId: project.id, sessionId: nextSession.id, title: nextSession.title, cwd: "/tmp", profileId: "shell" });
+    expect(second.sessionId).toBe(nextSession.id);
+    expect(manager.list(project.id)).toHaveLength(1);
+    db.db.close();
   });
 });

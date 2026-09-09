@@ -1134,7 +1134,7 @@ app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   if (!session) return reply.code(404).send({ error: "Session not found" });
   runs.cancel(id);
   const terminalSession = store.getTerminalSessionBySession(id);
-  if (terminalSession) terminalChats.stop(terminalSession.id);
+  if (terminalSession) terminalChats.remove(terminalSession.id);
   store.deleteSession(id);
   return { ok: true };
 });
@@ -1701,6 +1701,8 @@ app.post("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req
     const terminal = terminalChats.create({ projectId, sessionId: session.id, title: session.title, cwd: rootPath, profileId: body.profileId, restartPolicy: body.restartPolicy });
     return { session, terminal };
   } catch (error) {
+    const created = store.getTerminalSessionBySession(session.id);
+    if (created) terminalChats.remove(created.id);
     store.deleteSession(session.id);
     return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
   }

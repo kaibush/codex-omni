@@ -66,6 +66,7 @@ import type {
   Session,
   SessionDetailPage,
   SessionSnapshot,
+  TerminalChatSession,
   TimelineItem
 } from "@/types";
 import { ApprovalAuditDialog } from "@/features/workspace/ApprovalAuditDialog";
@@ -1412,8 +1413,15 @@ export function Workspace() {
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
         (current ?? []).filter((session) => session.id !== id)
       );
-      if (sessionId === id) openWorkspace(projectId, remaining[0]?.id ?? "", true);
+      qc.setQueryData<{ items: TerminalChatSession[] }>(["terminal-chat-sessions", projectId], (current) =>
+        current ? { items: current.items.filter((item) => item.sessionId !== id) } : current
+      );
+      if (sessionId === id) {
+        const next = remaining[0];
+        openWorkspace(projectId, next?.id ?? "", true, next?.kind === "terminal-chat" ? "terminal-chat" : "chat");
+      }
       void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+      void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", projectId] });
       void qc.removeQueries({ queryKey: ["session", id] });
     }
   });
