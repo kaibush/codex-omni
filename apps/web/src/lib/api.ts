@@ -43,6 +43,24 @@ export async function apiUpload<T>(url: string, body: BodyInit): Promise<T> {
   return data as T;
 }
 
+export async function apiText(url: string) {
+  const headers = new Headers();
+  if (csrf) headers.set("x-csrf-token", csrf);
+  const response = await fetch(url, { credentials: "include", headers });
+  const text = await response.text();
+  if (!response.ok) {
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const data = JSON.parse(text) as { message?: string; error?: string };
+      message = data.message ?? data.error ?? message;
+    } catch {
+      // keep the raw body
+    }
+    throw new Error(message);
+  }
+  return text;
+}
+
 export async function apiDownload(url: string, filename: string) {
   const headers = new Headers();
   if (csrf) headers.set("x-csrf-token", csrf);

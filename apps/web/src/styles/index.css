@@ -1338,6 +1338,9 @@ button.composer-chip:hover,
   font-size: 0.9rem;
   line-height: 1.6;
   color: var(--foreground);
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 .markdown > :first-child {
   margin-top: 0;
@@ -1612,6 +1615,15 @@ button.composer-chip:hover,
     flex-wrap: nowrap;
     justify-content: flex-end;
     scrollbar-width: none;
+  }
+  .copy-button-message {
+    width: 2.25rem;
+    height: 2.25rem;
+    opacity: 1;
+  }
+  .copy-button-code {
+    min-width: 3.5rem;
+    min-height: 2rem;
   }
   .message-actions::-webkit-scrollbar {
     display: none;

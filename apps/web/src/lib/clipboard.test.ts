@@ -34,4 +34,25 @@ describe("copyTextToClipboard", () => {
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(document.querySelector("textarea")).toBeNull();
   });
+
+  it("keeps the fallback textarea inside the viewport for iOS", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined
+    });
+    const execCommand = vi.fn(() => {
+      const textarea = document.querySelector("textarea");
+      expect(textarea).not.toBeNull();
+      expect(textarea?.style.left).toBe("0px");
+      expect(textarea?.style.top).toBe("0px");
+      return true;
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand
+    });
+
+    await expect(copyTextToClipboard("history")).resolves.toBe(true);
+    expect(execCommand).toHaveBeenCalledWith("copy");
+  });
 });

@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { useTheme } from "@/context/theme-provider";
-import { api, apiUpload, wsUrl } from "@/lib/api";
+import { api, apiText, apiUpload, wsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { defaultWorkspaceView, settingsPath, workspacePath } from "@/lib/routes";
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
@@ -1981,6 +1981,35 @@ export function Workspace() {
       toast.success("已复制消息链接");
     } else toast.error("复制失败");
   };
+  const copySession = async (id: string) => {
+    const cached = qc.getQueryData<SessionDetailPage>(["session", id]);
+    try {
+      const fromCache = cached?.messages
+        ?.filter(
+          (message) =>
+            message.content.trim() &&
+            (message.role === "user" || message.role === "assistant" || message.role === "reasoning")
+        )
+        .map((message) => {
+          const heading =
+            message.role === "user" ? "用户" : message.role === "assistant" ? "助手" : "推理";
+          return `## ${heading}\n\n${message.content.trim()}`;
+        })
+        .join("\n\n");
+      const text =
+        fromCache ||
+        (await apiText(`/api/sessions/${id}/export?format=markdown&reasoning=true&tools=true`));
+      if (!text.trim()) {
+        toast.error("这条对话还没有可复制的内容");
+        return;
+      }
+      const copied = await copyTextToClipboard(text);
+      if (copied) toast.success("对话已复制");
+      else toast.error("复制失败，请长按消息选择文字");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "复制对话失败");
+    }
+  };
   const jumpMessageHit = (offset: number) => {
     if (!messageHits.length) return;
     const current = Math.max(
@@ -2136,6 +2165,7 @@ export function Workspace() {
         updateSession={updateSession}
         archiveSession={archiveSession}
         exportSession={exportSession}
+        copySession={(id) => void copySession(id)}
         deleteSession={deleteSession}
         setSendNotice={setSendNotice}
         activeRunsCount={activeRuns.data?.length ?? 0}
@@ -2185,6 +2215,7 @@ export function Workspace() {
               updateSession={updateSession}
               archiveSession={archiveSession}
               exportSession={exportSession}
+              copySession={(id) => void copySession(id)}
               deleteSession={deleteSession}
               setSendNotice={setSendNotice}
             />

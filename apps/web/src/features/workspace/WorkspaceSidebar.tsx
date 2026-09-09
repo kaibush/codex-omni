@@ -156,6 +156,7 @@ export function WorkspaceSidebar({
   updateSession,
   archiveSession,
   exportSession,
+  copySession,
   deleteSession,
   setSendNotice,
   activeRunsCount,
@@ -236,6 +237,7 @@ export function WorkspaceSidebar({
   };
   archiveSession: (session: Session, archived: boolean) => void;
   exportSession: (id: string, format: "markdown" | "json") => void;
+  copySession: (id: string) => void;
   deleteSession: { mutate: (id: string) => void };
   setSendNotice: (value: string) => void;
   activeRunsCount: number;
@@ -843,6 +845,11 @@ export function WorkspaceSidebar({
                                       {s.archivedAt ? "恢复归档" : "归档"}
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
+                                    {s.kind !== "terminal-chat" ? (
+                                      <DropdownMenuItem onSelect={() => copySession(s.id)}>
+                                        <Copy /> 复制对话
+                                      </DropdownMenuItem>
+                                    ) : null}
                                     <DropdownMenuItem
                                       onSelect={() => exportSession(s.id, "markdown")}
                                     >

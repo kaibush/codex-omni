@@ -67,6 +67,7 @@ export function WorkspaceHeader({
   updateSession,
   archiveSession,
   exportSession,
+  copySession,
   deleteSession,
   setSendNotice
 }: {
@@ -109,6 +110,7 @@ export function WorkspaceHeader({
   };
   archiveSession: (session: Session, archived: boolean) => void;
   exportSession: (id: string, format: "markdown" | "json") => void;
+  copySession: (id: string) => void;
   deleteSession: { mutate: (id: string) => void };
   setSendNotice: (value: string) => void;
 }) {
@@ -290,6 +292,11 @@ export function WorkspaceHeader({
                 {activeSession.archivedAt ? "恢复归档" : "归档"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {activeSession.kind !== "terminal-chat" ? (
+                <DropdownMenuItem onSelect={() => copySession(activeSession.id)}>
+                  <Copy /> 复制对话
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onSelect={() => exportSession(activeSession.id, "markdown")}>
                 <Download /> 导出 Markdown
               </DropdownMenuItem>

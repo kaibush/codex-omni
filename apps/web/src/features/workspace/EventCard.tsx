@@ -47,6 +47,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { toast } from "sonner";
 import { useTheme } from "@/context/theme-provider";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import {
@@ -128,7 +129,10 @@ function CopyButton({ text, variant = "tool" }: { text: string; variant?: CopyBu
       onClick={(event) => {
         event.stopPropagation();
         void copyTextToClipboard(text).then((success) => {
-          if (!success) return;
+          if (!success) {
+            toast.error("复制失败，可长按文字选择后复制");
+            return;
+          }
           setCopied(true);
           if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
           resetTimer.current = window.setTimeout(() => setCopied(false), 1400);
