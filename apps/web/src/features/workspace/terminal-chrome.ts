@@ -100,6 +100,26 @@ export function encodeTerminalKeyboardSubmit(value: string): string {
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
 }
 
+export function quoteShellArg(value: string): string {
+  if (!value) return "''";
+  if (/^[A-Za-z0-9_./:@%=+-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function composeTerminalAttachmentCommand(
+  draft: string,
+  paths: readonly string[]
+): { command: string; submit: boolean } {
+  const quoted = paths.map(quoteShellArg).join(" ");
+  const trimmed = draft.trim();
+  if (!quoted) return { command: draft, submit: Boolean(trimmed) };
+  if (!trimmed) return { command: quoted, submit: false };
+  if (paths.some((path) => draft.includes(path) || draft.includes(quoteShellArg(path)))) {
+    return { command: draft, submit: true };
+  }
+  return { command: `${draft.trimEnd()} ${quoted}`, submit: true };
+}
+
 export type TerminalInputModifiers = {
   ctrl?: boolean;
   alt?: boolean;

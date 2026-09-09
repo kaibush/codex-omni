@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   isCoarsePointer,
   chromePointerMovedTooFar,
+  composeTerminalAttachmentCommand,
   encodeTerminalKeyboardSubmit,
   encodeTerminalModifiedInput,
   filterCommandHistory,
+  quoteShellArg,
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
@@ -146,6 +148,41 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalModifiedInput("\t", { shift: true })).toBe("\x1b[Z");
     expect(encodeTerminalModifiedInput("[", { ctrl: true })).toBe("\x1b");
     expect(encodeTerminalModifiedInput("中", { ctrl: true })).toBe("中");
+  });
+});
+
+describe("terminal attachment paths", () => {
+  it("quotes shell arguments only when needed", () => {
+    expect(quoteShellArg("")).toBe("''");
+    expect(quoteShellArg("ls")).toBe("ls");
+    expect(quoteShellArg(".codex-uploads/1-a.md")).toBe(".codex-uploads/1-a.md");
+    expect(quoteShellArg("my file.txt")).toBe("'my file.txt'");
+    expect(quoteShellArg("it's")).toBe("'it'\\''s'");
+  });
+
+  it("inserts uploaded paths instead of executing a bare file", () => {
+    expect(composeTerminalAttachmentCommand("", [".codex-uploads/1-a.md"])).toEqual({
+      command: ".codex-uploads/1-a.md",
+      submit: false
+    });
+    expect(composeTerminalAttachmentCommand("cat", [".codex-uploads/1-a.md"])).toEqual({
+      command: "cat .codex-uploads/1-a.md",
+      submit: true
+    });
+    expect(
+      composeTerminalAttachmentCommand("cat .codex-uploads/1-a.md", [".codex-uploads/1-a.md"])
+    ).toEqual({
+      command: "cat .codex-uploads/1-a.md",
+      submit: true
+    });
+    expect(composeTerminalAttachmentCommand("", ["my file.txt"])).toEqual({
+      command: "'my file.txt'",
+      submit: false
+    });
+    expect(composeTerminalAttachmentCommand("python", ["my file.txt"])).toEqual({
+      command: "python 'my file.txt'",
+      submit: true
+    });
   });
 });
 

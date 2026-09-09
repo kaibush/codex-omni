@@ -12,16 +12,20 @@ import {
   Delete,
   Download,
   Eraser,
+  FileText,
   History as HistoryIcon,
+  Image,
   Keyboard,
   LoaderCircle,
+  Paperclip,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
   Send,
   Square,
-  SquareTerminal
+  SquareTerminal,
+  X
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,12 +39,24 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/context/theme-provider";
-import { api, terminalChatWsUrl } from "@/lib/api";
+import { api, apiUpload, terminalChatWsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { createId } from "@/lib/utils";
 import type { Project, Session, TerminalChatSession } from "@/types";
+import {
+  ATTACHMENT_UPLOAD_DIR,
+  attachmentUploadPath,
+  collectComposerAttachments,
+  filesFromClipboard,
+  filesFromDataTransfer,
+  formatBytes,
+  type ComposerAttachment,
+  type FileLike
+} from "./composer-attachments";
 import { LiveDuration } from "./WorkspaceStatus";
 import {
   chromePointerMovedTooFar,
+  composeTerminalAttachmentCommand,
   encodeTerminalKeyboardSubmit,
   encodeTerminalModifiedInput,
   filterCommandHistory,
@@ -72,6 +88,39 @@ const modifierClass = (pressed: boolean) =>
       : "border-border bg-background text-foreground dark:border-white/15 dark:bg-white/5 dark:text-slate-200"
   }`;
 
+function transferHasFiles(data: DataTransfer | null | undefined) {
+  return Boolean(data?.types.includes("Files"));
+}
+
+function fileDragHandlers(
+  setDragActive: (value: boolean) => void,
+  onFiles: (files: FileLike[]) => void
+) {
+  return {
+    onDragEnter: (event: { dataTransfer: DataTransfer; preventDefault: () => void }) => {
+      if (!transferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      setDragActive(true);
+    },
+    onDragOver: (event: { dataTransfer: DataTransfer; preventDefault: () => void }) => {
+      if (!transferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    },
+    onDragLeave: (event: { currentTarget: EventTarget & { contains: (node: Node) => boolean }; relatedTarget: EventTarget | null; }) => {
+      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+      setDragActive(false);
+    },
+    onDrop: (event: { dataTransfer: DataTransfer; preventDefault: () => void }) => {
+      if (!transferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      setDragActive(false);
+      onFiles(filesFromDataTransfer(event.dataTransfer));
+    }
+  };
+}
+
 function statusLabel(session: TerminalChatSession, connected: boolean) {
   const parts = [
     connected
@@ -90,7 +139,7 @@ function statusLabel(session: TerminalChatSession, connected: boolean) {
   return parts.join(" · ");
 }
 
-function TerminalChatViewport({ session, onChange }: { session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
+function TerminalChatViewport({ project, session, onChange }: { project: Project; session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
   const { resolvedTheme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
@@ -142,6 +191,13 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
   const [historyLoading, setHistoryLoading] = useState(false);
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const [comboDraft, setComboDraft] = useState("");
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [attachError, setAttachError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const uploadingRef = useRef(false);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const addAttachmentsRef = useRef<(files: FileLike[]) => Promise<void>>(async () => {});
 
   const sendRaw = useCallback((data: string) => {
     if (!data) return;
@@ -313,6 +369,14 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     };
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(element);
+    const onHostPaste = (event: ClipboardEvent) => {
+      const files = filesFromClipboard(event.clipboardData);
+      if (!files.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void addAttachmentsRef.current(files);
+    };
+    element.addEventListener("paste", onHostPaste, true);
     const dataSubscription = instance.onData((data) => {
       if (rawRef.current) sendInput(data);
     });
@@ -391,6 +455,7 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (reconnect.current) window.clearTimeout(reconnect.current);
       observer.disconnect();
+      element.removeEventListener("paste", onHostPaste, true);
       detachTouchScroll();
       dataSubscription.dispose();
       scrollSubscription.dispose();
@@ -549,14 +614,91 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     if (value) sendInput(value, false);
     focusTerminalIfAppropriate();
   };
+  const addAttachments = async (files: FileLike[]) => {
+    if (!files.length) return;
+    try {
+      const result = await collectComposerAttachments(attachments, files, createId);
+      setAttachments(result.items);
+      setAttachError(result.error ?? "");
+      if (result.error) toast.error(result.error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "添加附件失败";
+      setAttachError(message);
+      toast.error(message);
+    }
+  };
+  addAttachmentsRef.current = addAttachments;
+  const uploadAttachments = async (files: ComposerAttachment[]) => {
+    try {
+      await api(`/api/projects/${project.id}/files`, {
+        method: "POST",
+        body: JSON.stringify({ path: ATTACHMENT_UPLOAD_DIR, type: "directory" })
+      });
+    } catch (error) {
+      const notice = error instanceof Error ? error.message : String(error);
+      if (!notice.includes("已存在")) throw error;
+    }
+    const uploaded: Array<{ name: string; path: string }> = [];
+    for (const file of files) {
+      const path = attachmentUploadPath(file.name);
+      const copy = new ArrayBuffer(file.bytes.byteLength);
+      new Uint8Array(copy).set(file.bytes);
+      await apiUpload(
+        `/api/projects/${project.id}/files/upload?path=${encodeURIComponent(path)}&overwrite=true`,
+        copy
+      );
+      uploaded.push({ name: file.name, path });
+    }
+    return uploaded;
+  };
   const submitLine = () => {
-    if (lineComposing.current || !draft.trim()) return;
-    rememberCommand(draft);
-    sendRaw(encodeTerminalKeyboardSubmit(draft));
-    setDraft("");
-    setHistoryOpen(false);
-    setHistoryQuery("");
-    setShortcutOpen(false);
+    if (lineComposing.current || uploadingRef.current) return;
+    void (async () => {
+      let command = draft;
+      let shouldSubmit = Boolean(command.trim());
+      if (attachments.length) {
+        uploadingRef.current = true;
+        setUploading(true);
+        try {
+          const uploaded = await uploadAttachments(attachments);
+          const composed = composeTerminalAttachmentCommand(
+            draft,
+            uploaded.map((item) => item.path)
+          );
+          command = composed.command;
+          shouldSubmit = composed.submit;
+          setAttachments([]);
+          setAttachError("");
+          toast.success(
+            shouldSubmit
+              ? `已保存到 ${ATTACHMENT_UPLOAD_DIR}`
+              : `已保存到 ${ATTACHMENT_UPLOAD_DIR}，路径已填入输入框`
+          );
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "上传附件失败");
+          return;
+        } finally {
+          uploadingRef.current = false;
+          setUploading(false);
+        }
+      }
+      if (!command.trim()) return;
+      if (!shouldSubmit) {
+        setDraft(command);
+        window.setTimeout(() => {
+          lineRef.current?.focus();
+          const length = command.length;
+          lineRef.current?.setSelectionRange(length, length);
+        }, 0);
+        return;
+      }
+      rememberCommand(command);
+      sendRaw(encodeTerminalKeyboardSubmit(command));
+      setDraft("");
+      setHistoryOpen(false);
+      setHistoryQuery("");
+      setShortcutOpen(false);
+    })();
   };
   const downloadLog = () => {
     const blob = new Blob([outputRef.current || readVisibleBufferText()], { type: "text/plain;charset=utf-8" });
@@ -704,8 +846,12 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
     </div>
   );
 
+  const dropHandlers = fileDragHandlers(setDragActive, (files) => { void addAttachments(files); });
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100"
+      {...dropHandlers}
+    >
       <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-muted px-3 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
         <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
         <span className="min-w-0 truncate">{statusLabel(session, connected)}</span>
@@ -752,6 +898,11 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute inset-0 p-2 sm:p-3">
         <div ref={host} className="h-full touch-none overscroll-contain" />
+        {dragActive ? (
+          <div className="pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-xl border border-dashed border-sky-400/70 bg-sky-500/10 text-sm text-sky-800 dark:border-sky-400/50 dark:text-sky-100 sm:inset-3">
+            松开鼠标即可添加附件
+          </div>
+        ) : null}
         {!atBottom && (
           <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
             <ArrowDown className="size-4" />
@@ -761,7 +912,34 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
       </div>
       <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8">
         <div className="chat-content-width mx-auto">
-          <div className="composer-shell overflow-visible rounded-2xl p-3">
+          <div className="composer-shell overflow-visible rounded-2xl p-3" data-drop={dragActive ? "true" : "false"}>
+          {dragActive ? <div className="composer-drop-hint">松开鼠标即可添加附件</div> : null}
+          {attachments.length > 0 ? (
+            <div className="composer-attachments">
+              {attachments.map((item) => (
+                <div key={item.id} className="composer-attachment">
+                  {item.kind === "image" && item.previewUrl ? (
+                    <img src={item.previewUrl} alt="" />
+                  ) : item.kind === "image" ? (
+                    <Image className="size-4" />
+                  ) : (
+                    <FileText className="size-4" />
+                  )}
+                  <span className="min-w-0 truncate" title={item.name}>{item.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{formatBytes(item.size)}</span>
+                  <button
+                    type="button"
+                    className="grid size-5 place-items-center rounded-full hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`移除 ${item.name}`}
+                    onClick={() => setAttachments((current) => current.filter((file) => file.id !== item.id))}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {attachError ? <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p> : null}
           <div className="relative">
             {shortcutOpen ? (
               <div ref={shortcutPanelRef} className="absolute bottom-full left-0 z-30 mb-2 rounded-xl border border-border bg-card shadow-xl dark:border-white/15 dark:bg-slate-900">
@@ -802,6 +980,12 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               lang="zh-CN"
               className="max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-2 py-1 font-mono text-base leading-6 shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent sm:min-h-14 sm:text-sm"
               onChange={(event) => setDraft(event.target.value)}
+              onPaste={(event) => {
+                const files = filesFromClipboard(event.clipboardData);
+                if (!files.length) return;
+                event.preventDefault();
+                void addAttachments(files);
+              }}
               onCompositionStart={() => { lineComposing.current = true; }}
               onCompositionEnd={() => { lineComposing.current = false; }}
               onKeyDown={(event) => {
@@ -862,6 +1046,29 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
               </span>
             </div>
             <div className="composer-actions">
+              <input
+                ref={attachInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  const files = event.target.files ? [...event.target.files] : [];
+                  event.target.value = "";
+                  void addAttachments(files);
+                }}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8 rounded-lg"
+                aria-label="添加附件"
+                title="添加附件，也可拖入或粘贴文件"
+                disabled={uploading}
+                onClick={() => attachInputRef.current?.click()}
+              >
+                <Paperclip className="size-4" />
+              </Button>
               <span ref={historyButtonRef} className="inline-flex">
                 <Button
                   type="button"
@@ -876,8 +1083,8 @@ function TerminalChatViewport({ session, onChange }: { session: TerminalChatSess
                   历史
                 </Button>
               </span>
-              <Button type="button" size="icon" className="size-8 rounded-lg" aria-label="发送到终端" onClick={submitLine} disabled={!draft.trim()}>
-                <Send className="size-4" />
+              <Button type="button" size="icon" className="size-8 rounded-lg" aria-label="发送到终端" onClick={submitLine} disabled={uploading || (!draft.trim() && attachments.length === 0)}>
+                {uploading ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </Button>
             </div>
           </div>
@@ -1049,7 +1256,7 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
             <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
             <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="删除终端对话" onClick={() => closeTab(selected)} disabled={remove.isPending}><Delete className="size-3.5" /></Button>
           </div>
-          <TerminalChatViewport key={selected.id} session={selected} onChange={selectedChange} />
+          <TerminalChatViewport key={selected.id} project={project} session={selected} onChange={selectedChange} />
         </>
       ) : (
         <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
