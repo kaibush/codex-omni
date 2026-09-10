@@ -158,6 +158,22 @@ function isCompletedAssistant(item: TimelineItem) {
   return item.kind === "assistant" && item.streaming !== true;
 }
 
+function isCompletedTurnResidue(item: TimelineItem) {
+  return (
+    item.kind === "reasoning" ||
+    item.kind === "tool" ||
+    item.kind === "file" ||
+    item.kind === "activity"
+  );
+}
+
+function historicalHasCompletedTurn(items: TimelineItem[]) {
+  const lastUser = findLastIndex(items, (item) => item.kind === "user");
+  const lastAssistant = findLastIndex(items, isCompletedAssistant);
+  if (lastAssistant <= lastUser) return false;
+  return items.slice(lastUser + 1, lastAssistant).some(isCompletedTurnResidue);
+}
+
 export function hideSupersededStreamErrors(items: TimelineItem[]): TimelineItem[] {
   const lastAssistantIndex = findLastIndex(items, isCompletedAssistant);
   return items.filter((item, index) => {
@@ -402,11 +418,29 @@ export function mergeSessionTimeline(input: {
           .map((item) => item.id)
       : []
   );
+  const extraUserIndex = input.current.findIndex(
+    (item) => item.kind === "user" && !historicalIds.has(item.id)
+  );
+  const liveStillStreaming = input.current.some(
+    (item) => item.streaming && (item.kind === "assistant" || item.kind === "tool")
+  );
+  const persistCompletedTurn = !liveStillStreaming && historicalHasCompletedTurn(input.historical);
   const inFlight = extras.filter((item) => {
     if (olderIds.has(item.id)) return false;
     if (isStaleInFlightError(item, input.current, newestCreatedAt)) return false;
-    if (afterHistoricalIds.has(item.id)) return true;
     if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
+    if (item.kind === "approval" && (!item.data?.status || item.data.status === "pending")) {
+      return true;
+    }
+    // After the latest page already contains a finished reply, leftover live
+    // thinking/tool cards are almost always the same turn with different ids
+    // (rollout backfill vs websocket). Appending them after the assistant is
+    // what made the timeline look shuffled until a full refresh.
+    if (persistCompletedTurn && isCompletedTurnResidue(item) && !item.streaming) {
+      const liveIndex = input.current.findIndex((entry) => entry.id === item.id);
+      if (extraUserIndex < 0 || liveIndex < extraUserIndex) return false;
+    }
+    if (afterHistoricalIds.has(item.id)) return true;
     return (item.createdAt ?? 0) > newestCreatedAt;
   });
   return cleanTimelineItems([...older, ...historical, ...inFlight]);

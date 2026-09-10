@@ -670,6 +670,7 @@ export function Workspace() {
     let disposed = false;
     let reconnectTimer: number | undefined;
     let timelineFlushTimer: number | undefined;
+    let settledTurn = false;
     let timelineUpdates: Array<(current: TimelineItem[]) => TimelineItem[]> = [];
     const flushTimelineUpdates = () => {
       if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
@@ -955,6 +956,7 @@ export function Workspace() {
         return;
       }
       if (event.type === "user.message") {
+        settledTurn = false;
         if (!stickToBottom.current) setHasDeferredLiveEvents(true);
         enqueueTimelineUpdate((current) =>
           upsert(current, String(payload.id ?? `user-${event.requestId}`), {
@@ -987,6 +989,7 @@ export function Workspace() {
         return;
       }
       if (event.type === "run.started" || event.type === "turn.started") {
+        settledTurn = false;
         setRunState((current) =>
           beginRunningTaskState(current, {
             ...(typeof payload.startedAt === "number" ? { startedAt: payload.startedAt } : {}),
@@ -995,6 +998,7 @@ export function Workspace() {
         );
         void qc.invalidateQueries({ queryKey: ["active-runs"] });
       } else if (event.type === "turn.completed") {
+        settledTurn = true;
         setRunState((current) =>
           patchTaskState(current, {
             status: "completed",
@@ -1009,6 +1013,7 @@ export function Workspace() {
         );
         refreshSession();
       } else if (event.type === "run.failed") {
+        settledTurn = true;
         setRunState((current) =>
           patchTaskState(current, {
             status: "failed",
@@ -1023,6 +1028,7 @@ export function Workspace() {
         );
         refreshSession();
       } else if (event.type === "run.cancelled") {
+        settledTurn = true;
         setRunState((current) =>
           patchTaskState(current, {
             status: "cancelled",
@@ -1034,6 +1040,7 @@ export function Workspace() {
         );
         refreshSession();
       } else if (event.type === "run.interrupted") {
+        settledTurn = true;
         setRunState((current) =>
           patchTaskState(current, {
             status: "interrupted",
@@ -1067,9 +1074,20 @@ export function Workspace() {
       if (!stickToBottom.current && isDeferredLiveTimelineEvent(event.type)) {
         setHasDeferredLiveEvents(true);
       }
+      const skipNewCards = settledTurn;
       enqueueTimelineUpdate((current) => {
-        const put = (id: string, next: Omit<TimelineItem, "id">) =>
-          upsert(current, id, compactTimelineItem(next));
+        const put = (id: string, next: Omit<TimelineItem, "id">) => {
+          if (
+            skipNewCards &&
+            !current.some((item) => item.id === id) &&
+            next.kind !== "user" &&
+            next.kind !== "approval" &&
+            next.kind !== "error"
+          ) {
+            return current;
+          }
+          return upsert(current, id, compactTimelineItem(next));
+        };
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
           const previous = current.find((item) => item.id === id);

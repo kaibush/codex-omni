@@ -64,6 +64,64 @@ describe("mergeSessionTimeline", () => {
     ).toEqual(["m3", "m4", "live"]);
   });
 
+  it("drops leftover live activity after a persisted completed reply", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("tool-jsonl-1", 20, { kind: "tool", data: { command: "ruff format" } }),
+          item("tool-jsonl-2", 21, { kind: "tool", data: { command: "python3" } }),
+          item("assistant-1", 40, { kind: "assistant", text: "冷却区已经能同步。" })
+        ],
+        current: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("think-1", 15, { kind: "reasoning", text: "先改去重" }),
+          item("tool-live-1", 30, { kind: "tool", data: { command: "python3" } }),
+          item("assistant-1", 40, { kind: "assistant", text: "提前结束需要按账号去重。" }),
+          item("cmd-live", 50, { kind: "tool", data: { command: "python3 - <<'PY'" } }),
+          item("think-2", 51, { kind: "reasoning", text: "继续检查" }),
+          item("tool-live-2", 52, { kind: "tool", data: { command: "ruff format" } })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-1", "tool-jsonl-1", "tool-jsonl-2", "assistant-1"]);
+  });
+
+  it("keeps live activity extras while the assistant is still streaming", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 20, { kind: "assistant", text: "working", streaming: true })
+        ],
+        current: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 20, { kind: "assistant", text: "working", streaming: true }),
+          item("tool-live", 30, { kind: "tool", streaming: true, data: { command: "ls" } })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-1", "assistant-1", "tool-live"]);
+  });
+
+  it("keeps a new turn's live activity after a completed historical reply", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user-1", 10, { kind: "user", text: "first" }),
+          item("assistant-1", 20, { kind: "assistant", text: "done" })
+        ],
+        current: [
+          item("user-1", 10, { kind: "user", text: "first" }),
+          item("assistant-1", 20, { kind: "assistant", text: "done" }),
+          item("user-2", 30, { kind: "user", text: "next" }),
+          item("tool-live", 31, { kind: "tool", data: { command: "ls" } })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-1", "assistant-1", "user-2", "tool-live"]);
+  });
+
   it("keeps active streaming items but drops terminal errors older than the fetched page", () => {
     expect(
       mergeSessionTimeline({
