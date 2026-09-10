@@ -31,6 +31,17 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { defaultWorkspaceView, settingsPath, workspacePath } from "@/lib/routes";
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
 import {
+  fallbackProviderId,
+  isUnstartedComposerSession,
+  loadComposerModels,
+  loadComposerProviderId,
+  persistComposerModel,
+  persistComposerProviderId,
+  resolveComposerModel,
+  resolveComposerProviderId,
+  shouldHydrateComposerProvider
+} from "@/lib/composer-selection";
+import {
   isPlaceholderSessionTitle,
   listHistoricalSessions,
   sortSessionsByLatest,
@@ -151,7 +162,7 @@ export function Workspace() {
   const params = useParams<{ projectId?: string; sessionId?: string; section?: string }>();
   const projectId = params.projectId ?? "";
   const sessionId = params.sessionId ?? "";
-  const [providerId, setProviderId] = useState("");
+  const [providerId, setProviderId] = useState(() => loadComposerProviderId());
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -276,6 +287,7 @@ export function Workspace() {
   const liveEventsRef = useRef<TimelineItem[]>([]);
   const eventsRef = useRef<TimelineItem[]>([]);
   const cachedSessionId = useRef(sessionId);
+  const hydratedComposerSessionId = useRef<string | null>(null);
   currentSessionId.current = sessionId;
   eventsRef.current = events;
   const restoreLiveTimeline = useCallback(
@@ -515,6 +527,9 @@ export function Workspace() {
     liveEventsRef.current = [];
     eventsRef.current = [];
     setTimelineLockId(undefined);
+    if (hydratedComposerSessionId.current !== sessionId) {
+      hydratedComposerSessionId.current = null;
+    }
   }, [projectId, qc, sessionId]);
   useEffect(() => {
     if (followingLive) liveEventsRef.current = events;
@@ -539,13 +554,32 @@ export function Workspace() {
   }, [attachments, input]);
   useEffect(() => {
     const selected = detail.data?.session;
-    if (selected)
-      setProviderId(
-        selected.providerId ??
-          projects.data?.find((p) => p.id === selected.projectId)?.providerId ??
-          ""
-      );
-  }, [detail.data?.session, projects.data]);
+    if (
+      !selected ||
+      !shouldHydrateComposerProvider({
+        sessionId,
+        hydratedSessionId: hydratedComposerSessionId.current,
+        sessionReady: selected.id === sessionId
+      })
+    ) {
+      return;
+    }
+    hydratedComposerSessionId.current = sessionId;
+    setProviderId((current) => {
+      const next = resolveComposerProviderId({
+        sessionProviderId: selected.providerId,
+        projectProviderId:
+          projects.data?.find((project) => project.id === selected.projectId)?.providerId ?? null,
+        currentProviderId: current,
+        lastUsedProviderId: loadComposerProviderId(),
+        providers: providers.data,
+        keepCurrentOnEmptySession: isUnstartedComposerSession({
+          threadId: selected.threadId
+        })
+      });
+      return next || current;
+    });
+  }, [detail.data?.session, projects.data, providers.data, sessionId]);
   useEffect(() => {
     if (!detail.data || detail.data.session.id !== sessionId) return;
     const messages = detail.data.messages;
@@ -625,6 +659,9 @@ export function Workspace() {
   providerIdRef.current = providerId;
   const workspaceSettingsRef = useRef(workspaceSettings);
   workspaceSettingsRef.current = workspaceSettings;
+  useEffect(() => {
+    persistComposerProviderId(providerId);
+  }, [providerId]);
   useEffect(() => {
     if (!pageVisible) {
       setConnection("disconnected");
@@ -1206,14 +1243,9 @@ export function Workspace() {
     }
   }, []);
   useEffect(() => {
-    if (
-      !providers.data ||
-      (providerId && providers.data.some((provider) => provider.id === providerId))
-    )
-      return;
-    setProviderId(
-      providers.data.find((provider) => provider.isDefault)?.id ?? providers.data[0]?.id ?? ""
-    );
+    if (!providers.data?.length) return;
+    const next = fallbackProviderId(providers.data, providerId || loadComposerProviderId());
+    if (next && next !== providerId) setProviderId(next);
   }, [providers.data, providerId]);
   const pendingApprovals = useMemo(
     () =>
@@ -1246,11 +1278,18 @@ export function Workspace() {
   const availableModels = useMemo(() => selectedProvider?.models ?? [], [selectedProvider?.models]);
   useEffect(() => {
     setModel((current) =>
-      current && availableModels.includes(current)
-        ? current
-        : (selectedProvider?.model ?? availableModels[0] ?? "")
+      resolveComposerModel({
+        current,
+        available: availableModels,
+        preferred: loadComposerModels()[providerId] ?? null,
+        fallback: selectedProvider?.model ?? null
+      })
     );
   }, [availableModels, providerId, selectedProvider?.model]);
+  useEffect(() => {
+    if (!providerId || !model || !availableModels.includes(model)) return;
+    persistComposerModel(providerId, model);
+  }, [availableModels, model, providerId]);
   const providerNames = useMemo(
     () => new Map(providers.data?.map((p) => [p.id, p.name]) ?? []),
     [providers.data]
@@ -1280,7 +1319,6 @@ export function Workspace() {
         ...(current ?? []).filter((session) => session.id !== s.id)
       ]);
       openWorkspace(s.projectId || projectId, s.id, false, "chat");
-      if (s.providerId) setProviderId(s.providerId);
       setNewSessionOpen(false);
       void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
     },
