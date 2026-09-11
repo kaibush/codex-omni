@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   Archive,
   ArchiveRestore,
+  Ban,
   Copy,
   Download,
   Eraser,
@@ -64,6 +65,8 @@ export function WorkspaceHeader({
   forkSessionFrom,
   reloadSession,
   clearRunRecords,
+  threadGoalLocked,
+  onClearThreadGoal,
   updateSession,
   archiveSession,
   exportSession,
@@ -95,6 +98,8 @@ export function WorkspaceHeader({
   forkSessionFrom: (messageId?: string, sourceId?: string) => void;
   reloadSession: () => void;
   clearRunRecords: () => void;
+  threadGoalLocked?: boolean;
+  onClearThreadGoal?: () => void;
   updateSession: {
     mutate: (input: {
       id: string;
@@ -274,6 +279,11 @@ export function WorkspaceHeader({
               <DropdownMenuItem onSelect={() => void clearRunRecords()}>
                 <Eraser /> 清理运行记录
               </DropdownMenuItem>
+              {threadGoalLocked && onClearThreadGoal ? (
+                <DropdownMenuItem onSelect={() => onClearThreadGoal()}>
+                  <Ban /> 清除卡住的目标
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onSelect={() =>
                   updateSession.mutate({

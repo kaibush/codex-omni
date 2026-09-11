@@ -525,4 +525,21 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("加载完整内容");
     expect(html).toContain("字符");
   });
+
+  it("renders a thread goal lock as a warning notice", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "goal-1",
+          kind: "error",
+          text: "Codex 已把该线程标记为额度用尽，继续发送也只会收到收尾总结。",
+          data: { tool: "thread_goal", title: "目标额度已用尽" }
+        }}
+      />
+    );
+    expect(html).toContain("目标额度已用尽");
+    expect(html).toContain("notice-card");
+    expect(html).not.toContain("运行失败");
+  });
+
 });

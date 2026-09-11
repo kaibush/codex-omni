@@ -155,12 +155,31 @@ export type Message = {
   updatedAt: number;
 };
 export type MessageCursor = Pick<Message, "createdAt" | "id">;
+export type ThreadGoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usage_limited"
+  | "budget_limited"
+  | "complete";
+export type ThreadGoal = {
+  threadId: string;
+  goalId: string;
+  objective: string;
+  status: ThreadGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+};
 export type SessionDetailPage = {
   session: Session;
   messages: Message[];
   latestRun: Message | null;
   nextCursor: MessageCursor | null;
   hasMore: boolean;
+  threadGoal?: ThreadGoal | null;
 };
 export type TimelineItem = {
   id: string;
@@ -275,6 +294,7 @@ export type SessionSnapshot = {
   queue: QueuedTurn[];
   replayTruncated: boolean;
   serverTime: number;
+  threadGoal?: ThreadGoal | null;
 };
 
 export type ProjectTerminal = {

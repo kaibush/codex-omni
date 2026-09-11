@@ -2141,6 +2141,30 @@ button.user-attachment-path {
   background: var(--muted);
   padding: 0.1rem 0.4rem;
 }
+.thread-goal-banner {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  z-index: 19;
+  display: flex;
+  width: min(42rem, calc(100% - 1.5rem));
+  transform: translateX(-50%);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.65rem;
+  border: 1px solid color-mix(in oklab, var(--chart-4) 42%, var(--border));
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--card) 88%, var(--chart-4));
+  padding: 0.7rem 0.85rem;
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.thread-goal-banner p {
+  margin: 0;
+}
+.chat-pane:has(.thread-goal-banner) .chat-scroll {
+  padding-top: 6.75rem;
+}
+
 .message-hit-bar {
   position: absolute;
   top: 0.75rem;

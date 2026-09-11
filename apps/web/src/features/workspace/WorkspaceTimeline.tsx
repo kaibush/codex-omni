@@ -26,8 +26,10 @@ import {
   shouldPauseLiveFollowFromWheel
 } from "@/lib/live-follow";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
+import { isThreadGoalLocked, type ThreadGoal } from "@/lib/thread-goal";
 import type { Session, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
+import { ThreadGoalBanner } from "./ThreadGoalBanner";
 import { VirtualTimeline } from "./VirtualTimeline";
 import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
 import { TimelineOutline } from "./TimelineOutline";
@@ -130,7 +132,10 @@ export function WorkspaceTimeline({
   connection,
   sendNotice,
   saveWorkspaceSettings,
-  loadFullMessage
+  loadFullMessage,
+  threadGoal,
+  clearingGoal,
+  onClearThreadGoal
 }: {
   workspaceView: "chat" | "files" | "git" | "terminal" | "terminal-chat";
   messageHits: Array<{ projectId: string; sessionId: string; messageId: string }>;
@@ -190,6 +195,9 @@ export function WorkspaceTimeline({
   sendNotice: string;
   saveWorkspaceSettings: (settings: WorkspaceSettings) => Promise<void>;
   loadFullMessage: (item: TimelineItem) => void;
+  threadGoal?: ThreadGoal | null;
+  clearingGoal?: boolean;
+  onClearThreadGoal?: () => void;
 }) {
   const detail = { isError: detailError, refetch: refetchDetail };
   const timelineView: TimelineView = isTimelineView(workspaceSettings.timelineView)
@@ -322,6 +330,17 @@ export function WorkspaceTimeline({
         activeId={highlightMessageId}
         onJump={(id) => setHighlightMessageId(id)}
       />
+      {isThreadGoalLocked(threadGoal) && threadGoal && onClearThreadGoal ? (
+        <ThreadGoalBanner
+          goal={threadGoal}
+          busy={Boolean(clearingGoal)}
+          disabled={runState?.status === "running"}
+          onClear={onClearThreadGoal}
+          onFork={() => {
+            void forkSessionFrom();
+          }}
+        />
+      ) : null}
       {sessionId && !followingLive ? (
         <Button
           type="button"

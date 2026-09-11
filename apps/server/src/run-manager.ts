@@ -39,6 +39,12 @@ import {
   incompleteTurnReason,
   type ContinuationRetryReason
 } from "./turn-completion.js";
+import {
+  isThreadGoalLocked,
+  readThreadGoal,
+  threadGoalNotice,
+  type ThreadGoal
+} from "./thread-goal.js";
 
 type WebSocket = {
   readyState: number;
@@ -227,6 +233,31 @@ export class RunManager {
     return true;
   }
 
+  notifyThreadGoal(sessionId: string, goal: ThreadGoal | null) {
+    this.broadcast(sessionId, {
+      type: "thread.goal.updated",
+      sessionId,
+      payload: { goal }
+    });
+  }
+
+  private sessionThreadGoal(sessionId: string) {
+    try {
+      const session = this.store.getSession(sessionId);
+      if (!session?.threadId) return null;
+      const project = this.store.getProject(session.projectId);
+      const provider = this.store.getProvider(session.providerId ?? project?.providerId ?? "");
+      if (!provider) return null;
+      const home =
+        provider.homeMode === "external" && provider.codexHomePath
+          ? provider.codexHomePath
+          : path.join(this.runtimeRoot, "providers", provider.id);
+      return readThreadGoal(home, session.threadId);
+    } catch {
+      return null;
+    }
+  }
+
   private async stopOrphanWorker(sessionId: string) {
     const orphan = this.activeRuns.get(sessionId);
     if (this.worker.isActive(sessionId)) {
@@ -363,7 +394,8 @@ export class RunManager {
         approvals,
         queue: this.publicQueue(sessionId),
         replayTruncated,
-        serverTime: Date.now()
+        serverTime: Date.now(),
+        threadGoal: this.sessionThreadGoal(sessionId)
       }
     });
     if (!replayTruncated) {
@@ -481,6 +513,41 @@ export class RunManager {
       sessionId,
       requestId,
       payload: { message, continuation: true, kind }
+    });
+  }
+
+  private persistThreadGoalNotice(
+    sessionId: string,
+    providerId: string,
+    requestId: string,
+    goal: ThreadGoal
+  ) {
+    const notice = threadGoalNotice(goal);
+    this.store.upsertEventMessage({
+      sessionId,
+      role: "error",
+      content: notice.message,
+      providerId,
+      eventType: "thread.goal",
+      itemId: `${sessionId}:thread.goal`,
+      dataJson: JSON.stringify({
+        tool: "thread_goal",
+        kind: goal.status,
+        status: goal.status,
+        title: notice.title,
+        message: notice.message,
+        objective: goal.objective,
+        tokenBudget: goal.tokenBudget,
+        tokensUsed: goal.tokensUsed,
+        timeUsedSeconds: goal.timeUsedSeconds,
+        requestId
+      })
+    });
+    this.broadcast(sessionId, {
+      type: "thread.goal.updated",
+      sessionId,
+      requestId,
+      payload: { goal, title: notice.title, message: notice.message }
     });
   }
 
@@ -1061,6 +1128,7 @@ export class RunManager {
         );
       }
     };
+    let lockedGoal: ThreadGoal | null = null;
     try {
       if (process.env.CODEX_OMNI_FAKE_RUNTIME === "1") {
         await this.runFakeTurn({
@@ -1116,6 +1184,12 @@ export class RunManager {
           threadId: latest?.threadId ?? session.threadId,
           codexHome
         });
+        try {
+          const currentGoal = readThreadGoal(codexHome, latest?.threadId ?? session.threadId);
+          if (currentGoal && isThreadGoalLocked(currentGoal)) lockedGoal = currentGoal;
+        } catch {
+          lockedGoal = null;
+        }
       }
       const currentRun = this.store.getRun(requestId);
       if (currentRun?.status !== "running") return;
@@ -1129,8 +1203,9 @@ export class RunManager {
       const terminalPayload = (terminal.payload ?? {}) as Record<string, unknown>;
       const assistantText = [...assistantTextByItem.values()].join("\n");
       const latestAssistantText = [...assistantTextByItem.values()].at(-1) ?? "";
-      const incompleteReason =
-        continuationRetry && !hasExecutionEvidence
+      const incompleteReason = lockedGoal
+        ? undefined
+        : continuationRetry && !hasExecutionEvidence
           ? (command.continuationRetryReason ?? "continuation")
           : incompleteTurnReason({
               message: command.message,
@@ -1203,7 +1278,17 @@ export class RunManager {
       this.broadcast(session.id, terminal);
       this.finishRun(session.id, "completed", { ...terminalPayload, startedAt }, false);
       completed = true;
-      if (continuationApplied && !hasExecutionEvidence && (continuationRetry || assistantText)) {
+      if (lockedGoal) {
+        try {
+          this.persistThreadGoalNotice(session.id, provider.id, requestId, lockedGoal);
+        } catch {
+          this.notifyThreadGoal(session.id, lockedGoal);
+        }
+      } else if (
+        continuationApplied &&
+        !hasExecutionEvidence &&
+        (continuationRetry || assistantText)
+      ) {
         this.broadcastContinuationNotice(
           session.id,
           provider.id,

@@ -31,6 +31,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { useDocumentTitle, workspaceDocumentTitle } from "@/lib/document-title";
 import { defaultWorkspaceView, settingsPath, workspacePath } from "@/lib/routes";
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
+import { isThreadGoalLocked } from "@/lib/thread-goal";
 import {
   fallbackProviderId,
   isUnstartedComposerSession,
@@ -79,6 +80,7 @@ import type {
   SessionDetailPage,
   SessionSnapshot,
   TerminalChatSession,
+  ThreadGoal,
   TimelineItem
 } from "@/types";
 import { ApprovalAuditDialog } from "@/features/workspace/ApprovalAuditDialog";
@@ -199,6 +201,7 @@ export function Workspace() {
   const [runState, setRunState] = useState<RunState | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [sendNotice, setSendNotice] = useState("");
+  const [clearingGoal, setClearingGoal] = useState(false);
   const [model, setModel] = useState("");
   const [runtimeOptionsOpen, setRuntimeOptionsOpen] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
@@ -508,6 +511,7 @@ export function Workspace() {
     setEvents([]);
     setRunState(null);
     setSendNotice("");
+    setClearingGoal(false);
     setContinuation(null);
     setQueuedTurns([]);
     setEditingQueueId("");
@@ -874,7 +878,13 @@ export function Workspace() {
             )
           );
           qc.setQueryData<SessionDetailPage>(["session", sessionId], (current) =>
-            current ? { ...current, session: snapshot.session } : current
+            current
+              ? {
+                  ...current,
+                  session: snapshot.session,
+                  ...(snapshot.threadGoal !== undefined ? { threadGoal: snapshot.threadGoal } : {})
+                }
+              : current
           );
         }
         setQueuedTurns(snapshot.queue ?? []);
@@ -930,6 +940,31 @@ export function Workspace() {
           setSendNotice("实时事件较多，已从持久记录恢复最新状态");
         }
         void qc.invalidateQueries({ queryKey: ["session", sessionId] });
+        return;
+      }
+      if (event.type === "thread.goal.updated") {
+        const goal = (payload.goal ?? null) as ThreadGoal | null;
+        qc.setQueryData<SessionDetailPage>(["session", sessionId], (current) =>
+          current ? { ...current, threadGoal: goal } : current
+        );
+        const text = String(payload.message ?? "");
+        if (text) {
+          enqueueTimelineUpdate((current) =>
+            upsert(current, `error-${sessionId}-thread.goal`, {
+              kind: "error",
+              text,
+              data: {
+                tool: "thread_goal",
+                title: payload.title,
+                message: text,
+                status: goal?.status,
+                goal
+              },
+              providerId: providerIdRef.current,
+              createdAt: Date.now()
+            })
+          );
+        }
         return;
       }
 
@@ -1952,6 +1987,31 @@ export function Workspace() {
     setReconnectNonce((value) => value + 1);
     toast.message("正在重新加载会话");
   };
+  const clearThreadGoal = async () => {
+    if (!sessionId) return;
+    if (runState?.status === "running") {
+      toast.error("请先停止当前任务，再清除卡住的目标");
+      return;
+    }
+    if (
+      !window.confirm(
+        "清除后当前对话才能继续执行。不会删除聊天记录，只移除 Codex 线程目标额度限制。确定清除？"
+      )
+    )
+      return;
+    setClearingGoal(true);
+    try {
+      await api(`/api/sessions/${sessionId}/clear-goal`, { method: "POST" });
+      qc.setQueryData<SessionDetailPage>(["session", sessionId], (current) =>
+        current ? { ...current, threadGoal: null } : current
+      );
+      toast.success("已清除目标额度限制，可以继续发送请求");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清除失败");
+    } finally {
+      setClearingGoal(false);
+    }
+  };
   const clearRunRecords = async () => {
     if (!sessionId) return;
     if (!window.confirm("清理当前会话的运行记录、工具输出和推理？用户与助手消息会保留。")) return;
@@ -2280,6 +2340,8 @@ export function Workspace() {
               forkSessionFrom={forkSessionFrom}
               reloadSession={reloadSession}
               clearRunRecords={clearRunRecords}
+              threadGoalLocked={isThreadGoalLocked(detail.data?.threadGoal)}
+              onClearThreadGoal={() => void clearThreadGoal()}
               updateSession={updateSession}
               archiveSession={archiveSession}
               exportSession={exportSession}
@@ -2345,6 +2407,9 @@ export function Workspace() {
               sendNotice={sendNotice}
               saveWorkspaceSettings={saveWorkspaceSettings}
               loadFullMessage={loadFullMessage}
+              threadGoal={detail.data?.threadGoal ?? null}
+              clearingGoal={clearingGoal}
+              onClearThreadGoal={() => void clearThreadGoal()}
             />}
             {workspaceView !== "terminal-chat" && <WorkspaceComposer
               workspaceView={workspaceView}

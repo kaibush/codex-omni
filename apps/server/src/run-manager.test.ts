@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import Database from "better-sqlite3";
 import os from "node:os";
 import path from "node:path";
 import { Store } from "@codex-omni/db";
@@ -887,6 +888,82 @@ describe("RunManager reconnect state", () => {
     expect(
       sent.some((event) => event.type === "server.error" && event.payload?.kind === "retrying")
     ).toBe(true);
+  });
+
+  it("does not auto-retry a continuation when the Codex thread goal is budget limited", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    const home = mkdtempSync(path.join(os.tmpdir(), "omni-goal-home-"));
+    tempDirs.push(home);
+    const db = new Database(path.join(home, "goals_1.sqlite"));
+    db.exec(`
+      CREATE TABLE thread_goals (
+        thread_id TEXT PRIMARY KEY NOT NULL,
+        goal_id TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        status TEXT NOT NULL,
+        token_budget INTEGER,
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        time_used_seconds INTEGER NOT NULL DEFAULT 0,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO thread_goals(thread_id, goal_id, objective, status, token_budget, tokens_used, time_used_seconds, created_at_ms, updated_at_ms)
+       VALUES(?, ?, ?, ?, ?, ?, 0, 1, 2)`
+    ).run("thread-locked", "goal-1", "完成缺思考换号记录表", "budget_limited", 80_000, 2_352_069);
+    db.close();
+    store!.updateSession(session.id, { threadId: "thread-locked" });
+    const { resolveProviderHome } = await import("@codex-omni/codex-runtime");
+    vi.mocked(resolveProviderHome).mockResolvedValueOnce(home);
+
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      calls += 1;
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "tool.started",
+          payload: { itemId: "tool-1", tool: "command" }
+        })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "assistant.completed",
+          payload: { itemId: "assistant-1", text: "已完成部分工作，还缺前端改动。" }
+        })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 3,
+          type: "turn.completed",
+          payload: { status: "completed", endedAt: Date.now(), usage: {} }
+        })
+      );
+    });
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "继续"
+      },
+      socket
+    );
+
+    expect(calls).toBe(1);
+    expect(store!.getSession(session.id)?.status).toBe("idle");
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(sent.some((event) => event.type === "thread.goal.updated")).toBe(true);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "retrying")
+    ).toBe(false);
+    const notice = store!.getMessageByItemId(session.id, `${session.id}:thread.goal`);
+    expect(notice?.content).toContain("收尾总结");
   });
 
   it("retries after context compaction if the model only posts a short plan", async () => {

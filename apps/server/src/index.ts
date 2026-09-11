@@ -50,6 +50,7 @@ import { TerminalManager, terminalHostLabel } from "./terminal-manager.js";
 import { TerminalChatManager, terminalProfiles } from "./terminal-chat-manager.js";
 import { compactMessageForClient } from "./session-history.js";
 import { backfillSessionRolloutTools } from "./session-rollout.js";
+import { clearThreadGoal, readThreadGoal } from "./thread-goal.js";
 import { searchWorkspace } from "./workspace-search.js";
 import { collectHostInfo } from "./host-info.js";
 import { UpdateCheckService } from "./update-check.js";
@@ -140,6 +141,19 @@ const providerHome = (provider: ProviderRow) =>
     configToml: provider.configToml,
     authJson: provider.authJson
   });
+const sessionThreadGoal = async (
+  session: { threadId: string | null; providerId: string | null; projectId: string }
+) => {
+  if (!session.threadId) return null;
+  const project = store.getProject(session.projectId);
+  const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
+  if (!provider) return null;
+  try {
+    return readThreadGoal(await providerHome(provider), session.threadId);
+  } catch {
+    return null;
+  }
+};
 const runs = new RunManager(store, runtimeRoot);
 const terminals = new TerminalManager();
 const terminalChats = new TerminalChatManager(store);
@@ -1035,7 +1049,8 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     session,
     ...page,
     messages: page.messages.map((row) => compactMessageForClient(row)),
-    latestRun: latestRun ? compactMessageForClient(latestRun) : null
+    latestRun: latestRun ? compactMessageForClient(latestRun) : null,
+    threadGoal: await sessionThreadGoal(session)
   };
 });
 app.put("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
@@ -1188,6 +1203,38 @@ app.post("/api/sessions/:id/clear-runs", { preHandler: auth }, async (req, reply
     return reply.code(409).send({ error: "Cannot clear run records while the session is running" });
   }
   return store.clearSessionRunRecords(id);
+});
+app.post("/api/sessions/:id/clear-goal", { preHandler: auth }, async (req, reply) => {
+  const id = routeId(req);
+  const session = store.getSession(id);
+  if (!session) return reply.code(404).send({ error: "Session not found" });
+  if (!session.threadId) {
+    return reply.code(400).send({ error: "当前会话还没有 Codex 线程，没有可清除的目标" });
+  }
+  if (session.status === "running") {
+    return reply.code(409).send({ error: "请先停止当前任务，再清除卡住的目标" });
+  }
+  const project = store.getProject(session.projectId);
+  const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
+  if (!provider) return reply.code(400).send({ error: "当前会话没有可用的供应商" });
+  let home: string;
+  try {
+    home = await providerHome(provider);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "无法打开 Codex 目录";
+    return reply.code(400).send({ error: message });
+  }
+  const existing = readThreadGoal(home, session.threadId);
+  if (!existing) return { ok: true, cleared: false, threadGoal: null };
+  try {
+    const cleared = clearThreadGoal(home, session.threadId);
+    runs.notifyThreadGoal(session.id, null);
+    return { ok: true, cleared, threadGoal: null };
+  } catch (error) {
+    const status = Number((error as { statusCode?: number }).statusCode);
+    const message = error instanceof Error ? error.message : "清除目标失败";
+    return reply.code(status >= 400 && status < 600 ? status : 500).send({ error: message });
+  }
 });
 app.get("/api/approvals", { preHandler: auth }, async (req) => {
   const query = z

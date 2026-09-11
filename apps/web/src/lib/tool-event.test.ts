@@ -266,6 +266,13 @@ describe("runtime notices", () => {
       level: "error"
     });
     expect(classifyRuntimeNotice({ tool: "runtime_error", message: "" })).toBeNull();
+    expect(
+      classifyRuntimeNotice({
+        tool: "thread_goal",
+        title: "目标额度已用尽",
+        message: "Codex 已把该线程标记为额度用尽。"
+      })
+    ).toMatchObject({ title: "目标额度已用尽", level: "warning" });
     expect(isRuntimePlaceholder({ tool: "runtime_error", message: "" })).toBe(true);
     expect(
       classifyRuntimeNotice(

@@ -342,7 +342,17 @@ export function classifyRuntimeNotice(
       message: message || COMPACTION_DEFAULT_MESSAGE
     };
   }
+  if (tool === "threadgoal" && message) {
+    return {
+      level: "warning",
+      title: firstString([asRecord(data)?.title]) || "目标额度已用尽",
+      message
+    };
+  }
   if (runtimeError && message) {
+    if (/目标额度已用尽|目标用量已达上限|清除该目标/.test(message)) {
+      return { level: "warning", title: "目标额度已用尽", message };
+    }
     return { level: "error", title: "运行失败", message };
   }
   return null;
