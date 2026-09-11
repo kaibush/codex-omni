@@ -98,7 +98,7 @@ export const CLI_HELP = `Codex Omni
   codex-omni user create --username NAME --password PASSWORD
 
 选项:
-  --host <addr>     监听地址，默认 0.0.0.0
+  --host <addr>     监听地址，默认 127.0.0.1
   --port <port>     端口，默认 8790
   --data <file>     SQLite 路径，默认 ./data/codex-omni.db
   --origin <url>    CORS Origin 白名单，逗号分隔

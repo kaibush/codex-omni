@@ -14,7 +14,7 @@ export default defineConfig({
     }
   },
   server: {
-    host: "0.0.0.0",
+    host: process.env.CODEX_OMNI_WEB_HOST ?? "127.0.0.1",
     allowedHosts: true,
     port: Number(process.env.CODEX_OMNI_WEB_PORT ?? 5173),
     strictPort: true,

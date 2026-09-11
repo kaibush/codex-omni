@@ -1867,7 +1867,7 @@ if (staticDir) {
   });
 }
 
-const host = process.env.CODEX_OMNI_HOST ?? "0.0.0.0";
+const host = process.env.CODEX_OMNI_HOST ?? "127.0.0.1";
 const port = Number(process.env.CODEX_OMNI_PORT ?? 8790);
 await app.listen({ host, port });
 updateCheck.start();

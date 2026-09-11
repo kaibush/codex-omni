@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx watch --exclude './data/**' --exclude './dist/**' --exclude '**/*.db*' --exclude '**/runtime/**' src/index.ts",
-    "dev:stable": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx src/index.ts",
+    "dev": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx watch --exclude './data/**' --exclude './dist/**' --exclude '**/*.db*' --exclude '**/runtime/**' src/index.ts",
+    "dev:stable": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli/codex-omni.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
