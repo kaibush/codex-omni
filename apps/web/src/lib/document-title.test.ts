@@ -34,15 +34,15 @@ describe("workspaceDocumentTitle", () => {
     expect(workspaceDocumentTitle({})).toBe("Codex Omni");
   });
 
-  it("shows the project, then a named conversation", () => {
-    expect(workspaceDocumentTitle({ projectName: "demo" })).toBe("demo · Codex Omni");
+  it("puts the project first, then a named conversation", () => {
+    expect(workspaceDocumentTitle({ projectName: "demo" })).toBe("demo");
     expect(
       workspaceDocumentTitle({
         projectName: "demo",
         sessionTitle: "修复登录",
         view: "chat"
       })
-    ).toBe("修复登录 · demo · Codex Omni");
+    ).toBe("demo - 修复登录");
   });
 
   it("omits placeholder conversation titles", () => {
@@ -52,30 +52,26 @@ describe("workspaceDocumentTitle", () => {
         sessionTitle: "新对话",
         view: "chat"
       })
-    ).toBe("demo · Codex Omni");
+    ).toBe("demo");
     expect(
       workspaceDocumentTitle({
         projectName: "demo",
         sessionTitle: "New session",
         view: "chat"
       })
-    ).toBe("demo · Codex Omni");
+    ).toBe("demo");
   });
 
-  it("labels file, git and terminal views", () => {
-    expect(workspaceDocumentTitle({ projectName: "demo", view: "files" })).toBe(
-      "文件 · demo · Codex Omni"
-    );
+  it("labels file, git and terminal views after the project", () => {
+    expect(workspaceDocumentTitle({ projectName: "demo", view: "files" })).toBe("demo - 文件");
     expect(
       workspaceDocumentTitle({
         projectName: "demo",
         sessionTitle: "修复登录",
         view: "git"
       })
-    ).toBe("Git · demo · Codex Omni");
-    expect(workspaceDocumentTitle({ projectName: "demo", view: "terminal" })).toBe(
-      "终端 · demo · Codex Omni"
-    );
+    ).toBe("demo - Git");
+    expect(workspaceDocumentTitle({ projectName: "demo", view: "terminal" })).toBe("demo - 终端");
   });
 
   it("uses the terminal-chat label until the session is named", () => {
@@ -85,13 +81,13 @@ describe("workspaceDocumentTitle", () => {
         sessionTitle: "新对话",
         view: "terminal-chat"
       })
-    ).toBe("终端对话 · demo · Codex Omni");
+    ).toBe("demo - 终端对话");
     expect(
       workspaceDocumentTitle({
         projectName: "demo",
         sessionTitle: "修终端滚动",
         view: "terminal-chat"
       })
-    ).toBe("修终端滚动 · demo · Codex Omni");
+    ).toBe("demo - 修终端滚动");
   });
 });

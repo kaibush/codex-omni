@@ -40,18 +40,24 @@ export function workspaceDocumentTitle(input: {
   sessionTitle?: string | null | undefined;
   view?: DocumentTitleView | null | undefined;
 }) {
-  const projectName = cleanTitlePart(input.projectName);
+  const projectName = truncateTitlePart(cleanTitlePart(input.projectName));
+  if (!projectName) return DEFAULT_DOCUMENT_TITLE;
+
   const sessionTitle = cleanTitlePart(input.sessionTitle);
-  const namedSession = sessionTitle && !isPlaceholderSessionTitle(sessionTitle) ? sessionTitle : "";
+  const namedSession =
+    sessionTitle && !isPlaceholderSessionTitle(sessionTitle) ? truncateTitlePart(sessionTitle) : "";
   const view = input.view ?? "chat";
 
+  let detail = "";
   if (view === "files" || view === "git" || view === "terminal") {
-    return joinDocumentTitle([VIEW_LABEL[view], projectName]);
+    detail = VIEW_LABEL[view] ?? "";
+  } else if (view === "terminal-chat") {
+    detail = namedSession || VIEW_LABEL[view] || "";
+  } else {
+    detail = namedSession;
   }
-  if (view === "terminal-chat") {
-    return joinDocumentTitle([namedSession || VIEW_LABEL[view], projectName]);
-  }
-  return joinDocumentTitle([namedSession, projectName]);
+
+  return detail ? `${projectName} - ${detail}` : projectName;
 }
 
 export function useDocumentTitle(title: string) {
