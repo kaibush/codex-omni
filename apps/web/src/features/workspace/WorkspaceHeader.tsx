@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { api } from "@/lib/api";
-import { copyTextToClipboard } from "@/lib/clipboard";
+import { copyMenuItemProps } from "@/lib/clipboard";
 import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import { taskStatusLabel } from "@/lib/task-state";
 import type { Project, Provider, Session, SessionCheckpoint } from "@/types";
@@ -71,8 +71,7 @@ export function WorkspaceHeader({
   archiveSession,
   exportSession,
   copySession,
-  deleteSession,
-  setSendNotice
+  deleteSession
 }: {
   sidebar: boolean;
   isMobile: boolean;
@@ -117,7 +116,6 @@ export function WorkspaceHeader({
   exportSession: (id: string, format: "markdown" | "json") => void;
   copySession: (id: string) => void;
   deleteSession: { mutate: (id: string) => void };
-  setSendNotice: (value: string) => void;
 }) {
   return (
     <header className="workspace-header flex shrink-0 items-center gap-3 px-3 sm:px-5">
@@ -345,11 +343,11 @@ export function WorkspaceHeader({
                 恢复最近检查点
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => {
-                  void copyTextToClipboard(activeSession.id).then((copied) =>
-                    setSendNotice(copied ? "已复制 Session ID" : "复制失败，请手动选择")
-                  );
-                }}
+                {...copyMenuItemProps(activeSession.id, (copied) =>
+                  copied
+                    ? toast.success("已复制 Session ID")
+                    : toast.error("复制失败，请长按选择 Session ID")
+                )}
               >
                 <Copy /> 复制 Session ID
               </DropdownMenuItem>

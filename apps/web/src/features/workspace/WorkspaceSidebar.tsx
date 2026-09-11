@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { copyTextToClipboard } from "@/lib/clipboard";
+import { copyMenuItemProps } from "@/lib/clipboard";
 import { requestSystemUpdateCheck } from "@/lib/system-update";
 import { formatCompactDateTime, formatDataSize, formatDateTime } from "@/lib/utils";
 import type { HostInfo, Project, Session } from "@/types";
@@ -158,7 +158,6 @@ export function WorkspaceSidebar({
   exportSession,
   copySession,
   deleteSession,
-  setSendNotice,
   activeRunsCount,
   pendingApprovalCount,
   connection,
@@ -239,7 +238,6 @@ export function WorkspaceSidebar({
   exportSession: (id: string, format: "markdown" | "json") => void;
   copySession: (id: string) => void;
   deleteSession: { mutate: (id: string) => void };
-  setSendNotice: (value: string) => void;
   activeRunsCount: number;
   pendingApprovalCount: number;
   connection: ConnectionState;
@@ -602,11 +600,9 @@ export function WorkspaceSidebar({
                             <Star /> {project.pinnedAt ? "取消收藏" : "收藏"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onSelect={() => {
-                              void copyTextToClipboard(project.displayPath).then((copied) =>
-                                copied ? toast.success("已复制路径") : toast.error("复制失败")
-                              );
-                            }}
+                            {...copyMenuItemProps(project.displayPath, (copied) =>
+                              copied ? toast.success("已复制路径") : toast.error("复制失败")
+                            )}
                           >
                             <Copy /> 复制路径
                           </DropdownMenuItem>
@@ -859,13 +855,11 @@ export function WorkspaceSidebar({
                                       <Download /> 导出 JSON
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
-                                      onSelect={() => {
-                                        void copyTextToClipboard(s.id).then((copied) =>
-                                          setSendNotice(
-                                            copied ? "已复制 Session ID" : "复制失败，请手动选择"
-                                          )
-                                        );
-                                      }}
+                                      {...copyMenuItemProps(s.id, (copied) =>
+                                        copied
+                                          ? toast.success("已复制 Session ID")
+                                          : toast.error("复制失败，请长按选择 Session ID")
+                                      )}
                                     >
                                       <Copy /> 复制 Session ID
                                     </DropdownMenuItem>

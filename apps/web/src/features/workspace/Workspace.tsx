@@ -2295,7 +2295,6 @@ export function Workspace() {
         exportSession={exportSession}
         copySession={(id) => void copySession(id)}
         deleteSession={deleteSession}
-        setSendNotice={setSendNotice}
         activeRunsCount={activeRuns.data?.length ?? 0}
         pendingApprovalCount={pendingApprovalQuery.data?.length ?? pendingApprovals.length}
         connection={connection}
@@ -2347,7 +2346,6 @@ export function Workspace() {
               exportSession={exportSession}
               copySession={(id) => void copySession(id)}
               deleteSession={deleteSession}
-              setSendNotice={setSendNotice}
             />
             {workspaceView !== "terminal-chat" && <WorkspaceTimeline
               key={`${projectId}:${sessionId}`}
