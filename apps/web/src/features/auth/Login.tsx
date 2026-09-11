@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Bot, Check, FolderOpen, KeyRound, Loader2, TerminalSquare } from "lucide-react";
 import { api, setCsrf } from "@/lib/api";
+import { DEFAULT_DOCUMENT_TITLE, useDocumentTitle } from "@/lib/document-title";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ const highlights = [
 ];
 
 export function Login({ onLogin }: { onLogin: () => void }) {
+  useDocumentTitle(DEFAULT_DOCUMENT_TITLE);
   const [mode, setMode] = useState<"loading" | "setup" | "login">("loading");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

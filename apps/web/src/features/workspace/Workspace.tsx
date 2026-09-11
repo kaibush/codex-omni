@@ -28,6 +28,7 @@ import { ThemeSwitch } from "@/components/theme-switch";
 import { useTheme } from "@/context/theme-provider";
 import { api, apiText, apiUpload, wsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { useDocumentTitle, workspaceDocumentTitle } from "@/lib/document-title";
 import { defaultWorkspaceView, settingsPath, workspacePath } from "@/lib/routes";
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
 import {
@@ -1190,6 +1191,13 @@ export function Workspace() {
   useEffect(() => {
     if (activeSession?.kind === "terminal-chat") setWorkspaceView("terminal-chat");
   }, [activeSession?.id, activeSession?.kind]);
+  useDocumentTitle(
+    workspaceDocumentTitle({
+      projectName: activeProject?.name,
+      sessionTitle: activeSession?.title,
+      view: workspaceView
+    })
+  );
   const sessionLoading = Boolean(sessionId) && detail.isPending;
   const selectedProvider = providers.data?.find((p) => p.id === providerId) ?? null;
   const loadOlderMessages = useCallback(async () => {

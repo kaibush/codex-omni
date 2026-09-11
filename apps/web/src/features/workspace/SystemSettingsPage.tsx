@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { useTheme } from "@/context/theme-provider";
 import { api } from "@/lib/api";
+import { joinDocumentTitle, useDocumentTitle } from "@/lib/document-title";
 import { workspacePath } from "@/lib/routes";
 import { formatDataSize, formatUptime } from "@/lib/utils";
 import type { Project, PromptTemplate, Provider, ProviderHomeMode, RuntimeInfo } from "@/types";
@@ -78,6 +79,7 @@ export function SystemSettingsPage() {
   const { section } = useParams();
   const active = findSettingsSection(section);
   const navigate = useNavigate();
+  useDocumentTitle(joinDocumentTitle([active.title]));
   const queryClient = useQueryClient();
   const { theme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
