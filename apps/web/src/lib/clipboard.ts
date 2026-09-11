@@ -7,19 +7,68 @@ function execCopyCommand() {
 }
 
 function restoreSelection(previousRange: Range | null) {
+  if (typeof document === "undefined") return;
   const selection = document.getSelection();
   selection?.removeAllRanges();
   if (previousRange) selection?.addRange(previousRange);
 }
 
+export function isIosDevice() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  const platform = navigator.platform ?? "";
+  return (
+    /iPad|iPhone|iPod/.test(platform) ||
+    /iPad|iPhone|iPod/.test(ua) ||
+    ((platform === "MacIntel" || ua.includes("Mac")) && navigator.maxTouchPoints > 1)
+  );
+}
+
+function withCopyEvent(text: string, run: () => boolean) {
+  if (typeof document === "undefined") return run();
+  let eventCopied = false;
+  const onCopy = (event: Event) => {
+    const clipboardEvent = event as ClipboardEvent;
+    const data = clipboardEvent.clipboardData;
+    if (!data) return;
+    try {
+      data.setData("text/plain", text);
+      data.setData("text", text);
+      clipboardEvent.preventDefault();
+      eventCopied = true;
+    } catch {
+      // Some WebViews expose clipboardData but reject setData.
+    }
+  };
+  document.addEventListener("copy", onCopy, true);
+  try {
+    const commandOk = run();
+    if (eventCopied) return true;
+    // iOS often reports execCommand success while the pasteboard stays empty.
+    if (isIosDevice()) return false;
+    return commandOk;
+  } finally {
+    document.removeEventListener("copy", onCopy, true);
+  }
+}
+
 function copyUsingTextarea(text: string) {
   const textarea = document.createElement("textarea");
   textarea.value = text;
-  textarea.readOnly = true;
-  textarea.setAttribute("readonly", "");
   textarea.setAttribute("inputmode", "none");
-  textarea.style.cssText =
-    "position:fixed;top:0;left:0;width:2em;height:2em;margin:0;padding:0;border:0;outline:0;box-shadow:none;opacity:0.01;z-index:2147483647;font-size:16px;line-height:1;background:transparent;color:transparent;-webkit-user-select:text;user-select:text;";
+  textarea.setAttribute("autocomplete", "off");
+  textarea.setAttribute("autocorrect", "off");
+  textarea.setAttribute("spellcheck", "false");
+  if (isIosDevice()) {
+    textarea.contentEditable = "true";
+    textarea.readOnly = false;
+  } else {
+    textarea.readOnly = true;
+    textarea.setAttribute("readonly", "");
+  }
+  textarea.style.cssText = isIosDevice()
+    ? "position:fixed;top:0;left:0;width:1px;height:1px;margin:0;padding:0;border:0;outline:0;overflow:hidden;z-index:2147483647;font-size:16px;line-height:1;background:#fff;color:#000;clip:rect(0,0,0,0);-webkit-user-select:text;user-select:text;"
+    : "position:fixed;top:0;left:0;width:2em;height:2em;margin:0;padding:0;border:0;outline:0;box-shadow:none;opacity:0.01;z-index:2147483647;font-size:16px;line-height:1;background:transparent;color:transparent;-webkit-user-select:text;user-select:text;";
   document.body.appendChild(textarea);
   textarea.focus({ preventScroll: true });
   textarea.select();
@@ -32,12 +81,13 @@ function copyUsingTextarea(text: string) {
 function copyUsingSelectableMark(text: string) {
   const selection = document.getSelection();
   if (!selection) return false;
+  const previousRange = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
   const mark = document.createElement("span");
   mark.textContent = text;
   mark.setAttribute("contenteditable", "true");
   mark.tabIndex = -1;
   mark.style.cssText =
-    "position:fixed;top:0;left:0;max-width:80vw;margin:0;padding:0;border:0;outline:0;opacity:0.01;z-index:2147483647;font-size:16px;line-height:1;white-space:pre;background:transparent;color:transparent;-webkit-user-select:text;user-select:text;";
+    "position:fixed;top:0;left:0;width:auto;max-width:80vw;margin:0;padding:8px;border:0;outline:0;overflow:hidden;z-index:2147483647;font-size:16px;line-height:1.2;white-space:pre;background:#fff;color:#000;clip:rect(0,0,0,0);-webkit-user-select:text;user-select:text;";
   document.body.appendChild(mark);
   const range = document.createRange();
   range.selectNodeContents(mark);
@@ -46,50 +96,33 @@ function copyUsingSelectableMark(text: string) {
   mark.focus({ preventScroll: true });
   const success = execCopyCommand();
   mark.remove();
+  if (isIosDevice()) selection.removeAllRanges();
+  else restoreSelection(previousRange);
   return success;
 }
 
 function copyUsingDomSelection(text: string) {
   if (typeof document === "undefined" || !document.body) return false;
-  const selection = document.getSelection();
-  const previousRange = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
-  try {
+  return withCopyEvent(text, () => {
     if (copyUsingTextarea(text)) return true;
     return copyUsingSelectableMark(text);
-  } finally {
-    restoreSelection(previousRange);
-  }
-}
-
-function isIosDevice() {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent ?? "";
-  const platform = navigator.platform ?? "";
-  return (
-    /iPad|iPhone|iPod/.test(platform) ||
-    /iPad|iPhone|iPod/.test(ua) ||
-    ((platform === "MacIntel" || ua.includes("Mac")) && navigator.maxTouchPoints > 1)
-  );
+  });
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
-  const writeText = typeof navigator !== "undefined" ? navigator.clipboard?.writeText : undefined;
-  if (writeText) {
-    try {
-      // Invoke Clipboard API before yielding so iOS keeps the originating gesture.
-      const pending = writeText.call(navigator.clipboard, text);
-      const synchronousFallback = isIosDevice() ? copyUsingDomSelection(text) : false;
+  // iOS Safari often resolves writeText without putting text on the pasteboard,
+  // and a late Clipboard API write can overwrite a successful execCommand copy.
+  if (!isIosDevice()) {
+    const writeText = typeof navigator !== "undefined" ? navigator.clipboard?.writeText : undefined;
+    if (writeText) {
       try {
-        await pending;
+        await writeText.call(navigator.clipboard, text);
         return true;
       } catch {
-        // iOS Safari, HTTP, and permission policies may block the Clipboard API.
-        if (synchronousFallback) return true;
+        // HTTP and permission policies may block the Clipboard API.
       }
-    } catch {
-      // Some WebViews throw synchronously when Clipboard API is unavailable.
     }
   }
   if (copyUsingDomSelection(text)) return true;
@@ -108,6 +141,15 @@ function copyFromMenuGesture(text: string, onDone?: (copied: boolean) => void) {
   if (text === lastMenuCopyText && now - lastMenuCopyAt < 500) return;
   lastMenuCopyText = text;
   lastMenuCopyAt = now;
+  if (isIosDevice()) {
+    if (copyUsingDomSelection(text)) {
+      onDone?.(true);
+      return;
+    }
+    const result = typeof window !== "undefined" ? window.prompt("请长按全选后复制", text) : null;
+    onDone?.(result !== null);
+    return;
+  }
   void copyTextToClipboard(text).then((copied) => onDone?.(copied));
 }
 
@@ -125,8 +167,13 @@ export function copyMenuItemProps(text: string, onDone?: (copied: boolean) => vo
     onClick: () => {
       copyFromMenuGesture(text, onDone);
     },
-    onSelect: () => {
+    onSelect: (event?: { preventDefault?: () => void }) => {
+      if (isIosDevice()) event?.preventDefault?.();
       copyFromMenuGesture(text, onDone);
     }
   };
+}
+
+export function preventIosMenuAutoFocus(event: Event) {
+  if (isIosDevice()) event.preventDefault();
 }

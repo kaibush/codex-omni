@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
+import { preventIosMenuAutoFocus } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
@@ -22,6 +23,7 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
@@ -34,6 +36,10 @@ function DropdownMenuContent({
           className
         )}
         {...props}
+        onCloseAutoFocus={(event) => {
+          preventIosMenuAutoFocus(event);
+          onCloseAutoFocus?.(event);
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   );
