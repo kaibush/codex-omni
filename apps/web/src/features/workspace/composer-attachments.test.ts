@@ -3,6 +3,8 @@ import {
   attachmentUploadPath,
   buildAttachmentPrompt,
   collectComposerAttachments,
+  stripAttachmentPrompt,
+  visibleUserMessageText,
   estimateComposerContext,
   formatContextEstimate,
   mergeAttachments,
@@ -43,7 +45,7 @@ describe("composer attachments", () => {
     expect(prompt).toContain('<file path=".codex-uploads/1-notes.md">');
     expect(prompt).toContain("已作为本轮输入直接附加");
     expect(prompt).toContain("shot.png");
-    expect(prompt).not.toContain("`.codex-uploads/1-shot.png`");
+    expect(prompt).toContain("`.codex-uploads/1-shot.png`");
     expect(
       formatContextEstimate("abcd", [attachment({ id: "1", name: "a.txt", text: "hello" })])
     ).toContain("tokens");
@@ -109,5 +111,41 @@ describe("composer attachments", () => {
     expect(sendBlockReason({ hasSession: true, hasProvider: true, hasContent: true })).toBeNull();
     expect(approvalSummary(0)).toBeNull();
     expect(approvalSummary(2)).toContain("待审批 2 条");
+  });
+});
+
+describe("visible user attachment text", () => {
+  const attachments = [
+    { name: "image.png", path: ".codex-uploads/1-image.png", kind: "image" as const }
+  ];
+
+  it("keeps the real image path in the model prompt", () => {
+    expect(buildAttachmentPrompt(attachments)).toContain("`.codex-uploads/1-image.png`");
+  });
+
+  it("strips the model-only attachment prompt from chat text", () => {
+    expect(
+      stripAttachmentPrompt(
+        "看这张图\n\n以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：\n- `a.png`"
+      )
+    ).toBe("看这张图");
+  });
+
+  it("hides filename-only fallbacks and prefers displayMessage", () => {
+    expect(visibleUserMessageText("image.png", { attachments })).toBe("");
+    expect(
+      visibleUserMessageText(
+        "以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：\n- image.png",
+        {
+          attachments
+        }
+      )
+    ).toBe("");
+    expect(
+      visibleUserMessageText("runtime prompt", {
+        attachments,
+        displayMessage: "看这张图"
+      })
+    ).toBe("看这张图");
   });
 });

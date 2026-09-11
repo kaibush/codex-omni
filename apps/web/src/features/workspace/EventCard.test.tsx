@@ -471,6 +471,27 @@ describe("EventCard copy controls", () => {
     expect(outside).not.toContain("files/download?path=tmp");
   });
 
+  it("renders the uploaded image path instead of the model prompt", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "user-img",
+          kind: "user",
+          text: "以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：\n- image.png",
+          data: {
+            attachments: [{ name: "image.png", path: ".codex-uploads/1-image.png", kind: "image" }]
+          }
+        }}
+        projectId="proj-1"
+      />
+    );
+    expect(html).not.toContain("以下图片已作为本轮输入直接附加");
+    expect(html).toContain(".codex-uploads/1-image.png");
+    expect(html).toContain(
+      `/api/projects/proj-1/files/download?path=${encodeURIComponent(".codex-uploads/1-image.png")}&amp;inline=1`
+    );
+  });
+
   it("renders a lightweight placeholder without markdown", () => {
     const html = renderToStaticMarkup(
       <EventCard

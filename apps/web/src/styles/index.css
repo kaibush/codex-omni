@@ -1048,6 +1048,38 @@ button.composer-chip:hover,
   object-fit: contain;
   background: var(--muted);
 }
+.user-attachments {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.user-attachment {
+  margin: 0;
+}
+.user-attachment-path {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  word-break: break-all;
+  text-align: left;
+  opacity: 0.85;
+}
+button.user-attachment-path {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.event-card-user .user-attachment-path {
+  color: var(--primary-foreground);
+}
+.event-card-user .notice-image {
+  background: color-mix(in oklab, var(--primary-foreground) 12%, transparent);
+}
 .tool-shell {
   overflow: hidden;
   border: 1px solid var(--border);

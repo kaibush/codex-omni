@@ -99,6 +99,7 @@ function queuedAttachments(options: Record<string, any>): TurnAttachment[] {
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
   continuationRetry?: boolean;
   continuationRetryReason?: ContinuationRetryReason;
+  displayMessage?: string;
 };
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
 type SteerCommand = Extract<RunCommand, { type: "turn.steer" }>;
@@ -756,7 +757,10 @@ export class RunManager {
         ? { networkAccessEnabled: options.networkAccessEnabled }
         : {}),
       ...(options.mode === "plan" || options.mode === "execute" ? { mode: options.mode } : {}),
-      ...(attachments.length ? { attachments } : {})
+      ...(attachments.length ? { attachments } : {}),
+      ...(typeof options.displayMessage === "string" && options.displayMessage.trim()
+        ? { displayMessage: options.displayMessage }
+        : {})
     };
   }
 
@@ -927,6 +931,7 @@ export class RunManager {
       dataJson: JSON.stringify({
         turnOptions,
         ...(attachments.length ? { attachments } : {}),
+        ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
         ...(continuationApplied ? { continuation: true } : {}),
         ...(continuationRetry ? { continuationRetry: true } : {})
       })
@@ -942,13 +947,16 @@ export class RunManager {
         createdAt: userMessage.createdAt,
         turnOptions,
         ...(attachments.length ? { attachments } : {}),
+        ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
         ...(continuationApplied
           ? { continuation: true, ...(continuationRetry ? { continuationRetry: true } : {}) }
           : {})
       }
     });
     if (isFirstUserMessage && isPlaceholderSessionTitle(session.title)) {
-      this.store.updateSession(session.id, { title: titleFromFirstMessage(command.message) });
+      this.store.updateSession(session.id, {
+        title: titleFromFirstMessage(command.displayMessage || command.message)
+      });
     }
     let completed = false;
     let completionEvent: BridgeEvent | undefined;

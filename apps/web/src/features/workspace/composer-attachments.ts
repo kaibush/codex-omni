@@ -135,7 +135,7 @@ export function buildAttachmentPrompt(
   const lines: string[] = [];
   if (images.length) {
     lines.push("以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：");
-    for (const item of images) lines.push(`- ${item.name}`);
+    for (const item of images) lines.push(`- \`${item.path}\`（图片 · ${item.name}）`);
   }
   if (files.length) {
     if (lines.length) lines.push("");
@@ -204,6 +204,56 @@ export function queuedAttachmentMeta(
         : "file";
     return [{ name: record.name, path: record.path, kind }];
   });
+}
+
+const IMAGE_PROMPT_MARKER =
+  "以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：";
+const FILE_PROMPT_MARKER = "附件已保存到当前工程，请读取这些文件：";
+
+export function timelineAttachments(data: unknown): QueuedAttachmentMeta[] {
+  if (!data || typeof data !== "object") return [];
+  const record = data as Record<string, unknown>;
+  const direct = queuedAttachmentMeta(record);
+  if (direct.length) return direct;
+  return record.turnOptions && typeof record.turnOptions === "object"
+    ? queuedAttachmentMeta(record.turnOptions as Record<string, unknown>)
+    : [];
+}
+
+export function stripAttachmentPrompt(text: string) {
+  const markers = [IMAGE_PROMPT_MARKER, FILE_PROMPT_MARKER];
+  let cut = -1;
+  for (const marker of markers) {
+    const withBreak = `\n\n${marker}`;
+    const index = text.indexOf(withBreak);
+    const found = index >= 0 ? index : text.startsWith(marker) ? 0 : -1;
+    if (found >= 0 && (cut < 0 || found < cut)) cut = found;
+  }
+  return (cut < 0 ? text : text.slice(0, cut)).trimEnd();
+}
+
+export function isAttachmentNameFallback(text: string, attachments: QueuedAttachmentMeta[]) {
+  const trimmed = text.trim();
+  if (!trimmed || !attachments.length) return false;
+  const names = attachments.map((item) => item.name).join("、");
+  const paths = attachments.map((item) => item.path).join("、");
+  return trimmed === names || trimmed === paths;
+}
+
+export function visibleUserMessageText(text: string, data?: unknown) {
+  const attachments = timelineAttachments(data);
+  const display =
+    data &&
+    typeof data === "object" &&
+    typeof (data as { displayMessage?: unknown }).displayMessage === "string"
+      ? (data as { displayMessage: string }).displayMessage.trim()
+      : "";
+  if (display) {
+    if (isAttachmentNameFallback(display, attachments)) return "";
+    return display;
+  }
+  const stripped = attachments.length ? stripAttachmentPrompt(text) : text;
+  return isAttachmentNameFallback(stripped, attachments) ? "" : stripped;
 }
 
 function bytesToBase64(bytes: Uint8Array) {

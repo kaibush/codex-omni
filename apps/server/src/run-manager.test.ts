@@ -358,6 +358,35 @@ describe("RunManager runtime inputs", () => {
     expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
   });
 
+  it("stores the user-facing display message with attachments", async () => {
+    const { project, session, socket, sent } = attachmentFixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.enqueue",
+        projectId: project.id,
+        sessionId: session.id,
+        message:
+          "以下图片已作为本轮输入直接附加，请基于图片内容作答，不要只重复文件路径：\n- image.png",
+        displayMessage: "看这张图",
+        attachments: [{ name: "image.png", path: ".codex-uploads/shot.png", kind: "image" }]
+      },
+      socket
+    );
+    await vi.waitFor(() =>
+      expect(store!.listMessages(session.id).some((message) => message.role === "user")).toBe(true)
+    );
+    const user = store!.listMessages(session.id).find((message) => message.role === "user")!;
+    expect(user.content).toContain("以下图片已作为本轮输入直接附加");
+    expect(JSON.parse(user.dataJson!)).toMatchObject({ displayMessage: "看这张图" });
+    expect(sent.find((event) => event.type === "user.message")?.payload.displayMessage).toBe(
+      "看这张图"
+    );
+  });
+
   it("forwards explicit retry attachments without weakening runtime defaults", async () => {
     const { project, session, socket, imagePath } = attachmentFixture();
     runtimeMocks.run.mockImplementation(async (_request, onEvent) => {

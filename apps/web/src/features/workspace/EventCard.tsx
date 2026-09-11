@@ -83,6 +83,11 @@ import {
   parseCodexFileHref,
   snippetFileName
 } from "./markdown-refs";
+import {
+  timelineAttachments,
+  visibleUserMessageText,
+  type QueuedAttachmentMeta
+} from "./composer-attachments";
 
 function EventTime({ value, className }: { value: number; className?: string }) {
   const date = new Date(value);
@@ -448,6 +453,48 @@ function projectImageSrc(
   return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(relative)}&inline=1`;
 }
 
+function UserAttachmentList({
+  attachments,
+  projectId,
+  projectPath,
+  onOpenFile
+}: {
+  attachments: QueuedAttachmentMeta[];
+  projectId?: string | undefined;
+  projectPath?: string | undefined;
+  onOpenFile?: ((path: string, line: number | null) => void) | undefined;
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div className="user-attachments">
+      {attachments.map((item) => {
+        const relative = toProjectRelativePath(item.path, projectPath) ?? item.path;
+        const src = item.kind === "image" ? projectImageSrc(projectId, item.path, projectPath) : "";
+        return (
+          <figure key={`${item.kind}:${item.path}`} className="user-attachment">
+            {src ? <BoundedImage src={src} alt={item.name} className="notice-image" /> : null}
+            <figcaption>
+              {onOpenFile ? (
+                <button
+                  type="button"
+                  className="user-attachment-path"
+                  onClick={() => {
+                    if (relative.trim()) onOpenFile(relative, null);
+                  }}
+                >
+                  {relative}
+                </button>
+              ) : (
+                <span className="user-attachment-path">{relative}</span>
+              )}
+            </figcaption>
+          </figure>
+        );
+      })}
+    </div>
+  );
+}
+
 function ViewImageCard({
   path,
   projectId,
@@ -713,6 +760,9 @@ function EventCardComponent({
   if (lite) return <EventCardLite item={item} height={liteHeight} />;
   if (isRuntimePlaceholder(item.data, item.text)) return null;
   const highlightClass = highlighted ? " is-highlighted" : "";
+  const userAttachments = item.kind === "user" ? timelineAttachments(item.data) : [];
+  const userVisibleText =
+    item.kind === "user" ? visibleUserMessageText(item.text ?? "", item.data) : (item.text ?? "");
   if (item.kind === "user")
     return (
       <article data-message-id={item.id} className={`event-card event-card-user${highlightClass}`}>
@@ -820,15 +870,31 @@ function EventCardComponent({
                 <TextSelect aria-hidden="true" />
               </button>
             ) : null}
-            <CopyButton text={item.text ?? ""} variant="message" />
+            <CopyButton
+              text={
+                userVisibleText ||
+                userAttachments.map((file) => file.path).join("\n") ||
+                item.text ||
+                ""
+              }
+              variant="message"
+            />
           </span>
         </header>
         <div className="markdown">
-          <MarkdownContent
-            text={item.text ?? ""}
-            streaming={item.streaming}
+          {userVisibleText ? (
+            <MarkdownContent
+              text={userVisibleText}
+              streaming={item.streaming}
+              onOpenFile={onOpenFile}
+              onCreateFile={onCreateFile}
+            />
+          ) : null}
+          <UserAttachmentList
+            attachments={userAttachments}
+            projectId={projectId}
+            projectPath={projectPath}
             onOpenFile={onOpenFile}
-            onCreateFile={onCreateFile}
           />
         </div>
         <TruncatedNotice item={item} onLoadFull={onLoadFull} />

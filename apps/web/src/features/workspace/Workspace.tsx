@@ -100,6 +100,7 @@ import {
   formatContextEstimate,
   parseComposerDraft,
   queuedAttachmentMeta,
+  timelineAttachments,
   sendBlockReason,
   stringifyComposerDraft,
   type ComposerAttachment
@@ -966,7 +967,10 @@ export function Workspace() {
             text: String(payload.message ?? ""),
             providerId: payload.providerId ?? providerIdRef.current,
             data: {
-              attachments: queuedAttachmentMeta(payload),
+              attachments: timelineAttachments(payload),
+              ...(typeof payload.displayMessage === "string"
+                ? { displayMessage: payload.displayMessage }
+                : {}),
               ...(payload.turnOptions ? { turnOptions: payload.turnOptions } : {}),
               ...(payload.continuation === true ? { continuation: true } : {}),
               ...(payload.continuationRetry === true ? { continuationRetry: true } : {})
