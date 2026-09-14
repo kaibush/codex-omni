@@ -47,6 +47,8 @@ import { RunSummary, RuntimeOptionsPanel, sandboxMeta, StatusChip } from "./Work
 import type { ConnectionState, RunState } from "./workspace-model";
 import type { WorkspaceSettings } from "./SettingsDialog";
 import { PromptEnhanceDialog } from "./PromptEnhanceDialog";
+import { PromptTemplatePicker } from "./PromptTemplatePicker";
+import { joinInsertedTemplate } from "./prompt-templates";
 
 export function WorkspaceComposer({
   workspaceView,
@@ -494,6 +496,10 @@ export function WorkspaceComposer({
                     {contextEstimate}
                   </span>
                 )}
+                <PromptTemplatePicker
+                  disabled={!activeSession}
+                  onInsert={(text) => setInput((current) => joinInsertedTemplate(current, text))}
+                />
                 <Button
                   type="button"
                   size="icon"

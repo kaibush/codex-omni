@@ -1,5 +1,53 @@
+export const TERMINAL_FONT_SIZE_MIN = 10;
+export const TERMINAL_FONT_SIZE_MAX = 22;
+export const TERMINAL_FONT_SIZE_STORAGE_KEY = "codex-omni:terminal-chat-font-size";
+
 export function terminalFontSize(viewportWidth: number) {
   return viewportWidth < 640 ? 11 : 12;
+}
+
+export function defaultTerminalFontSize(viewportWidth: number) {
+  return terminalFontSize(viewportWidth);
+}
+
+export function clampTerminalFontSize(value: number): number {
+  if (!Number.isFinite(value)) return TERMINAL_FONT_SIZE_MIN;
+  return Math.min(TERMINAL_FONT_SIZE_MAX, Math.max(TERMINAL_FONT_SIZE_MIN, Math.round(value)));
+}
+
+export function loadTerminalFontSize(viewportWidth: number): number {
+  try {
+    const stored = localStorage.getItem(TERMINAL_FONT_SIZE_STORAGE_KEY);
+    const value = Number(stored);
+    if (stored != null && stored !== "" && Number.isFinite(value)) {
+      return clampTerminalFontSize(value);
+    }
+  } catch {
+    // localStorage can be unavailable in private browsing.
+  }
+  return defaultTerminalFontSize(viewportWidth);
+}
+
+export function persistTerminalFontSize(value: number): void {
+  try {
+    localStorage.setItem(TERMINAL_FONT_SIZE_STORAGE_KEY, String(clampTerminalFontSize(value)));
+  } catch {
+    // localStorage can be unavailable in private browsing.
+  }
+}
+
+export function stepTerminalFontSize(current: number, delta: number): number {
+  const size = clampTerminalFontSize(current);
+  if (!Number.isFinite(delta)) return size;
+  return clampTerminalFontSize(size + Math.sign(delta));
+}
+
+export function canDecreaseTerminalFontSize(size: number) {
+  return clampTerminalFontSize(size) > TERMINAL_FONT_SIZE_MIN;
+}
+
+export function canIncreaseTerminalFontSize(size: number) {
+  return clampTerminalFontSize(size) < TERMINAL_FONT_SIZE_MAX;
 }
 
 export function canFitTerminal(width: number, height: number) {

@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+
+import { beforeEach, describe, expect, it } from "vitest";
 import {
+  TERMINAL_FONT_SIZE_MAX,
+  TERMINAL_FONT_SIZE_MIN,
+  TERMINAL_FONT_SIZE_STORAGE_KEY,
+  canDecreaseTerminalFontSize,
   canFitTerminal,
+  canIncreaseTerminalFontSize,
+  clampTerminalFontSize,
+  defaultTerminalFontSize,
+  loadTerminalFontSize,
+  persistTerminalFontSize,
+  stepTerminalFontSize,
   isCoarsePointer,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
@@ -32,6 +44,8 @@ describe("terminal density", () => {
   it("uses a compact font so more rows fit on phone and desktop", () => {
     expect(terminalFontSize(390)).toBe(11);
     expect(terminalFontSize(1280)).toBe(12);
+    expect(defaultTerminalFontSize(390)).toBe(11);
+    expect(defaultTerminalFontSize(1280)).toBe(12);
   });
 
   it("does not fit or resize a hidden terminal", () => {
@@ -47,6 +61,45 @@ describe("terminal density", () => {
     expect(terminalKeepaliveClassName(false)).toContain("absolute");
     expect(terminalKeepaliveClassName(false)).toContain("h-full");
     expect(terminalKeepaliveClassName(false).split(/\s+/)).not.toContain("hidden");
+  });
+});
+
+describe("terminal font size", () => {
+  beforeEach(() => {
+    localStorage.removeItem(TERMINAL_FONT_SIZE_STORAGE_KEY);
+  });
+
+  it("clamps finite sizes and rejects invalid numbers", () => {
+    expect(clampTerminalFontSize(Number.NaN)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(clampTerminalFontSize(Number.POSITIVE_INFINITY)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(clampTerminalFontSize(Number.NEGATIVE_INFINITY)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(clampTerminalFontSize(0)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(clampTerminalFontSize(100)).toBe(TERMINAL_FONT_SIZE_MAX);
+    expect(clampTerminalFontSize(14)).toBe(14);
+  });
+
+  it("steps by one until the min and max", () => {
+    expect(stepTerminalFontSize(12, 1)).toBe(13);
+    expect(stepTerminalFontSize(12, -1)).toBe(11);
+    expect(stepTerminalFontSize(TERMINAL_FONT_SIZE_MIN, -1)).toBe(TERMINAL_FONT_SIZE_MIN);
+    expect(stepTerminalFontSize(TERMINAL_FONT_SIZE_MAX, 1)).toBe(TERMINAL_FONT_SIZE_MAX);
+    expect(canDecreaseTerminalFontSize(TERMINAL_FONT_SIZE_MIN)).toBe(false);
+    expect(canIncreaseTerminalFontSize(TERMINAL_FONT_SIZE_MIN)).toBe(true);
+    expect(canDecreaseTerminalFontSize(TERMINAL_FONT_SIZE_MAX)).toBe(true);
+    expect(canIncreaseTerminalFontSize(TERMINAL_FONT_SIZE_MAX)).toBe(false);
+  });
+
+  it("loads a stored size and falls back when the value is invalid", () => {
+    expect(loadTerminalFontSize(390)).toBe(11);
+    localStorage.setItem(TERMINAL_FONT_SIZE_STORAGE_KEY, "nope");
+    expect(loadTerminalFontSize(390)).toBe(11);
+    localStorage.setItem(TERMINAL_FONT_SIZE_STORAGE_KEY, "");
+    expect(loadTerminalFontSize(1280)).toBe(12);
+    localStorage.setItem(TERMINAL_FONT_SIZE_STORAGE_KEY, "16");
+    expect(loadTerminalFontSize(390)).toBe(16);
+    persistTerminalFontSize(99);
+    expect(localStorage.getItem(TERMINAL_FONT_SIZE_STORAGE_KEY)).toBe(String(TERMINAL_FONT_SIZE_MAX));
+    expect(loadTerminalFontSize(390)).toBe(TERMINAL_FONT_SIZE_MAX);
   });
 });
 

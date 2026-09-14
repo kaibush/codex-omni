@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   Activity,
   Archive,
@@ -50,7 +50,13 @@ import { requestSystemUpdateCheck } from "@/lib/system-update";
 import { formatCompactDateTime, formatDataSize, formatDateTime } from "@/lib/utils";
 import type { HostInfo, Project, Session } from "@/types";
 import { SESSION_COLORS, SESSION_ICONS, sessionIcon } from "./session-appearance";
-import { clampSidebarWidth, type ConnectionState } from "./workspace-model";
+import {
+  clampSidebarWidth,
+  loadExpandedProjectIds,
+  persistExpandedProjectIds,
+  toggleExpandedProjectId,
+  type ConnectionState
+} from "./workspace-model";
 
 function SettingsToolsMenu({
   projectId,
@@ -254,6 +260,15 @@ export function WorkspaceSidebar({
   providersCount: number;
   host?: HostInfo | undefined;
 }) {
+  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() => loadExpandedProjectIds());
+  const toggleProjectExpanded = (id: string) => {
+    setExpandedProjectIds((current) => {
+      const next = toggleExpandedProjectId(current, id);
+      persistExpandedProjectIds(next);
+      return next;
+    });
+  };
+
   return (
     <>
       {isMobile && sidebar && (
@@ -534,10 +549,33 @@ export function WorkspaceSidebar({
                           aria-label="编辑工程名称"
                         />
                       ) : (
+                        <>
+                        <button
+                          type="button"
+                          aria-label={expandedProjectIds.includes(project.id) ? `折叠 ${project.name}` : `展开 ${project.name}`}
+                          aria-expanded={expandedProjectIds.includes(project.id)}
+                          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleProjectExpanded(project.id);
+                          }}
+                        >
+                          {expandedProjectIds.includes(project.id) ? (
+                            <ChevronDown className="size-3" />
+                          ) : (
+                            <ChevronRight className="size-3" />
+                          )}
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
                             openWorkspace(project.id, "", false, "chat");
+                            setExpandedProjectIds((current) => {
+                              if (current.includes(project.id)) return current;
+                              const next = [...current, project.id];
+                              persistExpandedProjectIds(next);
+                              return next;
+                            });
                             if (isMobile) setSidebar(false);
                           }}
                           onDoubleClick={(event) => {
@@ -546,7 +584,6 @@ export function WorkspaceSidebar({
                           }}
                           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
                         >
-                          <ChevronDown className="size-3" />
                           <Folder className="size-4 text-primary" />
                           <span className="min-w-0 truncate">
                             <span className="block truncate">
@@ -560,6 +597,7 @@ export function WorkspaceSidebar({
                             </span>
                           </span>
                         </button>
+                        </>
                       )}
                       <button
                         type="button"
@@ -626,7 +664,7 @@ export function WorkspaceSidebar({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                    {project.id === projectId && (
+                    {project.id === projectId && expandedProjectIds.includes(project.id) && (
                       <div className="ml-4 mt-0.5 border-l border-border pl-1.5">
                         {sessionGroups.map((group) => (
                           <section key={group.key} className="mb-1">

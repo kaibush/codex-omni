@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   Ban,
+  BotMessageSquare,
   Copy,
   Download,
   Eraser,
@@ -236,7 +237,7 @@ export function WorkspaceHeader({
               <span className="hidden sm:inline">对话</span>
             </TabsTrigger>
             <TabsTrigger value="terminal-chat" className="px-2.5 text-xs sm:px-3">
-              <TerminalSquare />
+              <BotMessageSquare />
               <span className="hidden sm:inline">终端对话</span>
             </TabsTrigger>
             <TabsTrigger value="files" className="px-2.5 text-xs sm:px-3">

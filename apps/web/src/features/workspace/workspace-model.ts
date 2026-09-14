@@ -42,6 +42,29 @@ export const persistSidebarWidth = (value: number) => {
   }
 };
 
+export const SIDEBAR_PROJECT_EXPANDED_KEY = "codex-omni:sidebar-project-expanded";
+
+export const loadExpandedProjectIds = (): string[] => {
+  try {
+    const value = JSON.parse(localStorage.getItem(SIDEBAR_PROJECT_EXPANDED_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+};
+
+export const persistExpandedProjectIds = (ids: Iterable<string>): void => {
+  try {
+    localStorage.setItem(SIDEBAR_PROJECT_EXPANDED_KEY, JSON.stringify([...ids]));
+  } catch {
+    // private browsing
+  }
+};
+
+export const toggleExpandedProjectId = (ids: readonly string[], projectId: string): string[] =>
+  ids.includes(projectId) ? ids.filter((id) => id !== projectId) : [...ids, projectId];
+
 export const loadOutboundCommands = (): QueuedCommand[] => {
   try {
     const value = JSON.parse(localStorage.getItem(OUTBOUND_TURNS_STORAGE_KEY) ?? "[]");

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { LogOut, Plus, Save, Settings as SettingsIcon, Trash2 } from "lucide-react";
+import { LogOut, Pencil, Plus, Save, Settings as SettingsIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type { TimelineView } from "@/lib/timeline";
 import type { PromptTemplate, Provider } from "@/types";
+import { normalizeTemplateCommand } from "./prompt-templates";
 
 export type WorkspaceSettings = {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
@@ -71,28 +72,35 @@ export function SettingsDialog({
   const [templateName, setTemplateName] = useState("");
   const [templateCommand, setTemplateCommand] = useState("");
   const [templateContent, setTemplateContent] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const qc = useQueryClient();
   const templates = useQuery({
     queryKey: ["templates"],
     queryFn: () => api<PromptTemplate[]>("/api/templates"),
     enabled: open
   });
+  const resetTemplateForm = () => {
+    setEditingTemplateId(null);
+    setTemplateName("");
+    setTemplateCommand("");
+    setTemplateContent("");
+  };
   const saveTemplate = useMutation({
-    mutationFn: () =>
-      api("/api/templates", {
-        method: "POST",
-        body: JSON.stringify({
-          name: templateName,
-          command: templateCommand,
-          content: templateContent
-        })
-      }),
+    mutationFn: () => {
+      const payload = {
+        name: templateName.trim(),
+        command: normalizeTemplateCommand(templateCommand) ?? "",
+        content: templateContent.trim()
+      };
+      return editingTemplateId
+        ? api(`/api/templates/${editingTemplateId}`, { method: "PUT", body: JSON.stringify(payload) })
+        : api("/api/templates", { method: "POST", body: JSON.stringify(payload) });
+    },
     onSuccess: async () => {
-      setTemplateName("");
-      setTemplateCommand("");
-      setTemplateContent("");
+      const wasEdit = Boolean(editingTemplateId);
+      resetTemplateForm();
       await qc.invalidateQueries({ queryKey: ["templates"] });
-      toast.success("已保存 Prompt 模板");
+      toast.success(wasEdit ? "已更新 Prompt 模板" : "已保存 Prompt 模板");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "保存模板失败")
   });
@@ -425,9 +433,25 @@ export function SettingsDialog({
                   </div>
                   <button
                     type="button"
+                    className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label={`编辑模板 ${item.name}`}
+                    onClick={() => {
+                      setEditingTemplateId(item.id);
+                      setTemplateName(item.name);
+                      setTemplateCommand(item.command ?? "");
+                      setTemplateContent(item.content);
+                    }}
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除模板 ${item.name}`}
-                    onClick={() => deleteTemplate.mutate(item.id)}
+                    onClick={() => {
+                      if (editingTemplateId === item.id) resetTemplateForm();
+                      deleteTemplate.mutate(item.id);
+                    }}
                   >
                     <Trash2 className="size-3.5" />
                   </button>
@@ -463,18 +487,24 @@ export function SettingsDialog({
                     placeholder="请审查 {{project}} 在 {{date}} 的变更"
                   />
                 </label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="mt-2"
-                  disabled={
-                    !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
-                  }
-                  onClick={() => saveTemplate.mutate()}
-                >
-                  <Plus className="size-4" />
-                  保存模板
-                </Button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {editingTemplateId ? (
+                    <Button type="button" variant="outline" onClick={resetTemplateForm}>
+                      取消编辑
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
+                    }
+                    onClick={() => saveTemplate.mutate()}
+                  >
+                    <Plus className="size-4" />
+                    {editingTemplateId ? "更新模板" : "保存模板"}
+                  </Button>
+                </div>
               </div>
             </div>
           </section>

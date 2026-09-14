@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   ArrowDown,
+  BotMessageSquare,
   ChevronUp,
   Clipboard,
   Command,
@@ -26,8 +27,9 @@ import {
   Search,
   Send,
   Square,
-  SquareTerminal,
-  X
+  X,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import { toast } from "sonner";
 import { numberedDuplicateTitles } from "@codex-omni/protocol";
@@ -64,15 +66,21 @@ import {
   type FileLike
 } from "./composer-attachments";
 import { LiveDuration } from "./WorkspaceStatus";
+import { PromptTemplatePicker } from "./PromptTemplatePicker";
+import { joinInsertedTemplate } from "./prompt-templates";
 import {
+  canDecreaseTerminalFontSize,
   canFitTerminal,
+  canIncreaseTerminalFontSize,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
   encodeTerminalComposerPayload,
   encodeTerminalModifiedInput,
   filterCommandHistory,
   isCoarsePointer,
-  terminalFontSize,
+  loadTerminalFontSize,
+  persistTerminalFontSize,
+  stepTerminalFontSize,
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
@@ -161,7 +169,9 @@ function TerminalChatViewport({
   onChange,
   active = true,
   tabBar,
-  sessionActions
+  sessionActions,
+  fontSize,
+  onFontSizeChange
 }: {
   project: Project;
   session: TerminalChatSession;
@@ -169,6 +179,8 @@ function TerminalChatViewport({
   active?: boolean;
   tabBar: ReactNode;
   sessionActions: ReactNode;
+  fontSize: number;
+  onFontSizeChange: (size: number) => void;
 }) {
   const { resolvedTheme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
@@ -427,7 +439,7 @@ function TerminalChatViewport({
     if (!element) return;
     const instance = new Terminal({
       cursorBlink: true,
-      fontSize: terminalFontSize(window.innerWidth),
+      fontSize,
       lineHeight: 1.15,
       scrollback: 5000,
       disableStdin: false,
@@ -586,6 +598,15 @@ function TerminalChatViewport({
   useEffect(() => {
     if (terminal.current) terminal.current.options.theme = xtermTheme(resolvedTheme);
   }, [resolvedTheme]);
+  useEffect(() => {
+    const instance = terminal.current;
+    if (!instance) return;
+    instance.options.fontSize = fontSize;
+    return scheduleTerminalFit(() => {
+      fitRef.current();
+      refreshTerminal(instance);
+    });
+  }, [fontSize]);
   useEffect(() => {
     if (!active) {
       terminal.current?.blur();
@@ -1009,6 +1030,12 @@ function TerminalChatViewport({
           {loadingEarlier ? <LoaderCircle className="size-3.5 animate-spin" /> : <ChevronUp className="size-3.5" />}
           <span>{loadingEarlier ? "加载中" : "更早"}</span>
         </button>
+        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="缩小终端字体" title="缩小终端字体" disabled={!canDecreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, -1)))}>
+          <ZoomOut className="size-3.5" />
+        </button>
+        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="放大终端字体" title="放大终端字体" disabled={!canIncreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}>
+          <ZoomIn className="size-3.5" />
+        </button>
         <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
           <Search className="size-3.5" />
         </button>
@@ -1222,6 +1249,10 @@ function TerminalChatViewport({
                   void addAttachments(files);
                 }}
               />
+              <PromptTemplatePicker
+                disabled={uploading}
+                onInsert={(text) => setDraft((current) => joinInsertedTemplate(current, text))}
+              />
               <Button
                 type="button"
                 size="icon"
@@ -1305,6 +1336,11 @@ export function TerminalChatPanel({
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState("");
   const [visitedIds, setVisitedIds] = useState<string[]>([]);
+  const [fontSize, setFontSize] = useState(() => loadTerminalFontSize(window.innerWidth));
+  const changeFontSize = (size: number) => {
+    persistTerminalFontSize(size);
+    setFontSize(size);
+  };
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
   const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
   const create = useMutation({
@@ -1389,7 +1425,7 @@ export function TerminalChatPanel({
   };
   const renderTabBar = () => (
     <>
-      <SquareTerminal className="size-3.5 shrink-0 text-primary" />
+      <BotMessageSquare className="size-3.5 shrink-0 text-primary" />
       <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item) => (
           <div
@@ -1461,6 +1497,8 @@ export function TerminalChatPanel({
               active={active && item.id === selected?.id}
               tabBar={renderTabBar()}
               sessionActions={item.id === selected?.id ? sessionActions : null}
+              fontSize={fontSize}
+              onFontSizeChange={changeFontSize}
             />
           </div>
         ))
@@ -1471,7 +1509,7 @@ export function TerminalChatPanel({
           </div>
           <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
             <div>
-              <SquareTerminal className="mx-auto size-10 text-muted-foreground" />
+              <BotMessageSquare className="mx-auto size-10 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
               <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
               <Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button>

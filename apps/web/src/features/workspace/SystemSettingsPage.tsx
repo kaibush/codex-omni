@@ -9,6 +9,7 @@ import {
   ListChecks,
   LogOut,
   Menu,
+  Pencil,
   Plus,
   RotateCcw,
   Save,
@@ -41,6 +42,7 @@ import { ProjectKnowledgeDialog } from "./ProjectKnowledgeDialog";
 import { ProviderDialog } from "./ProviderDialog";
 import { ScheduleDialog } from "./ScheduleDialog";
 import { defaultWorkspaceSettings, type WorkspaceSettings } from "./SettingsDialog";
+import { normalizeTemplateCommand } from "./prompt-templates";
 import { findSettingsSection } from "./settings-navigation";
 import { SettingsUpdatesSection } from "./SettingsUpdatesSection";
 import { SettingsMobileNav, SettingsSidebar } from "./settings/settings-sidebar";
@@ -119,6 +121,7 @@ export function SystemSettingsPage() {
   const [templateName, setTemplateName] = useState("");
   const [templateCommand, setTemplateCommand] = useState("");
   const [templateContent, setTemplateContent] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const settings = useMemo(
     () => ({ ...defaultWorkspaceSettings, ...(settingsQuery.data ?? {}) }),
     [settingsQuery.data]
@@ -153,22 +156,28 @@ export function SystemSettingsPage() {
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "保存失败")
   });
+  const resetTemplateForm = () => {
+    setEditingTemplateId(null);
+    setTemplateName("");
+    setTemplateCommand("");
+    setTemplateContent("");
+  };
   const saveTemplate = useMutation({
-    mutationFn: () =>
-      api("/api/templates", {
-        method: "POST",
-        body: JSON.stringify({
-          name: templateName.trim(),
-          command: templateCommand.trim(),
-          content: templateContent.trim()
-        })
-      }),
+    mutationFn: () => {
+      const payload = {
+        name: templateName.trim(),
+        command: normalizeTemplateCommand(templateCommand) ?? "",
+        content: templateContent.trim()
+      };
+      return editingTemplateId
+        ? api(`/api/templates/${editingTemplateId}`, { method: "PUT", body: JSON.stringify(payload) })
+        : api("/api/templates", { method: "POST", body: JSON.stringify(payload) });
+    },
     onSuccess: async () => {
-      setTemplateName("");
-      setTemplateCommand("");
-      setTemplateContent("");
+      const wasEdit = Boolean(editingTemplateId);
+      resetTemplateForm();
       await queryClient.invalidateQueries({ queryKey: ["templates"] });
-      toast.success("已保存 Prompt 模板");
+      toast.success(wasEdit ? "已更新 Prompt 模板" : "已保存 Prompt 模板");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "保存模板失败")
   });
@@ -675,8 +684,25 @@ export function SystemSettingsPage() {
                             type="button"
                             size="icon"
                             variant="ghost"
+                            aria-label={`编辑模板 ${template.name}`}
+                            onClick={() => {
+                              setEditingTemplateId(template.id);
+                              setTemplateName(template.name);
+                              setTemplateCommand(template.command ?? "");
+                              setTemplateContent(template.content);
+                            }}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
                             aria-label={`删除模板 ${template.name}`}
-                            onClick={() => deleteTemplate.mutate(template.id)}
+                            onClick={() => {
+                              if (editingTemplateId === template.id) resetTemplateForm();
+                              deleteTemplate.mutate(template.id);
+                            }}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -687,7 +713,7 @@ export function SystemSettingsPage() {
                     <p className="text-sm text-muted-foreground">还没有模板。</p>
                   )}
                 </SettingsCard>
-                <SettingsCard title="新建模板">
+                <SettingsCard title={editingTemplateId ? "编辑模板" : "新建模板"}>
                   <SettingsFormGrid>
                     <SettingsField label="名称">
                       <Input
@@ -713,17 +739,23 @@ export function SystemSettingsPage() {
                       />
                     </SettingsField>
                   </SettingsFormGrid>
-                  <Button
-                    type="button"
-                    className="mt-4"
-                    disabled={
-                      !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
-                    }
-                    onClick={() => saveTemplate.mutate()}
-                  >
-                    <Plus className="size-4" />
-                    保存模板
-                  </Button>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {editingTemplateId ? (
+                      <Button type="button" variant="outline" onClick={resetTemplateForm}>
+                        取消编辑
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      disabled={
+                        !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
+                      }
+                      onClick={() => saveTemplate.mutate()}
+                    >
+                      <Plus className="size-4" />
+                      {editingTemplateId ? "更新模板" : "保存模板"}
+                    </Button>
+                  </div>
                 </SettingsCard>
               </>
             ) : null}

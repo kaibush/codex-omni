@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+
+import { afterEach, describe, expect, it } from "vitest";
 import type { Message } from "@/types";
 import {
   boundOutboundCommands,
+  loadExpandedProjectIds,
   MAX_OUTBOUND_COMMAND_BYTES,
   MAX_OUTBOUND_COMMANDS,
+  persistExpandedProjectIds,
+  SIDEBAR_PROJECT_EXPANDED_KEY,
   timelineMessageId,
+  toggleExpandedProjectId,
   type QueuedCommand
 } from "./workspace-model";
 
@@ -66,5 +72,39 @@ describe("timeline message ids", () => {
       updatedAt: 2
     };
     expect(timelineMessageId(message)).toBe("assistant-run-1-s1:m1");
+  });
+});
+
+afterEach(() => {
+  localStorage.clear();
+});
+
+describe("sidebar project expanded ids", () => {
+  it("toggles a project id on and off", () => {
+    expect(toggleExpandedProjectId([], "p1")).toEqual(["p1"]);
+    expect(toggleExpandedProjectId(["p1"], "p1")).toEqual([]);
+    expect(toggleExpandedProjectId(["p1", "p2"], "p1")).toEqual(["p2"]);
+    expect(toggleExpandedProjectId(["p1"], "p2")).toEqual(["p1", "p2"]);
+  });
+
+  it("loads an empty list when storage is missing or invalid", () => {
+    expect(loadExpandedProjectIds()).toEqual([]);
+    localStorage.setItem(SIDEBAR_PROJECT_EXPANDED_KEY, "not-json");
+    expect(loadExpandedProjectIds()).toEqual([]);
+    localStorage.setItem(SIDEBAR_PROJECT_EXPANDED_KEY, JSON.stringify({ p1: true }));
+    expect(loadExpandedProjectIds()).toEqual([]);
+    localStorage.setItem(SIDEBAR_PROJECT_EXPANDED_KEY, JSON.stringify(["p1", 2, "p2"]));
+    expect(loadExpandedProjectIds()).toEqual(["p1", "p2"]);
+  });
+
+  it("persists expanded project ids for the next load", () => {
+    persistExpandedProjectIds(["a", "b"]);
+    expect(JSON.parse(localStorage.getItem(SIDEBAR_PROJECT_EXPANDED_KEY) ?? "[]")).toEqual([
+      "a",
+      "b"
+    ]);
+    expect(loadExpandedProjectIds()).toEqual(["a", "b"]);
+    persistExpandedProjectIds(new Set(["c"]));
+    expect(loadExpandedProjectIds()).toEqual(["c"]);
   });
 });
