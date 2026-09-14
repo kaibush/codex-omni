@@ -80,7 +80,7 @@ import { toProjectRelativePath } from "./file-workspace";
 import {
   downloadTextFile,
   linkFileRefs,
-  parseCodexFileHref,
+  parseProjectFileHref,
   snippetFileName
 } from "./markdown-refs";
 import {
@@ -317,8 +317,11 @@ const MarkdownContent = memo(function MarkdownContent({
       img: ({ src, alt }) =>
         src ? <BoundedImage src={src} alt={alt ?? ""} className="notice-image" /> : null,
       a: ({ href, children }) => {
-        const file = parseCodexFileHref(href);
-        if (file && onOpenFile) {
+        const file = parseProjectFileHref(href);
+        if (file) {
+          if (!onOpenFile) {
+            return <span className="file-ref-link">{children}</span>;
+          }
           return (
             <button
               type="button"

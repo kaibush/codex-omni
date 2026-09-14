@@ -116,6 +116,9 @@ describe("file workspace helpers", () => {
     expect(toProjectRelativePath("/repo/app-extra/x.png", "/repo/app")).toBeNull();
     expect(toProjectRelativePath("/repo/app", "/repo/app")).toBeNull();
     expect(toProjectRelativePath("/tmp/gamepad.png")).toBeNull();
+    expect(toProjectRelativePath("`src/app.ts`", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath('"docs/shot.png"', "/repo/app")).toBe("docs/shot.png");
+    expect(toProjectRelativePath("file:///repo/app/src/app.ts", "/repo/app")).toBe("src/app.ts");
   });
 
   it("builds a unified diff for inserted and deleted lines", () => {

@@ -9,6 +9,12 @@ export type FileEntry = {
 
 export type DirectoryResult = { path: string; entries: FileEntry[] };
 
+export type OpenFileRequest = {
+  path: string;
+  line: number | null;
+  nonce: number;
+};
+
 export type FilePreview = {
   path: string;
   content: string;
@@ -104,7 +110,11 @@ function toPosixPath(value: string) {
 }
 
 export function toProjectRelativePath(inputPath: string, projectRealPath?: string | null) {
-  const raw = toPosixPath(inputPath).trim();
+  let raw = toPosixPath(inputPath).trim().replace(/^['"`]+/, "").replace(/['"`]+$/, "");
+  if (/^file:\/\//i.test(raw)) {
+    raw = raw.replace(/^file:\/\//i, "");
+    if (raw.toLowerCase().startsWith("localhost")) raw = raw.slice("localhost".length);
+  }
   if (!raw) return null;
   const isAbsolute = raw.startsWith("/") || /^[A-Za-z]:\//.test(raw);
   if (!isAbsolute) {

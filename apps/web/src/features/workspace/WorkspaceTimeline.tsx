@@ -104,7 +104,6 @@ export function WorkspaceTimeline({
   workspaceSettings,
   providerNames,
   forkSessionFrom,
-  setWorkspaceView,
   setOpenFileRequest,
   setInput,
   setAttachments,
@@ -167,7 +166,7 @@ export function WorkspaceTimeline({
   providerNames: Map<string, string>;
   forkSessionFrom: (messageId?: string, sourceId?: string) => void;
   setWorkspaceView: (view: "chat" | "files" | "git" | "terminal" | "terminal-chat") => void;
-  setOpenFileRequest: (value: { path: string; line: number | null } | null) => void;
+  setOpenFileRequest: (path: string, line: number | null) => void;
   setInput: Dispatch<SetStateAction<string>>;
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -232,10 +231,9 @@ export function WorkspaceTimeline({
   }, [sessionId]);
   const onOpenFile = useCallback(
     (path: string, line: number | null) => {
-      setWorkspaceView("files");
-      setOpenFileRequest({ path, line });
+      setOpenFileRequest(path, line);
     },
-    [setOpenFileRequest, setWorkspaceView]
+    [setOpenFileRequest]
   );
   const onCreateFile = useCallback(
     (content: string, language: string) => {

@@ -1,4 +1,15 @@
-export const FILE_REF_PATTERN = /(^|[\s`])@?((?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]+):(\d+)\b/g;
+export const FILE_PATH_PATTERN =
+  String.raw`(?:\./)?(?:/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,9}|[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|scss|html|vue|py|go|rs|java|kt|rb|php|yml|yaml|toml|xml|svg|png|jpg|jpeg|gif|webp|pdf|sh|bash|zsh|sql|txt|lock|map))`;
+
+export const FILE_REF_PATTERN = new RegExp(
+  String.raw`(^|[^A-Za-z0-9_./-])@?(${FILE_PATH_PATTERN})(?::(\d+))?\b`,
+  "g"
+);
+
+const FENCE_PATTERN = /```[\s\S]*?```/g;
+const MARKDOWN_LINK_PATTERN = /\[[^\]]*]\([^)]*\)/g;
+const SKIP_HREF_PATTERN = /^(?:https?:|mailto:|javascript:|#)/i;
+const INLINE_CODE_FILE_PATTERN = new RegExp("`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+))?`", "g");
 
 const LANGUAGE_EXT: Record<string, string> = {
   typescript: "ts",
@@ -27,12 +38,84 @@ const LANGUAGE_EXT: Record<string, string> = {
   txt: "txt"
 };
 
+function protectSegments(text: string, pattern: RegExp, store: string[]) {
+  return text.replace(pattern, (block) => {
+    const token = `\0P${store.length}\0`;
+    store.push(block);
+    return token;
+  });
+}
+
+function restoreSegments(text: string, store: string[]) {
+  return text.replace(/\0P(\d+)\0/g, (_match, index: string) => store[Number(index)] ?? "");
+}
+
+export function sanitizeFileRef(path: string) {
+  let value = path.trim();
+  if (!value) return "";
+  value = value.replace(/^['"`]+/, "").replace(/['"`]+$/, "");
+  value = value.replace(/^<+/, "").replace(/>+$/, "");
+  if (/^file:\/\//i.test(value)) {
+    value = value.replace(/^file:\/\//i, "");
+    if (value.toLowerCase().startsWith("localhost")) {
+      value = value.slice("localhost".length);
+    }
+  }
+  value = value.replace(/^@/, "");
+  value = value.replace(/[),.;]+$/g, "");
+  return value.trim();
+}
+
+function firstPathSegment(path: string) {
+  return path.replace(/^\.\//, "").replace(/^\/+/, "").split("/")[0] ?? "";
+}
+
+function looksLikeHostedPath(path: string) {
+  if (!path.includes("/")) return false;
+  const first = firstPathSegment(path);
+  return /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(first);
+}
+
+export function looksLikeProjectFilePath(path: string) {
+  const value = sanitizeFileRef(path).replace(/\\/g, "/");
+  if (!value || value.includes("://") || value.startsWith("#")) return false;
+  if (looksLikeHostedPath(value)) return false;
+  const pattern = new RegExp(`^(?:${FILE_PATH_PATTERN})$`);
+  return pattern.test(value);
+}
+
+function fileRefHref(path: string, line?: string | number | null) {
+  const lineNumber = typeof line === "number" ? line : Number(line);
+  if (Number.isFinite(lineNumber) && lineNumber > 0) {
+    return `codex-file:${encodeURIComponent(path)}?line=${lineNumber}`;
+  }
+  return `codex-file:${encodeURIComponent(path)}`;
+}
+
+function fileRefMarkdown(path: string, line?: string | number | null) {
+  const lineNumber = typeof line === "number" ? line : Number(line);
+  const label = Number.isFinite(lineNumber) && lineNumber > 0 ? `${path}:${lineNumber}` : path;
+  return `[${label}](${fileRefHref(path, lineNumber)})`;
+}
+
 export function linkFileRefs(text: string) {
-  return text.replace(
-    FILE_REF_PATTERN,
-    (_match, prefix: string, path: string, line: string) =>
-      `${prefix}[${path}:${line}](codex-file:${encodeURIComponent(path)}?line=${line})`
+  const protectedBlocks: string[] = [];
+  let working = protectSegments(text, FENCE_PATTERN, protectedBlocks);
+  working = protectSegments(working, MARKDOWN_LINK_PATTERN, protectedBlocks);
+  working = working.replace(INLINE_CODE_FILE_PATTERN, (match, path: string, line?: string) =>
+    looksLikeProjectFilePath(path) ? fileRefMarkdown(path, line) : match
   );
+  working = working.replace(
+    FILE_REF_PATTERN,
+    (match, prefix: string, path: string, line: string | undefined, offset: number) => {
+      const start = offset + prefix.length;
+      const before = working.slice(Math.max(0, start - 12), start);
+      if (/[a-z]+:\/\/$/i.test(before)) return match;
+      if (!looksLikeProjectFilePath(path)) return match;
+      return `${prefix}${fileRefMarkdown(path, line)}`;
+    }
+  );
+  return restoreSegments(working, protectedBlocks);
 }
 
 export function parseCodexFileHref(href: string | undefined) {
@@ -40,11 +123,44 @@ export function parseCodexFileHref(href: string | undefined) {
   const body = href.slice("codex-file:".length);
   const [rawPath, query = ""] = body.split("?");
   if (!rawPath) return null;
+  const path = sanitizeFileRef(decodeURIComponent(rawPath));
+  if (!path) return null;
   const line = Number(new URLSearchParams(query).get("line"));
   return {
-    path: decodeURIComponent(rawPath),
+    path,
     line: Number.isFinite(line) && line > 0 ? line : null
   };
+}
+
+export function parseProjectFileHref(href: string | undefined) {
+  if (!href) return null;
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+  const fromCodex = parseCodexFileHref(trimmed);
+  if (fromCodex) return fromCodex;
+  if (SKIP_HREF_PATTERN.test(trimmed)) return null;
+
+  let raw = sanitizeFileRef(trimmed);
+  if (!raw) return null;
+
+  let line: number | null = null;
+  const lineMatch = raw.match(/^(.*?):(\d+)$/);
+  if (lineMatch?.[1] && lineMatch[2] && !/^[A-Za-z]:$/.test(lineMatch[1])) {
+    raw = lineMatch[1];
+    line = Number(lineMatch[2]);
+  }
+  raw = sanitizeFileRef(raw).replace(/\\/g, "/");
+  if (!looksLikeProjectFilePath(raw) && !looksLikeRelativeOpenPath(raw)) return null;
+  return {
+    path: raw,
+    line: Number.isFinite(line) && line && line > 0 ? line : null
+  };
+}
+
+function looksLikeRelativeOpenPath(path: string) {
+  if (!path || path.includes("://") || path.startsWith("#") || /\s/.test(path)) return false;
+  if (looksLikeHostedPath(path)) return false;
+  return /^(?:\.\/)?\/?(?:[\w.-]+\/)+[\w.-]+$/.test(path);
 }
 
 export function snippetFileName(language: string) {

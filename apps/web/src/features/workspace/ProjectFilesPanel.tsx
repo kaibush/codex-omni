@@ -101,9 +101,11 @@ import {
   type FileSort,
   type LanguageAnalysis,
   type LanguageSymbol,
+  type OpenFileRequest,
   MAX_EDITABLE_FILE_BYTES
 } from "./file-workspace";
 import { BoundedImage } from "./BoundedImage";
+import { sanitizeFileRef } from "./markdown-refs";
 import { FILE_PREVIEW_IMAGE_MAX_HEIGHT, FILE_PREVIEW_IMAGE_MAX_WIDTH } from "./bounded-image";
 
 type ProjectResourceView = "files" | "git";
@@ -386,7 +388,7 @@ function FilesWorkspace({
   onDirtyCount
 }: {
   project: Project;
-  openRequest?: { path: string; line: number | null } | null;
+  openRequest?: OpenFileRequest | null;
   editorCommand?: "goto-line" | "toggle-outline" | null | undefined;
   onOpened?: () => void;
   onCommandHandled?: (() => void) | undefined;
@@ -402,6 +404,8 @@ function FilesWorkspace({
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [openingPath, setOpeningPath] = useState<string | null>(null);
+  const openingPathRef = useRef<string | null>(null);
+  const openGenerationRef = useRef(0);
   const [activeDirectory, setActiveDirectory] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [checkedPaths, setCheckedPaths] = useState<Set<string>>(new Set());
@@ -518,6 +522,7 @@ function FilesWorkspace({
     setExpanded(new Set([""]));
     setDirectories({});
     setOpeningPath(null);
+    openingPathRef.current = null;
     setActiveDirectory("");
     setSelectedPath(null);
     setCheckedPaths(new Set());
@@ -655,20 +660,31 @@ function FilesWorkspace({
     );
   };
 
+  const revealInTree = (relativePath: string) => {
+    const directoriesToOpen = new Set<string>([""]);
+    for (const ancestor of ancestorPaths(relativePath)) directoriesToOpen.add(ancestor);
+    setExpanded((current) => new Set([...current, ...directoriesToOpen]));
+    for (const directory of directoriesToOpen) {
+      void loadDirectoryRef.current(directory);
+    }
+  };
+
   const openPath = async (targetPath: string, line: number | null = null) => {
-    if (!targetPath.trim()) {
+    const cleaned = sanitizeFileRef(targetPath);
+    if (!cleaned) {
       setError("无法打开：文件路径为空。");
       setMobilePane("editor");
       return;
     }
     const relativePath =
-      toProjectRelativePath(targetPath, project.realPath) ??
-      toProjectRelativePath(targetPath, project.displayPath);
+      toProjectRelativePath(cleaned, project.realPath) ??
+      toProjectRelativePath(cleaned, project.displayPath);
     if (!relativePath) {
       setError("该文件不在当前项目目录内，无法打开。");
       setMobilePane("editor");
       return;
     }
+    revealInTree(relativePath);
     const existing = tabsRef.current.find((tab) => tab.path === relativePath);
     if (existing) {
       setActivePath(relativePath);
@@ -681,13 +697,14 @@ function FilesWorkspace({
       }
       return;
     }
-    if (openingPath === relativePath) {
+    if (openingPathRef.current === relativePath) {
       setActivePath(relativePath);
       setSelectedPath(relativePath);
       setMobilePane("editor");
       return;
     }
     try {
+      openingPathRef.current = relativePath;
       setOpeningPath(relativePath);
       setError("");
       const meta = await api<FileMeta>(
@@ -717,20 +734,18 @@ function FilesWorkspace({
       setError(reason instanceof Error ? reason.message : String(reason));
       setMobilePane("editor");
     } finally {
-      setOpeningPath(null);
+      if (openingPathRef.current === relativePath) openingPathRef.current = null;
+      setOpeningPath((current) => (current === relativePath ? null : current));
     }
   };
 
   useEffect(() => {
     if (!openRequest?.path) return;
-    let cancelled = false;
+    const generation = ++openGenerationRef.current;
     void openPath(openRequest.path, openRequest.line).finally(() => {
-      if (!cancelled) onOpened?.();
+      if (openGenerationRef.current === generation) onOpened?.();
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [openRequest]);
+  }, [openRequest?.line, openRequest?.nonce, openRequest?.path]);
 
   useEffect(() => {
     if (!activeTab || isMediaPreview(activeTab.previewKind)) {
@@ -2019,6 +2034,7 @@ export function ProjectFilesPanel({
   view,
   onViewChange,
   openFileRequest,
+  onOpenFileHandled,
   editorCommand,
   focusCommit,
   onDirtyCount,
@@ -2028,16 +2044,16 @@ export function ProjectFilesPanel({
   project: Project;
   view: ProjectResourceView;
   onViewChange?: (view: ProjectResourceView) => void;
-  openFileRequest?: { path: string; line: number | null } | null | undefined;
+  openFileRequest?: OpenFileRequest | null | undefined;
+  onOpenFileHandled?: (() => void) | undefined;
   editorCommand?: "goto-line" | "toggle-outline" | null | undefined;
   focusCommit?: string | null | undefined;
   onDirtyCount?: ((count: number) => void) | undefined;
   onGitCount?: ((count: number) => void) | undefined;
   onCommandHandled?: (() => void) | undefined;
 }) {
-  const [openRequest, setOpenRequest] = useState<{ path: string; line: number | null } | null>(
-    openFileRequest ?? null
-  );
+  const [openRequest, setOpenRequest] = useState<OpenFileRequest | null>(openFileRequest ?? null);
+  const localOpenNonce = useRef(0);
   useEffect(() => {
     if (!openFileRequest?.path) return;
     setOpenRequest(openFileRequest);
@@ -2049,7 +2065,10 @@ export function ProjectFilesPanel({
           project={project}
           openRequest={openRequest}
           editorCommand={editorCommand}
-          onOpened={() => setOpenRequest(null)}
+          onOpened={() => {
+            setOpenRequest(null);
+            onOpenFileHandled?.();
+          }}
           onCommandHandled={onCommandHandled}
           onDirtyCount={onDirtyCount}
         />
@@ -2060,7 +2079,8 @@ export function ProjectFilesPanel({
           focusCommit={focusCommit}
           onChangeCount={onGitCount}
           onOpenFile={(path, line) => {
-            setOpenRequest({ path, line });
+            localOpenNonce.current += 1;
+            setOpenRequest({ path, line, nonce: localOpenNonce.current });
             onViewChange?.("files");
           }}
         />

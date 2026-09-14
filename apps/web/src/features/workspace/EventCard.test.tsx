@@ -109,6 +109,32 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("src/app.ts:12");
   });
 
+  it("opens bare file paths and markdown file links from chat", () => {
+    const bare = renderToStaticMarkup(
+      <EventCard
+        item={{ id: "user-path", kind: "assistant", text: "see src/app.ts and `apps/web/src/foo.ts`" }}
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(bare).toContain("file-ref-link");
+    expect(bare).toContain("src/app.ts");
+    expect(bare).toContain("apps/web/src/foo.ts");
+
+    const markdown = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "user-md-link",
+          kind: "assistant",
+          text: "open [the file](apps/web/src/foo.ts)"
+        }}
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(markdown).toContain("file-ref-link");
+    expect(markdown).toContain("the file");
+    expect(markdown).not.toContain('href="apps/web/src/foo.ts"');
+  });
+
   it("renders latex math with katex", () => {
     const html = renderToStaticMarkup(
       <EventCard

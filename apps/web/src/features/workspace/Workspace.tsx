@@ -86,7 +86,7 @@ import type {
 import { ApprovalAuditDialog } from "@/features/workspace/ApprovalAuditDialog";
 import { CommandPalette } from "@/features/workspace/CommandPalette";
 import type { PaletteAction } from "@/features/workspace/command-palette";
-import { quoteMarkdown } from "@/features/workspace/markdown-refs";
+import { quoteMarkdown, sanitizeFileRef } from "@/features/workspace/markdown-refs";
 import { summarizeMessageText } from "@/features/workspace/message-summary";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
@@ -112,7 +112,7 @@ import {
   extractMentions,
   type SlashCommand
 } from "@/features/workspace/composer-mentions";
-import type { FilePreview, FileSearchMatch } from "@/features/workspace/file-workspace";
+import type { FilePreview, FileSearchMatch, OpenFileRequest } from "@/features/workspace/file-workspace";
 import { RunningCenterDialog, useActiveRuns } from "@/features/workspace/RunningCenterDialog";
 import { ProjectKnowledgeDialog } from "@/features/workspace/ProjectKnowledgeDialog";
 import { ScheduleDialog } from "@/features/workspace/ScheduleDialog";
@@ -209,7 +209,9 @@ export function Workspace() {
     defaultWorkspaceView(params.sessionId)
   );
   const [terminalChatVisited, setTerminalChatVisited] = useState(false);
+  const [filesVisited, setFilesVisited] = useState(false);
   const lastTerminalChatSessionId = useRef("");
+  const openFileNonce = useRef(0);
   const workspaceViewRef = useRef(workspaceView);
   workspaceViewRef.current = workspaceView;
   const openWorkspace = useCallback(
@@ -255,10 +257,15 @@ export function Workspace() {
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [createFile, setCreateFile] = useState<{ content: string; language: string } | null>(null);
   const [createFilePath, setCreateFilePath] = useState("");
-  const [openFileRequest, setOpenFileRequest] = useState<{
-    path: string;
-    line: number | null;
-  } | null>(null);
+  const [openFileRequest, setOpenFileRequest] = useState<OpenFileRequest | null>(null);
+  const requestOpenFile = useCallback((path: string, line: number | null) => {
+    const cleaned = sanitizeFileRef(path);
+    if (!cleaned) return;
+    openFileNonce.current += 1;
+    setFilesVisited(true);
+    setWorkspaceView("files");
+    setOpenFileRequest({ path: cleaned, line, nonce: openFileNonce.current });
+  }, []);
   const [editorCommand, setEditorCommand] = useState<"goto-line" | "toggle-outline" | null>(null);
   const [enhanceNonce, setEnhanceNonce] = useState(0);
   const [focusCommit, setFocusCommit] = useState<string | null>(null);
@@ -1245,9 +1252,11 @@ export function Workspace() {
   }, [activeSession?.id, activeSession?.kind]);
   useEffect(() => {
     setTerminalChatVisited(workspaceViewRef.current === "terminal-chat");
+    setFilesVisited(workspaceViewRef.current === "files" || workspaceViewRef.current === "git");
   }, [projectId]);
   useEffect(() => {
     if (workspaceView === "terminal-chat") setTerminalChatVisited(true);
+    if (workspaceView === "files" || workspaceView === "git") setFilesVisited(true);
   }, [workspaceView]);
   useDocumentTitle(
     workspaceDocumentTitle({
@@ -1523,7 +1532,7 @@ export function Workspace() {
     }
     if (action.type === "file") {
       openWorkspace(action.projectId, sessionId || "", false, "files");
-      setOpenFileRequest({ path: action.path, line: action.line });
+      requestOpenFile(action.path, action.line);
       return;
     }
     if (action.type === "git-commit") {
@@ -2181,7 +2190,7 @@ export function Workspace() {
       });
       setCreateFile(null);
       setWorkspaceView("files");
-      setOpenFileRequest({ path, line: null });
+      requestOpenFile(path, null);
       toast.success("已创建文件", { description: path });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "创建文件失败");
@@ -2401,7 +2410,7 @@ export function Workspace() {
               providerNames={providerNames}
               forkSessionFrom={forkSessionFrom}
               setWorkspaceView={setWorkspaceView}
-              setOpenFileRequest={setOpenFileRequest}
+              setOpenFileRequest={requestOpenFile}
               setInput={setInput}
               setAttachments={setAttachments}
               inputRef={inputRef}
@@ -2488,14 +2497,19 @@ export function Workspace() {
               activeProject={activeProject}
               enhanceNonce={enhanceNonce}
             />}
-            {activeProject && (workspaceView === "files" || workspaceView === "git") && (
-              <div className="min-h-0 flex-1 overflow-hidden">
+            {activeProject && filesVisited ? (
+              <div
+                className={terminalKeepaliveClassName(workspaceView === "files" || workspaceView === "git")}
+                aria-hidden={workspaceView !== "files" && workspaceView !== "git"}
+                {...(workspaceView === "files" || workspaceView === "git" ? {} : { inert: true })}
+              >
                 <ProjectFilesPanel
                   key={activeProject.id}
                   project={activeProject}
-                  view={workspaceView}
+                  view={workspaceView === "git" ? "git" : "files"}
                   onViewChange={setWorkspaceView}
                   openFileRequest={openFileRequest}
+                  onOpenFileHandled={() => setOpenFileRequest(null)}
                   editorCommand={editorCommand}
                   onCommandHandled={() => setEditorCommand(null)}
                   focusCommit={focusCommit}
@@ -2503,7 +2517,7 @@ export function Workspace() {
                   onGitCount={setGitCount}
                 />
               </div>
-            )}
+            ) : null}
             {activeProject && workspaceView === "terminal" && (
               <div className="min-h-0 flex-1 overflow-hidden">
                 <Suspense
