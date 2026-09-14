@@ -417,6 +417,12 @@ input[type="checkbox"] {
   padding-right: 0.45rem;
   color: var(--foreground);
 }
+.terminal-enter-select {
+  flex: none;
+  width: auto;
+  min-width: 7rem;
+  max-width: 9rem;
+}
 .composer-runtime-btn {
   position: relative;
   z-index: 1;
@@ -1709,6 +1715,12 @@ button.user-attachment-path {
     flex: 1 1 0;
     width: 0;
     max-width: none;
+  }
+  .terminal-enter-select {
+    flex: none;
+    width: auto;
+    min-width: 6.5rem;
+    max-width: 8.5rem;
   }
   .composer-runtime-btn {
     min-width: 2rem;

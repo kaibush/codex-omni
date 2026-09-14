@@ -18,6 +18,7 @@ import {
   Image,
   Keyboard,
   LoaderCircle,
+  PanelBottomClose,
   Paperclip,
   Plus,
   RefreshCw,
@@ -38,6 +39,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/context/theme-provider";
 import { api, apiUpload, terminalChatWsUrl } from "@/lib/api";
@@ -353,6 +361,11 @@ function TerminalChatViewport({
   const toggleComposerOpen = () => {
     setComposerOpen((value) => {
       const next = !value;
+      if (!next) {
+        setHistoryOpen(false);
+        setHistoryQuery("");
+        setShortcutOpen(false);
+      }
       window.setTimeout(() => {
         if (next) {
           lineRef.current?.focus();
@@ -988,12 +1001,24 @@ function TerminalChatViewport({
           </div>
         ) : null}
         {!atBottom && (
-          <button type="button" className="absolute bottom-3 right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100" aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
+          <button type="button" className={`absolute right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100 ${composerOpen ? "bottom-3" : "bottom-14"}`} aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
             <ArrowDown className="size-4" />
           </button>
         )}
+        {!composerOpen ? (
+          <button
+            type="button"
+            className="absolute bottom-3 right-3 z-20 grid size-9 place-items-center rounded-lg border border-sky-400/40 bg-card/95 text-sky-700 shadow-lg dark:border-sky-400/40 dark:bg-slate-900/90 dark:text-sky-300"
+            aria-label="显示输入框"
+            title="显示输入框，发送文本给终端"
+            {...chromeActivateProps(toggleComposerOpen)}
+          >
+            <Keyboard className="size-4" />
+          </button>
+        ) : null}
         </div>
       </div>
+      {composerOpen ? (
       <div className="composer-dock shrink-0 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1 sm:px-3 sm:pb-2">
         <div className="chat-content-width mx-auto">
           <div className="composer-shell overflow-visible rounded-2xl p-2" data-drop={dragActive ? "true" : "false"}>
@@ -1049,7 +1074,6 @@ function TerminalChatViewport({
                 </div>
               </div>
             ) : null}
-            {composerOpen ? (
             <Textarea
               ref={lineRef}
               rows={2}
@@ -1100,32 +1124,34 @@ function TerminalChatViewport({
                 submitLine();
               }}
             />
-            ) : null}
           </div>
           <div className="composer-toolbar">
             <div className="composer-context">
               <Button
                 type="button"
-                variant={composerOpen ? "secondary" : "outline"}
-                className="composer-runtime-btn h-8 shrink-0 rounded-lg px-2.5"
-                aria-pressed={composerOpen}
-                title={composerOpen ? "隐藏下方输入框，终端仍可直通操作" : "显示下方输入框，发送文本给终端"}
+                variant="outline"
+                className="h-8 shrink-0 rounded-lg px-2.5"
+                aria-label="隐藏输入框"
+                title="隐藏输入框，终端仍可直通操作"
                 {...chromeActivateProps(toggleComposerOpen)}
               >
-                <Keyboard className="size-3.5" />
-                <span>{composerOpen ? "隐藏输入" : "显示输入"}</span>
+                <PanelBottomClose className="size-3.5" />
+                <span>隐藏</span>
               </Button>
-              <Button
-                type="button"
-                variant={autoEnter ? "secondary" : "outline"}
-                className="h-8 shrink-0 rounded-lg px-2.5"
-                aria-pressed={autoEnter}
-                title={autoEnter ? "发送时自动回车。再点一次改为只写入文本" : "发送时不回车，只把文本写入终端"}
-                {...chromeActivateProps(() => setAutoEnter((value) => !value))}
-              >
-                <CornerDownLeft className="size-3.5" />
-                <span>{autoEnter ? "自动回车" : "不回车"}</span>
-              </Button>
+              <Select value={autoEnter ? "enter" : "plain"} onValueChange={(value) => setAutoEnter(value === "enter")}>
+                <SelectTrigger
+                  className="composer-select terminal-enter-select h-8 w-auto min-w-0"
+                  title={autoEnter ? "发送时自动回车" : "发送时不回车，只把文本写入终端"}
+                  aria-label="发送时是否回车"
+                >
+                  <CornerDownLeft className="size-3.5 shrink-0 text-muted-foreground" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectItem value="enter">自动回车</SelectItem>
+                  <SelectItem value="plain">不回车</SelectItem>
+                </SelectContent>
+              </Select>
               <span ref={shortcutButtonRef} className="inline-flex shrink-0">
                 <Button
                   type="button"
@@ -1188,6 +1214,7 @@ function TerminalChatViewport({
           </div>
         </div>
       </div>
+      ) : null}
       <Dialog open={pasteOpen} onOpenChange={(open) => { if (!open) closePasteDialog(); }}>
         <DialogContent
           className="sm:max-w-lg"
