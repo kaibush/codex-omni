@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -30,6 +30,7 @@ import {
   X
 } from "lucide-react";
 import { toast } from "sonner";
+import { numberedDuplicateTitles } from "@codex-omni/protocol";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -1262,6 +1263,7 @@ export function TerminalChatPanel({
 }) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState("");
+  const [visitedIds, setVisitedIds] = useState<string[]>([]);
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
   const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
   const create = useMutation({
@@ -1314,9 +1316,10 @@ export function TerminalChatPanel({
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "删除终端对话失败")
   });
-  const selectedChange = useCallback((next: Partial<TerminalChatSession>) => {
-    if (selected) update(selected.id, next);
-  }, [selected, update]);
+  const tabLabels = useMemo(
+    () => numberedDuplicateTitles(items.map((item) => ({ id: item.sessionId, title: item.title, createdAt: item.createdAt }))),
+    [items]
+  );
   useEffect(() => {
     const matched = items.find((item) => item.sessionId === sessionId) ?? items.find((item) => item.id === selectedId) ?? items[0];
     if (matched) {
@@ -1325,12 +1328,25 @@ export function TerminalChatPanel({
     }
     if (selectedId) setSelectedId("");
   }, [items, selectedId, sessionId]);
+  useEffect(() => {
+    const live = new Set(items.map((item) => item.id));
+    setVisitedIds((current) => {
+      const pruned = current.filter((id) => live.has(id));
+      if (!selected || !live.has(selected.id)) {
+        return pruned.length === current.length ? current : pruned;
+      }
+      const next = [selected.id, ...pruned.filter((id) => id !== selected.id)].slice(0, 8);
+      return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+    });
+  }, [items, selected]);
+  const visitedItems = items.filter((item) => item.id === selected?.id || visitedIds.includes(item.id));
   const closeTab = (item: TerminalChatSession) => {
     const running = item.state === "running" || item.desiredState === "running";
-    if (!window.confirm(running ? `删除终端对话「${item.title}」？进程会被停止。` : `删除终端对话「${item.title}」？`)) return;
+    const title = tabLabels.get(item.sessionId) ?? item.title;
+    if (!window.confirm(running ? `删除终端对话「${title}」？进程会被停止。` : `删除终端对话「${title}」？`)) return;
     remove.mutate(item);
   };
-  const tabBar = (
+  const renderTabBar = () => (
     <>
       <SquareTerminal className="size-3.5 shrink-0 text-primary" />
       <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1349,12 +1365,12 @@ export function TerminalChatPanel({
               onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
             >
               <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-              <span className="max-w-24 truncate">{item.title}</span>
+              <span className="max-w-28 truncate">{tabLabels.get(item.sessionId) ?? item.title}</span>
             </button>
             <button
               type="button"
               className="grid size-6 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`关闭 ${item.title}`}
+              aria-label={`关闭 ${tabLabels.get(item.sessionId) ?? item.title}`}
               disabled={remove.isPending}
               onClick={() => closeTab(item)}
             >
@@ -1389,20 +1405,26 @@ export function TerminalChatPanel({
   ) : null;
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
-      {selected ? (
-        <TerminalChatViewport
-          key={selected.id}
-          project={project}
-          session={selected}
-          onChange={selectedChange}
-          active={active}
-          tabBar={tabBar}
-          sessionActions={sessionActions}
-        />
+      {visitedItems.length ? (
+        visitedItems.map((item) => (
+          <div
+            key={item.id}
+            className={item.id === selected?.id ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}
+          >
+            <TerminalChatViewport
+              project={project}
+              session={item}
+              onChange={(next) => update(item.id, next)}
+              active={active && item.id === selected?.id}
+              tabBar={renderTabBar()}
+              sessionActions={item.id === selected?.id ? sessionActions : null}
+            />
+          </div>
+        ))
       ) : (
         <>
           <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-muted/70 px-2 text-[11px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {tabBar}
+            {renderTabBar()}
           </div>
           <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
             <div>

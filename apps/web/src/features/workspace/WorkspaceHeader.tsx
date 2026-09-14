@@ -46,6 +46,7 @@ export function WorkspaceHeader({
   setSidebar,
   activeProject,
   activeSession,
+  sessionDisplayTitle,
   renamingSessionId,
   setRenamingSessionId,
   renameDraft,
@@ -78,6 +79,7 @@ export function WorkspaceHeader({
   setSidebar: Dispatch<SetStateAction<boolean>>;
   activeProject: Project;
   activeSession: Session | undefined;
+  sessionDisplayTitle?: string | undefined;
   renamingSessionId: string;
   setRenamingSessionId: Dispatch<SetStateAction<string>>;
   renameDraft: string;
@@ -157,7 +159,7 @@ export function WorkspaceHeader({
                   onDoubleClick={() => beginRenameSession(activeSession)}
                   title="双击重命名"
                 >
-                  {activeSession.title}
+                  {sessionDisplayTitle ?? activeSession.title}
                 </button>
               )}
               {runState && (
@@ -358,7 +360,7 @@ export function WorkspaceHeader({
                   if (
                     !window.confirm(
                       activeSession.kind === "terminal-chat"
-                        ? `删除终端对话「${activeSession.title}」？进程会被停止。`
+                        ? `删除终端对话「${sessionDisplayTitle ?? activeSession.title}」？进程会被停止。`
                         : `删除对话「${activeSession.title}」？`
                     )
                   )

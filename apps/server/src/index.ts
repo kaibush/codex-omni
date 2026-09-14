@@ -11,6 +11,7 @@ import websocket from "@fastify/websocket";
 import { z } from "zod";
 import { Store, type ProviderRow } from "@codex-omni/db";
 import {
+  nextNumberedTitle,
   normalizeProviderHomeMode,
   providerInputSchema,
   runCommandSchema
@@ -1743,7 +1744,9 @@ app.post("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req
     profileId: z.string().min(1).default("shell"),
     restartPolicy: z.enum(["manual", "on-unexpected-exit"]).default("manual")
   }).parse(req.body ?? {});
-  const session = store.createSession({ projectId, title: body.title || `${body.profileId} 终端`, kind: "terminal-chat" });
+  const existingTitles = store.listTerminalSessions(projectId).map((item) => item.title);
+  const title = body.title?.trim() || nextNumberedTitle(existingTitles, `${body.profileId} 终端`);
+  const session = store.createSession({ projectId, title, kind: "terminal-chat" });
   try {
     const terminal = terminalChats.create({ projectId, sessionId: session.id, title: session.title, cwd: rootPath, profileId: body.profileId, restartPolicy: body.restartPolicy });
     return { session, terminal };

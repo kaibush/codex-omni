@@ -436,3 +436,4 @@ export {
   previewLimitForKind,
   previewText
 } from "./timeline-preview.js";
+export { nextNumberedTitle, numberedDuplicateTitles } from "./session-title.js";

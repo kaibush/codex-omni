@@ -139,6 +139,7 @@ export function WorkspaceSidebar({
   updateProject,
   deleteProject,
   projectSessions,
+  sessionDisplayTitles,
   sessionGroups,
   sessionId,
   sessionLoading,
@@ -207,6 +208,7 @@ export function WorkspaceSidebar({
   };
   deleteProject: { mutate: (id: string) => void };
   projectSessions: Session[];
+  sessionDisplayTitles?: Map<string, string>;
   sessionGroups: Array<{ key: string; label: string; items: Session[] }>;
   sessionId: string;
   sessionLoading: boolean;
@@ -631,7 +633,9 @@ export function WorkspaceSidebar({
                             <div className="flex h-5 items-center px-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
                               {group.label} · {group.items.length}
                             </div>
-                            {group.items.map((s) => (
+                            {group.items.map((s) => {
+                              const displayTitle = sessionDisplayTitles?.get(s.id) ?? s.title;
+                              return (
                               <div
                                 key={s.id}
                                 className={`session-row group my-px flex min-h-8 w-full items-center gap-0.5 rounded-md px-1 py-0.5 text-xs ${
@@ -695,7 +699,7 @@ export function WorkspaceSidebar({
                                 ) : (
                                   <button
                                     type="button"
-                                    title={s.title}
+                                    title={displayTitle}
                                     onClick={() => {
                                       openWorkspace(projectId, s.id, false, s.kind === "terminal-chat" ? "terminal-chat" : "chat");
                                       if (isMobile) setSidebar(false);
@@ -716,7 +720,7 @@ export function WorkspaceSidebar({
                                         {s.pinnedAt ? (
                                           <Pin className="size-3 shrink-0 text-primary" />
                                         ) : null}
-                                        <span className="truncate">{s.title}</span>
+                                        <span className="truncate">{displayTitle}</span>
                                         {s.id === sessionId && sessionLoading && (
                                           <LoaderCircle className="size-3 shrink-0 animate-spin text-primary" />
                                         )}
@@ -742,7 +746,7 @@ export function WorkspaceSidebar({
                                     <button
                                       type="button"
                                       className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
-                                      aria-label={`${s.title} 的更多操作`}
+                                      aria-label={`${displayTitle} 的更多操作`}
                                     >
                                       <MoreHorizontal className="size-3.5" />
                                     </button>
@@ -867,7 +871,7 @@ export function WorkspaceSidebar({
                                     <DropdownMenuItem
                                       variant="destructive"
                                       onSelect={() => {
-                                        if (!window.confirm(`删除对话「${s.title}」？`)) return;
+                                        if (!window.confirm(`删除对话「${displayTitle}」？`)) return;
                                         deleteSession.mutate(s.id);
                                       }}
                                     >
@@ -876,7 +880,8 @@ export function WorkspaceSidebar({
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </div>
-                            ))}
+                            );
+                            })}
                             {group.key === "archived" && group.items.length === 0 ? (
                               <p className="px-2 py-3 text-[11px] text-muted-foreground">
                                 暂无归档会话

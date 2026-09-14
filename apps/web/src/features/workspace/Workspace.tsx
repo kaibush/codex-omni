@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { applyTextPatch, compactTimelineItem, type TurnAttachment } from "@codex-omni/protocol";
+import { applyTextPatch, compactTimelineItem, numberedDuplicateTitles, type TurnAttachment } from "@codex-omni/protocol";
 import { useNavigate, useParams } from "react-router";
 import { FolderPlus, LoaderCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -434,6 +434,10 @@ export function Workspace() {
   const projectSessions = useMemo(() => sortSessionsByLatest(sessions.data ?? []), [sessions.data]);
   const archivedSessions = useMemo(
     () => projectSessions.filter((session) => session.archivedAt),
+    [projectSessions]
+  );
+  const sessionDisplayTitles = useMemo(
+    () => numberedDuplicateTitles(projectSessions.filter((session) => session.kind === "terminal-chat")),
     [projectSessions]
   );
   const sessionGroups = useMemo(
@@ -2292,6 +2296,7 @@ export function Workspace() {
         updateProject={updateProject}
         deleteProject={deleteProject}
         projectSessions={projectSessions}
+        sessionDisplayTitles={sessionDisplayTitles}
         sessionGroups={sessionGroups}
         sessionId={sessionId}
         sessionLoading={sessionLoading}
@@ -2336,6 +2341,7 @@ export function Workspace() {
               setSidebar={setSidebar}
               activeProject={activeProject}
               activeSession={activeSession ?? undefined}
+              sessionDisplayTitle={activeSession ? (sessionDisplayTitles.get(activeSession.id) ?? activeSession.title) : undefined}
               renamingSessionId={renamingSessionId}
               setRenamingSessionId={setRenamingSessionId}
               renameDraft={renameDraft}
