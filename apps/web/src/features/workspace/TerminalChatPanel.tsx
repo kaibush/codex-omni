@@ -6,12 +6,12 @@ import "@xterm/xterm/css/xterm.css";
 import {
   ArrowDown,
   BotMessageSquare,
+  ChevronDown,
   ChevronUp,
   Clipboard,
   Command,
   Copy,
   CornerDownLeft,
-  Delete,
   Download,
   Eraser,
   FileText,
@@ -19,6 +19,7 @@ import {
   Image,
   Keyboard,
   LoaderCircle,
+  MoreHorizontal,
   PanelBottomClose,
   Paperclip,
   Plus,
@@ -42,6 +43,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -1010,18 +1018,18 @@ function TerminalChatViewport({
       className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100"
       {...dropHandlers}
     >
-      <div className="relative flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-muted/70 px-2 text-[11px] text-muted-foreground [scrollbar-width:none] dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300 [&::-webkit-scrollbar]:hidden">
-        {tabBar}
-        <span className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
-        <span className="min-w-0 max-w-[9rem] truncate sm:max-w-[16rem]" title={statusLabel(session, connected)}>
+      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300">
+        <div className="flex min-w-0 flex-1 items-center gap-1">{tabBar}</div>
+        <span className={`hidden size-1.5 shrink-0 rounded-full sm:inline ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
+        <span className="hidden min-w-0 max-w-[9rem] truncate sm:inline sm:max-w-[16rem]" title={statusLabel(session, connected)}>
           {connected ? (session.pid ? `PID ${session.pid}` : "已连接") : "恢复中"}
           {session.state === "running" ? <> · <LiveDuration startedAt={session.createdAt} /></> : null}
         </span>
-        <span className="hidden min-w-0 max-w-[28%] truncate font-mono dark:text-slate-500 lg:block" title={session.cwd}>{session.cwd}</span>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <span className="hidden min-w-0 max-w-[28%] truncate font-mono dark:text-slate-500 lg:inline" title={session.cwd}>{session.cwd}</span>
+        <div className="flex shrink-0 items-center gap-0.5">
         <button
           type="button"
-          className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 hover:bg-accent disabled:opacity-40 dark:hover:bg-white/10 ${firstSeq > 1 ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground dark:text-slate-300"}`}
+          className={`hidden h-8 shrink-0 items-center gap-1 rounded-lg px-2 hover:bg-accent disabled:opacity-40 sm:inline-flex dark:hover:bg-white/10 ${firstSeq > 1 ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground dark:text-slate-300"}`}
           aria-label="加载更早输出"
           title={firstSeq > 1 ? "仅显示最近输出，点击加载更早历史" : "已是最早输出"}
           disabled={loadingEarlier || firstSeq <= 1}
@@ -1030,19 +1038,40 @@ function TerminalChatViewport({
           {loadingEarlier ? <LoaderCircle className="size-3.5 animate-spin" /> : <ChevronUp className="size-3.5" />}
           <span>{loadingEarlier ? "加载中" : "更早"}</span>
         </button>
-        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="缩小终端字体" title="缩小终端字体" disabled={!canDecreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, -1)))}>
+        <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="缩小终端字体" title="缩小终端字体" disabled={!canDecreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, -1)))}>
           <ZoomOut className="size-3.5" />
         </button>
-        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="放大终端字体" title="放大终端字体" disabled={!canIncreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}>
+        <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="放大终端字体" title="放大终端字体" disabled={!canIncreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}>
           <ZoomIn className="size-3.5" />
         </button>
-        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
+        <button type="button" className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
           <Search className="size-3.5" />
         </button>
-        <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
+        <button type="button" className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
           <Download className="size-3.5" />
         </button>
-        {sessionActions}
+        <div className="hidden sm:flex sm:items-center sm:gap-1">{sessionActions}</div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:hidden dark:text-slate-300 dark:hover:bg-white/10" aria-label="终端更多操作" title="更多操作">
+              <MoreHorizontal className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-44">
+            <DropdownMenuItem disabled={loadingEarlier || firstSeq <= 1} onSelect={() => { void loadEarlier(); }}>
+              <ChevronUp className="size-3.5" />
+              {loadingEarlier ? "加载中" : "加载更早输出"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSearchOpen(true)}>
+              <Search className="size-3.5" />
+              搜索历史
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={downloadLog}>
+              <Download className="size-3.5" />
+              下载输出
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         </div>
         {searchOpen && (
           <form className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
@@ -1423,14 +1452,92 @@ export function TerminalChatPanel({
     if (!window.confirm(running ? `删除终端对话「${title}」？进程会被停止。` : `删除终端对话「${title}」？`)) return;
     remove.mutate(item);
   };
+  const shellTitle = (item: TerminalChatSession) => tabLabels.get(item.sessionId) ?? item.title;
+  const openShell = (item: TerminalChatSession) => {
+    setSelectedId(item.id);
+    onOpenSession?.(item.sessionId);
+  };
+  const selectedIndex = selected ? items.findIndex((item) => item.id === selected.id) : -1;
   const renderTabBar = () => (
     <>
-      <BotMessageSquare className="size-3.5 shrink-0 text-primary" />
-      <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <BotMessageSquare className="hidden size-3.5 shrink-0 text-primary sm:block" />
+      <div className="min-w-0 flex-1 sm:hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-left text-xs text-foreground"
+              aria-label="选择终端对话"
+            >
+              <span className={`size-1.5 shrink-0 rounded-full ${selected?.state === "running" ? "bg-emerald-500" : selected?.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
+              <span className="min-w-0 flex-1 truncate">{selected ? shellTitle(selected) : "终端对话"}</span>
+              {items.length > 1 ? (
+                <span className="shrink-0 text-muted-foreground">{selectedIndex + 1}/{items.length}</span>
+              ) : null}
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[min(20rem,calc(100vw-1.5rem))]">
+            {items.length ? items.map((item) => (
+              <div key={item.id} className="flex items-center gap-1 px-1">
+                <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => openShell(item)}>
+                  <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
+                  <span className="min-w-0 flex-1 truncate">{shellTitle(item)}</span>
+                </DropdownMenuItem>
+                <button
+                  type="button"
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`关闭 ${shellTitle(item)}`}
+                  disabled={remove.isPending}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeTab(item);
+                  }}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )) : (
+              <DropdownMenuItem disabled>还没有终端对话</DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={create.isPending} onSelect={() => create.mutate("shell")}>
+              <Plus className="size-3.5" />
+              新建终端对话
+            </DropdownMenuItem>
+            {(profiles.data?.profiles ?? []).filter((profile) => profile.id !== "shell").map((profile) => (
+              <DropdownMenuItem key={profile.id} disabled={create.isPending} onSelect={() => create.mutate(profile.id)}>
+                <Plus className="size-3.5" />
+                新建 {profile.name}
+              </DropdownMenuItem>
+            ))}
+            {selected ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled={restart.isPending} onSelect={() => restart.mutate(selected.id)}>
+                  <RotateCcw className="size-3.5" />
+                  重启当前终端
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={stop.isPending} onSelect={() => stop.mutate(selected.id)}>
+                  <Square className="size-3.5" />
+                  停止当前终端
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={remove.isPending} onSelect={() => closeTab(selected)}>
+                  <X className="size-3.5" />
+                  关闭当前终端
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="hidden min-w-0 flex-1 gap-1 overflow-x-auto sm:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item) => (
           <div
             key={item.id}
-            className={`flex h-7 shrink-0 items-center rounded-lg border text-[11px] ${
+            className={`flex h-8 shrink-0 items-center rounded-lg border text-[11px] ${
               selected?.id === item.id
                 ? "border-primary/30 bg-primary/10 text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-accent"
@@ -1439,29 +1546,29 @@ export function TerminalChatPanel({
             <button
               type="button"
               className="flex h-full items-center gap-1 px-1.5"
-              onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
+              onClick={() => openShell(item)}
             >
               <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-              <span className="max-w-40 truncate">{tabLabels.get(item.sessionId) ?? item.title}</span>
+              <span className="max-w-40 truncate">{shellTitle(item)}</span>
             </button>
             <button
               type="button"
-              className="grid size-6 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`关闭 ${tabLabels.get(item.sessionId) ?? item.title}`}
+              className="grid size-7 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={`关闭 ${shellTitle(item)}`}
               disabled={remove.isPending}
               onClick={() => closeTab(item)}
             >
-              <Delete className="size-3" />
+              <X className="size-3.5" />
             </button>
           </div>
         ))}
       </div>
-      <select aria-label="选择终端 profile" className="h-7 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px]" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
+      <select aria-label="选择终端 profile" className="hidden h-8 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px] sm:block" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
         <option value="" disabled>新建</option>
         {(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
       </select>
-      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
-      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
+      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
+      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
     </>
   );
   const sessionActions = selected ? (
@@ -1504,8 +1611,8 @@ export function TerminalChatPanel({
         ))
       ) : (
         <>
-          <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-muted/70 px-2 text-[11px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {renderTabBar()}
+          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px]">
+            <div className="flex min-w-0 flex-1 items-center gap-1">{renderTabBar()}</div>
           </div>
           <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
             <div>
