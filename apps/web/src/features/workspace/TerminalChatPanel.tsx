@@ -9,6 +9,7 @@ import {
   Clipboard,
   Command,
   Copy,
+  CornerDownLeft,
   Delete,
   Download,
   Eraser,
@@ -57,7 +58,7 @@ import { LiveDuration } from "./WorkspaceStatus";
 import {
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
-  encodeTerminalKeyboardSubmit,
+  encodeTerminalComposerPayload,
   encodeTerminalModifiedInput,
   filterCommandHistory,
   isCoarsePointer,
@@ -149,7 +150,6 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   const lastSeq = useRef(0);
   const reconnect = useRef<number | null>(null);
   const attempts = useRef(0);
-  const rawRef = useRef(false);
   const ctrlRef = useRef(false);
   const altRef = useRef(false);
   const shiftRef = useRef(false);
@@ -171,7 +171,26 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   const comboKeySent = useRef(false);
   const lineComposing = useRef(false);
   const [connected, setConnected] = useState(false);
-  const [raw, setRaw] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("codex-omni:terminal-chat-composer-open");
+      if (stored === "0") return false;
+      if (stored === "1") return true;
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+    return true;
+  });
+  const [autoEnter, setAutoEnter] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("codex-omni:terminal-chat-auto-enter");
+      if (stored === "0") return false;
+      if (stored === "1") return true;
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+    return true;
+  });
   const [draft, setDraft] = useState("");
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
@@ -232,9 +251,19 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   useEffect(() => { shiftRef.current = shift; }, [shift]);
   useEffect(() => { stickyRef.current = sticky; }, [sticky]);
   useEffect(() => {
-    rawRef.current = raw;
-    if (terminal.current) terminal.current.options.disableStdin = !raw;
-  }, [raw]);
+    try {
+      window.localStorage.setItem("codex-omni:terminal-chat-composer-open", composerOpen ? "1" : "0");
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+  }, [composerOpen]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("codex-omni:terminal-chat-auto-enter", autoEnter ? "1" : "0");
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+  }, [autoEnter]);
   useEffect(() => {
     if (!shortcutOpen || !(ctrl || alt || shift)) return;
     comboRef.current?.focus();
@@ -304,8 +333,24 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
     setHistoryQuery("");
     setShortcutOpen((open) => !open);
   };
+  const toggleComposerOpen = () => {
+    setComposerOpen((value) => {
+      const next = !value;
+      window.setTimeout(() => {
+        if (next) {
+          lineRef.current?.focus();
+          return;
+        }
+        if (shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+          terminal.current?.focus();
+        }
+      }, 0);
+      return next;
+    });
+  };
   const applyHistory = (item: string) => {
     setDraft(item);
+    setComposerOpen(true);
     setHistoryOpen(false);
     setHistoryQuery("");
     window.setTimeout(() => {
@@ -347,7 +392,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
       fontSize: window.innerWidth < 640 ? 12 : 13,
       lineHeight: 1.2,
       scrollback: 5000,
-      disableStdin: true,
+      disableStdin: false,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
       theme: xtermTheme(resolvedThemeRef.current)
     });
@@ -355,7 +400,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
     instance.loadAddon(fit);
     instance.open(element);
     terminal.current = instance;
-    instance.options.disableStdin = !rawRef.current;
+    if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) instance.focus();
     const detachTouchScroll = attachTerminalTouchScroll(element, () => terminal.current);
     const fitTerminal = () => {
       try {
@@ -378,7 +423,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
     };
     element.addEventListener("paste", onHostPaste, true);
     const dataSubscription = instance.onData((data) => {
-      if (rawRef.current) sendInput(data);
+      sendInput(data);
     });
     const scrollSubscription = instance.onScroll(() => {
       const buffer = instance.buffer.active;
@@ -620,6 +665,10 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
       const result = await collectComposerAttachments(attachments, files, createId);
       setAttachments(result.items);
       setAttachError(result.error ?? "");
+      if (result.items.length) {
+        setComposerOpen(true);
+        window.setTimeout(() => lineRef.current?.focus(), 0);
+      }
       if (result.error) toast.error(result.error);
     } catch (error) {
       const message = error instanceof Error ? error.message : "添加附件失败";
@@ -693,7 +742,11 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
         return;
       }
       rememberCommand(command);
-      sendRaw(encodeTerminalKeyboardSubmit(command));
+      const payload = encodeTerminalComposerPayload(command, autoEnter);
+      if (payload) sendRaw(payload);
+      if (!autoEnter && shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+        window.setTimeout(() => terminal.current?.focus(), 0);
+      }
       setDraft("");
       setHistoryOpen(false);
       setHistoryQuery("");
@@ -965,12 +1018,13 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
                 </div>
               </div>
             ) : null}
+            {composerOpen ? (
             <Textarea
               ref={lineRef}
               rows={2}
               value={draft}
-              placeholder="输入命令，Enter 发送，Shift+Enter 换行"
-              aria-label="终端命令"
+              placeholder={autoEnter ? "发送到终端并回车，Shift+Enter 换行。也可直接操作终端。" : "发送到终端，不自动回车。也可直接操作终端。"}
+              aria-label="发送到终端"
               inputMode="text"
               enterKeyHint="send"
               autoCapitalize="none"
@@ -1015,19 +1069,31 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
                 submitLine();
               }}
             />
+            ) : null}
           </div>
           <div className="composer-toolbar">
             <div className="composer-context">
               <Button
                 type="button"
-                variant="outline"
+                variant={composerOpen ? "secondary" : "outline"}
                 className="composer-runtime-btn h-8 shrink-0 rounded-lg px-2.5"
-                aria-pressed={raw}
-                title={raw ? "直通：按键直接进入终端" : "命令行：在输入框发送完整命令"}
-                {...chromeActivateProps(() => setRaw((value) => !value))}
+                aria-pressed={composerOpen}
+                title={composerOpen ? "隐藏下方输入框，终端仍可直通操作" : "显示下方输入框，发送文本给终端"}
+                {...chromeActivateProps(toggleComposerOpen)}
               >
                 <Keyboard className="size-3.5" />
-                <span>{raw ? "直通" : "命令行"}</span>
+                <span>{composerOpen ? "隐藏输入" : "显示输入"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant={autoEnter ? "secondary" : "outline"}
+                className="h-8 shrink-0 rounded-lg px-2.5"
+                aria-pressed={autoEnter}
+                title={autoEnter ? "发送时自动回车。再点一次改为只写入文本" : "发送时不回车，只把文本写入终端"}
+                {...chromeActivateProps(() => setAutoEnter((value) => !value))}
+              >
+                <CornerDownLeft className="size-3.5" />
+                <span>{autoEnter ? "自动回车" : "不回车"}</span>
               </Button>
               <span ref={shortcutButtonRef} className="inline-flex shrink-0">
                 <Button

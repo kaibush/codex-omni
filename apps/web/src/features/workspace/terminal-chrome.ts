@@ -94,10 +94,15 @@ export function shouldSubmitTerminalKeyboard(event: {
   return true;
 }
 
-export function encodeTerminalKeyboardSubmit(value: string): string {
+export function encodeTerminalComposerPayload(value: string, autoEnter = true): string {
   const normalized = value.replace(/\r\n/g, "\n").replace(/\n/g, "\r");
+  if (!autoEnter) return normalized.replace(/\r+$/g, "");
   if (!normalized) return "\r";
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
+}
+
+export function encodeTerminalKeyboardSubmit(value: string): string {
+  return encodeTerminalComposerPayload(value, true);
 }
 
 export function quoteShellArg(value: string): string {

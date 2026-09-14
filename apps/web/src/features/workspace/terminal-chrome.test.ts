@@ -3,6 +3,7 @@ import {
   isCoarsePointer,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
+  encodeTerminalComposerPayload,
   encodeTerminalKeyboardSubmit,
   encodeTerminalModifiedInput,
   filterCommandHistory,
@@ -134,6 +135,17 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalKeyboardSubmit("ls")).toBe("ls\r");
     expect(encodeTerminalKeyboardSubmit("echo hi\n")).toBe("echo hi\r");
     expect(encodeTerminalKeyboardSubmit("one\ntwo")).toBe("one\rtwo\r");
+  });
+
+  it("can send composer text without auto-enter", () => {
+    expect(encodeTerminalComposerPayload("ls")).toBe("ls\r");
+    expect(encodeTerminalComposerPayload("ls", true)).toBe("ls\r");
+    expect(encodeTerminalComposerPayload("ls", false)).toBe("ls");
+    expect(encodeTerminalComposerPayload("one\ntwo", false)).toBe("one\rtwo");
+    expect(encodeTerminalComposerPayload("ls\n", false)).toBe("ls");
+    expect(encodeTerminalComposerPayload("one\ntwo\n", false)).toBe("one\rtwo");
+    expect(encodeTerminalComposerPayload("", false)).toBe("");
+    expect(encodeTerminalComposerPayload("", true)).toBe("\r");
   });
 
   it("encodes latched Ctrl/Alt/Shift onto the next character", () => {
