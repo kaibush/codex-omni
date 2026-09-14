@@ -76,10 +76,14 @@ import {
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
+  refreshTerminal,
+  scheduleTerminalFit,
   shouldFocusTerminalAfterChromeAction,
   shouldPreventChromePointerDefault,
+  shouldResetTerminalSnapshot,
   shouldSubmitTerminalKeyboard,
   terminalCopyPayload,
+  terminalKeepaliveClassName,
   attachTerminalTouchScroll,
   xtermTheme
 } from "./terminal-chrome";
@@ -182,6 +186,7 @@ function TerminalChatViewport({
   const onChangeRef = useRef(onChange);
   const outputRef = useRef("");
   const firstSeqRef = useRef(1);
+  const lastPidRef = useRef<number | null>(session.pid ?? null);
   const fitRef = useRef<() => void>(() => {});
   const pageVisibleRef = useRef(document.visibilityState === "visible");
   const lastPointerType = useRef<string | undefined>(undefined);
@@ -270,6 +275,8 @@ function TerminalChatViewport({
     }
     sendRaw(data);
   }, [sendRaw]);
+  const sendInputRef = useRef(sendInput);
+  sendInputRef.current = sendInput;
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   useEffect(() => { ctrlRef.current = ctrl; }, [ctrl]);
@@ -456,13 +463,14 @@ function TerminalChatViewport({
     };
     element.addEventListener("paste", onHostPaste, true);
     const dataSubscription = instance.onData((data) => {
-      sendInput(data);
+      sendInputRef.current(data);
     });
     const scrollSubscription = instance.onScroll(() => {
       const buffer = instance.buffer.active;
       setAtBottom(buffer.viewportY >= buffer.baseY);
     });
     let disposed = false;
+    let freshTerminal = true;
     const applyChange = (next: Partial<TerminalChatSession>) => onChangeRef.current(next);
     const connect = () => {
       if (disposed || !pageVisibleRef.current) return;
@@ -478,18 +486,33 @@ function TerminalChatViewport({
         const message = JSON.parse(String(event.data));
         if (message.terminalId && message.terminalId !== session.id) return;
         if (message.type === "terminal.snapshot") {
-          if (!message.payload?.replay) {
+          const output = String(message.payload?.output ?? "");
+          const nextPid = typeof message.payload?.terminal?.pid === "number" ? message.payload.terminal.pid : null;
+          const reset = freshTerminal || shouldResetTerminalSnapshot({
+            replay: Boolean(message.payload?.replay),
+            truncated: Boolean(message.payload?.truncated),
+            previousPid: lastPidRef.current,
+            nextPid
+          });
+          freshTerminal = false;
+          if (reset) {
             instance.reset();
-            outputRef.current = String(message.payload?.output ?? "");
-          } else if (message.payload?.output) {
-            outputRef.current += String(message.payload.output);
+            outputRef.current = output;
+          } else if (output) {
+            outputRef.current += output;
           }
-          if (message.payload?.output) instance.write(String(message.payload.output));
+          const afterWrite = () => {
+            fitRef.current();
+            refreshTerminal(instance);
+          };
+          if (output) instance.write(output, afterWrite);
+          else afterWrite();
           if (typeof message.payload?.firstSeq === "number") {
             firstSeqRef.current = message.payload.firstSeq;
             setFirstSeq(message.payload.firstSeq);
           }
           if (typeof message.seq === "number") lastSeq.current = message.seq;
+          lastPidRef.current = nextPid;
           if (message.payload?.terminal) applyChange(message.payload.terminal);
         } else if (message.type === "terminal.output") {
           if (typeof message.seq === "number" && message.seq <= lastSeq.current) return;
@@ -497,11 +520,29 @@ function TerminalChatViewport({
           outputRef.current = `${outputRef.current}${String(message.payload?.data ?? "")}`.slice(-4 * 1024 * 1024);
           if (typeof message.seq === "number") lastSeq.current = message.seq;
         } else if (message.type === "terminal.exit") {
+          lastPidRef.current = null;
           applyChange({ state: "exited", pid: null, lastExitCode: message.payload?.exitCode ?? null });
           instance.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
-        } else if (message.type === "terminal.state") applyChange(message.payload ?? {});
+        } else if (message.type === "terminal.state") {
+          applyChange(message.payload ?? {});
+          if (Object.prototype.hasOwnProperty.call(message.payload ?? {}, "pid")) {
+            const nextPid = typeof message.payload?.pid === "number" ? message.payload.pid : null;
+            if (nextPid != null && nextPid !== lastPidRef.current) {
+              instance.reset();
+              outputRef.current = "";
+              refreshTerminal(instance);
+            }
+            lastPidRef.current = nextPid;
+          }
+        }
         else if (message.type === "terminal.marker") {
-          const marker = `\r\n\x1b[90m[${String(message.payload?.text ?? "状态更新")}]\x1b[0m\r\n`;
+          const text = String(message.payload?.text ?? "状态更新");
+          if (text.includes("已重启")) {
+            instance.reset();
+            outputRef.current = "";
+            refreshTerminal(instance);
+          }
+          const marker = `\r\n\x1b[90m[${text}]\x1b[0m\r\n`;
           instance.write(marker);
           outputRef.current = `${outputRef.current}${marker}`.slice(-4 * 1024 * 1024);
         }
@@ -540,7 +581,7 @@ function TerminalChatViewport({
       instance.dispose();
       terminal.current = null;
     };
-  }, [sendInput, session.id]);
+  }, [session.id]);
 
   useEffect(() => {
     if (terminal.current) terminal.current.options.theme = xtermTheme(resolvedTheme);
@@ -550,11 +591,11 @@ function TerminalChatViewport({
       terminal.current?.blur();
       return;
     }
-    const frame = window.requestAnimationFrame(() => {
+    return scheduleTerminalFit(() => {
       fitRef.current();
+      refreshTerminal(terminal.current);
       if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) terminal.current?.focus();
     });
-    return () => window.cancelAnimationFrame(frame);
   }, [active]);
 
   const focusTerminalIfAppropriate = () => {
@@ -1365,7 +1406,7 @@ export function TerminalChatPanel({
               onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
             >
               <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-              <span className="max-w-28 truncate">{tabLabels.get(item.sessionId) ?? item.title}</span>
+              <span className="max-w-40 truncate">{tabLabels.get(item.sessionId) ?? item.title}</span>
             </button>
             <button
               type="button"
@@ -1404,12 +1445,14 @@ export function TerminalChatPanel({
     </>
   ) : null;
   return (
-    <section className="flex h-full min-h-0 flex-col bg-background">
+    <section className="relative flex h-full min-h-0 flex-col bg-background">
       {visitedItems.length ? (
         visitedItems.map((item) => (
           <div
             key={item.id}
-            className={item.id === selected?.id ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}
+            className={terminalKeepaliveClassName(item.id === selected?.id)}
+            aria-hidden={item.id !== selected?.id}
+            {...(item.id === selected?.id ? {} : { inert: true })}
           >
             <TerminalChatViewport
               project={project}

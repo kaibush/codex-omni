@@ -6,6 +6,50 @@ export function canFitTerminal(width: number, height: number) {
   return width >= 16 && height >= 16;
 }
 
+export function terminalKeepaliveClassName(active: boolean) {
+  return active
+    ? "relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden"
+    : "pointer-events-none invisible absolute inset-0 z-0 flex h-full min-h-0 flex-col overflow-hidden";
+}
+
+export function scheduleTerminalFit(fit: () => void, onReady?: () => void) {
+  let inner = 0;
+  const outer = requestAnimationFrame(() => {
+    inner = requestAnimationFrame(() => {
+      fit();
+      onReady?.();
+    });
+  });
+  return () => {
+    cancelAnimationFrame(outer);
+    if (inner) cancelAnimationFrame(inner);
+  };
+}
+
+export function refreshTerminal(
+  term: { rows: number; refresh: (start: number, end: number) => void; clearTextureAtlas?: () => void } | null | undefined
+) {
+  if (!term || term.rows <= 0) return;
+  try {
+    term.clearTextureAtlas?.();
+    term.refresh(0, Math.max(0, term.rows - 1));
+  } catch {
+    // Renderer can be briefly unavailable while switching tabs.
+  }
+}
+
+export function shouldResetTerminalSnapshot(input: {
+  replay: boolean;
+  truncated?: boolean;
+  previousPid?: number | null;
+  nextPid?: number | null;
+}) {
+  if (!input.replay || input.truncated) return true;
+  if (input.previousPid != null && input.nextPid != null && input.previousPid !== input.nextPid) return true;
+  if (input.previousPid != null && input.nextPid == null) return true;
+  return false;
+}
+
 export function sliceVisibleLines(
   lines: readonly string[],
   viewportY: number,

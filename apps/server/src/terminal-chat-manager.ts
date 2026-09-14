@@ -18,6 +18,28 @@ const RESTART_WINDOW = 5 * 60_000;
 
 export const terminalProfiles = () => PROFILES.map((profile) => ({ ...profile }));
 
+export function terminalSnapshotFromEvents(
+  events: Array<{ seq: number; kind: string; data: string }>,
+  lastSeq: number,
+  currentLastSeq: number
+) {
+  let restartIndex = -1;
+  for (let i = 0; i < events.length; i += 1) {
+    const event = events[i]!;
+    if (event.kind === "marker" && event.data.includes("已重启")) restartIndex = i;
+  }
+  const restarted = restartIndex >= 0;
+  const visible = restarted ? events.slice(restartIndex + 1) : events;
+  const firstSeq = events[0]?.seq ?? currentLastSeq + 1;
+  const complete = lastSeq === 0 ? firstSeq <= 1 : firstSeq <= lastSeq + 1;
+  return {
+    output: visible.filter((event) => event.kind === "output").map((event) => event.data).join(""),
+    firstSeq: restarted ? 1 : firstSeq,
+    replay: lastSeq > 0 && complete && !restarted,
+    truncated: restarted ? false : !complete
+  };
+}
+
 export class TerminalChatManager {
   private readonly items = new Map<string, Managed>();
   private shuttingDown = false;
@@ -207,6 +229,7 @@ export class TerminalChatManager {
     if (!this.persist(item, { desiredState: "running", state: "provisioning", restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null })) return false;
     if (item.process) { try { item.process.kill("SIGTERM"); } catch { /* exited */ } }
     item.process = null;
+    this.marker(item, "终端已重启");
     this.start(id, false);
     return true;
   }
@@ -234,9 +257,8 @@ export class TerminalChatManager {
     const events = lastSeq > 0
       ? this.store.listTerminalEvents(id, lastSeq, limit)
       : this.store.listTerminalEventsBefore(id, item.row.lastSeq + 1, limit);
-    const firstSeq = events[0]?.seq ?? item.row.lastSeq + 1;
-    const complete = lastSeq === 0 ? firstSeq <= 1 : firstSeq <= lastSeq + 1;
-    this.send(socket, { type: "terminal.snapshot", terminalId: id, seq: item.row.lastSeq, payload: { terminal: this.publicRow(item), output: events.filter((event) => event.kind === "output").map((event) => event.data).join(""), firstSeq, replay: lastSeq > 0 && complete, truncated: !complete } });
+    const snapshot = terminalSnapshotFromEvents(events, lastSeq, item.row.lastSeq);
+    this.send(socket, { type: "terminal.snapshot", terminalId: id, seq: item.row.lastSeq, payload: { terminal: this.publicRow(item), ...snapshot } });
   }
   closeProject(projectId: string) {
     for (const item of [...this.items.values()]) if (item.row?.projectId === projectId) this.remove(item.row.id);

@@ -12,12 +12,16 @@ import {
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
+  refreshTerminal,
+  scheduleTerminalFit,
   shouldFocusTerminalAfterChromeAction,
   shouldPreventChromePointerDefault,
+  shouldResetTerminalSnapshot,
   shouldSubmitTerminalKeyboard,
   sliceVisibleLines,
   terminalCopyPayload,
   terminalFontSize,
+  terminalKeepaliveClassName,
   terminalKeyboardFieldProps,
   touchScrollLines,
   visibleBufferText,
@@ -35,6 +39,62 @@ describe("terminal density", () => {
     expect(canFitTerminal(0, 600)).toBe(false);
     expect(canFitTerminal(800, 0)).toBe(false);
     expect(canFitTerminal(8, 8)).toBe(false);
+  });
+
+  it("keeps inactive terminals sized instead of display-none", () => {
+    expect(terminalKeepaliveClassName(true)).toContain("relative");
+    expect(terminalKeepaliveClassName(false)).toContain("invisible");
+    expect(terminalKeepaliveClassName(false)).toContain("absolute");
+    expect(terminalKeepaliveClassName(false)).toContain("h-full");
+    expect(terminalKeepaliveClassName(false).split(/\s+/)).not.toContain("hidden");
+  });
+});
+
+describe("terminal snapshot reset", () => {
+  it("resets when replay is incomplete or the PTY pid changed", () => {
+    expect(shouldResetTerminalSnapshot({ replay: false })).toBe(true);
+    expect(shouldResetTerminalSnapshot({ replay: true, truncated: true })).toBe(true);
+    expect(shouldResetTerminalSnapshot({ replay: true, previousPid: 1, nextPid: 2 })).toBe(true);
+    expect(shouldResetTerminalSnapshot({ replay: true, previousPid: 1, nextPid: null })).toBe(true);
+    expect(shouldResetTerminalSnapshot({ replay: true, previousPid: 7, nextPid: 7 })).toBe(false);
+  });
+});
+
+describe("terminal fit helpers", () => {
+  it("refreshes the visible rows when the renderer is ready", () => {
+    const refresh: Array<[number, number]> = [];
+    const atlas: boolean[] = [];
+    refreshTerminal({
+      rows: 24,
+      refresh: (start, end) => { refresh.push([start, end]); },
+      clearTextureAtlas: () => { atlas.push(true); }
+    });
+    expect(atlas).toEqual([true]);
+    expect(refresh).toEqual([[0, 23]]);
+  });
+
+  it("schedules fit after two animation frames", () => {
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = globalThis.requestAnimationFrame;
+    const originalCancel = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+    try {
+      const calls: string[] = [];
+      const cancel = scheduleTerminalFit(() => calls.push("fit"), () => calls.push("ready"));
+      expect(frames).toHaveLength(1);
+      frames[0]!(0);
+      expect(frames).toHaveLength(2);
+      frames[1]!(0);
+      expect(calls).toEqual(["fit", "ready"]);
+      cancel();
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      globalThis.cancelAnimationFrame = originalCancel;
+    }
   });
 });
 

@@ -126,6 +126,7 @@ import { WorkspaceComposer } from "@/features/workspace/WorkspaceComposer";
 import { WorkspaceHeader } from "@/features/workspace/WorkspaceHeader";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
+import { terminalKeepaliveClassName } from "@/features/workspace/terminal-chrome";
 import { messageRetryPayload } from "@/features/workspace/message-retry";
 import {
   SESSION_PAGE_SIZE,
@@ -2369,6 +2370,7 @@ export function Workspace() {
               copySession={(id) => void copySession(id)}
               deleteSession={deleteSession}
             />
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {workspaceView !== "terminal-chat" && <WorkspaceTimeline
               key={`${projectId}:${sessionId}`}
               workspaceView={workspaceView}
@@ -2518,7 +2520,11 @@ export function Workspace() {
               </div>
             )}
             {activeProject && terminalChatVisited ? (
-              <div className={workspaceView === "terminal-chat" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}>
+              <div
+                className={terminalKeepaliveClassName(workspaceView === "terminal-chat")}
+                aria-hidden={workspaceView !== "terminal-chat"}
+                {...(workspaceView === "terminal-chat" ? {} : { inert: true })}
+              >
                 <Suspense
                   fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
                 >
@@ -2532,6 +2538,7 @@ export function Workspace() {
                 </Suspense>
               </div>
             ) : null}
+            </div>
           </>
         ) : (
           <>

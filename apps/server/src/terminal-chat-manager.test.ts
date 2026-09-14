@@ -32,7 +32,7 @@ vi.mock("node-pty", () => ({
 }));
 
 import { Store, type TerminalSessionRow } from "@codex-omni/db";
-import { TerminalChatManager } from "./terminal-chat-manager.js";
+import { TerminalChatManager, terminalSnapshotFromEvents } from "./terminal-chat-manager.js";
 
 const row = (overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow => ({
   id: "terminal-1", sessionId: "session-1", projectId: "project-1", profileId: "shell", title: "Shell", cwd: "/tmp", desiredState: "running", state: "provisioning", restartPolicy: "manual", pid: null, lastSeq: 0, lastOutputAt: null, lastExitCode: null, lastSignal: null, restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null, lastError: null, createdAt: 1, updatedAt: 1, stoppedAt: null, ...overrides
@@ -94,6 +94,34 @@ describe("TerminalChatManager", () => {
     expect(replay[0]).toMatchObject({ type: "terminal.snapshot", payload: { output: "hello\r\n", replay: false } });
   });
 
+  it("does not incrementally replay after the server restarts a PTY", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    ptyMocks.instances[0]!.emitData("old-tui\r\n");
+    const restored = new TerminalChatManager(store);
+    restored.restore();
+    ptyMocks.instances.at(-1)!.emitData("new-tui\r\n");
+    const replay: Array<Record<string, any>> = [];
+    restored.subscribe(terminal.id, { readyState: 1, OPEN: 1, send(data: string) { replay.push(JSON.parse(data)); } }, 1);
+    expect(replay[0]).toMatchObject({ type: "terminal.snapshot", payload: { output: "new-tui\r\n", replay: false, firstSeq: 1 } });
+    const cold: Array<Record<string, any>> = [];
+    restored.subscribe(terminal.id, { readyState: 1, OPEN: 1, send(data: string) { cold.push(JSON.parse(data)); } }, 0);
+    expect(cold[0]).toMatchObject({ type: "terminal.snapshot", payload: { output: "new-tui\r\n", replay: false, firstSeq: 1 } });
+  });
+
+  it("drops pre-restart output after a manual restart", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    ptyMocks.instances[0]!.emitData("old-tui\r\n");
+    manager.restart(terminal.id);
+    ptyMocks.instances[1]!.emitData("new-tui\r\n");
+    const replay: Array<Record<string, any>> = [];
+    manager.subscribe(terminal.id, { readyState: 1, OPEN: 1, send(data: string) { replay.push(JSON.parse(data)); } }, 1);
+    expect(replay[0]).toMatchObject({ type: "terminal.snapshot", payload: { output: "new-tui\r\n", replay: false, firstSeq: 1 } });
+  });
+
   it("does not let an old exit callback overwrite a manually restarted terminal", () => {
     const { store } = makeStore();
     const manager = new TerminalChatManager(store);
@@ -149,6 +177,22 @@ describe("TerminalChatManager", () => {
     const second = manager.create({ projectId: "project-1", sessionId: "session-2", title: "New shell", cwd: "/tmp", profileId: "shell" });
     expect(second.projectId).toBe("project-1");
     expect(manager.list("project-1").map((item) => item.id)).toEqual([second.id]);
+  });
+});
+
+describe("terminalSnapshotFromEvents", () => {
+  it("keeps incremental replay when the PTY did not restart", () => {
+    expect(terminalSnapshotFromEvents([
+      { seq: 2, kind: "output", data: "more" }
+    ], 1, 2)).toEqual({ output: "more", firstSeq: 2, replay: true, truncated: false });
+  });
+
+  it("drops output before the latest restart marker", () => {
+    expect(terminalSnapshotFromEvents([
+      { seq: 1, kind: "output", data: "old-tui" },
+      { seq: 2, kind: "marker", data: "Server 已重启，正在恢复终端进程" },
+      { seq: 3, kind: "output", data: "new-tui" }
+    ], 1, 3)).toEqual({ output: "new-tui", firstSeq: 1, replay: false, truncated: false });
   });
 });
 
