@@ -417,11 +417,10 @@ input[type="checkbox"] {
   padding-right: 0.45rem;
   color: var(--foreground);
 }
-.terminal-enter-select {
+.terminal-composer-toolbar .composer-context,
+.terminal-composer-toolbar .composer-actions {
   flex: none;
-  width: auto;
-  min-width: 7rem;
-  max-width: 9rem;
+  overflow: visible;
 }
 .composer-runtime-btn {
   position: relative;
@@ -1716,11 +1715,16 @@ button.user-attachment-path {
     width: 0;
     max-width: none;
   }
-  .terminal-enter-select {
+  .terminal-composer-toolbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .terminal-composer-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+  .terminal-composer-toolbar .composer-context {
     flex: none;
-    width: auto;
-    min-width: 6.5rem;
-    max-width: 8.5rem;
+    overflow: visible;
   }
   .composer-runtime-btn {
     min-width: 2rem;

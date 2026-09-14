@@ -50,13 +50,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "@/context/theme-provider";
 import { api, apiUpload, terminalChatWsUrl } from "@/lib/api";
@@ -76,6 +69,13 @@ import {
 import { LiveDuration } from "./WorkspaceStatus";
 import { PromptTemplatePicker } from "./PromptTemplatePicker";
 import { joinInsertedTemplate } from "./prompt-templates";
+import {
+  COMPOSER_DOCK_CLASS,
+  COMPOSER_ICON_BUTTON_CLASS,
+  COMPOSER_SHELL_CLASS,
+  COMPOSER_TEXTAREA_CLASS,
+  COMPOSER_WIDTH_CLASS
+} from "./composer-layout";
 import {
   canDecreaseTerminalFontSize,
   canFitTerminal,
@@ -1117,9 +1117,9 @@ function TerminalChatViewport({
         </div>
       </div>
       {composerOpen ? (
-      <div className="composer-dock shrink-0 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1 sm:px-3 sm:pb-2">
-        <div className="chat-content-width mx-auto">
-          <div className="composer-shell overflow-visible rounded-2xl p-2" data-drop={dragActive ? "true" : "false"}>
+      <footer className={COMPOSER_DOCK_CLASS}>
+        <div className={COMPOSER_WIDTH_CLASS}>
+          <div className={COMPOSER_SHELL_CLASS} data-drop={dragActive ? "true" : "false"}>
           {dragActive ? <div className="composer-drop-hint">松开鼠标即可添加附件</div> : null}
           {attachments.length > 0 ? (
             <div className="composer-attachments">
@@ -1185,7 +1185,7 @@ function TerminalChatViewport({
               autoComplete="off"
               spellCheck={false}
               lang="zh-CN"
-              className="max-h-40 min-h-10 w-full resize-none border-0 bg-transparent px-2 py-1 font-mono text-sm leading-5 shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent sm:min-h-12 sm:text-sm"
+              className={`${COMPOSER_TEXTAREA_CLASS} font-mono`}
               onChange={(event) => setDraft(event.target.value)}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);
@@ -1223,46 +1223,44 @@ function TerminalChatViewport({
               }}
             />
           </div>
-          <div className="composer-toolbar">
+          <div className="composer-toolbar terminal-composer-toolbar">
             <div className="composer-context">
               <Button
                 type="button"
+                size="icon"
                 variant="outline"
-                className="h-8 shrink-0 rounded-lg px-2.5"
+                className={COMPOSER_ICON_BUTTON_CLASS}
                 aria-label="隐藏输入框"
                 title="隐藏输入框，终端仍可直通操作"
                 {...chromeActivateProps(toggleComposerOpen)}
               >
-                <PanelBottomClose className="size-3.5" />
-                <span>隐藏</span>
+                <PanelBottomClose className="size-4" />
               </Button>
-              <Select value={autoEnter ? "enter" : "plain"} onValueChange={(value) => setAutoEnter(value === "enter")}>
-                <SelectTrigger
-                  className="composer-select terminal-enter-select h-8 w-auto min-w-0"
-                  title={autoEnter ? "发送时自动回车" : "发送时不回车，只把文本写入终端"}
-                  aria-label="发送时是否回车"
-                >
-                  <CornerDownLeft className="size-3.5 shrink-0 text-muted-foreground" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectItem value="enter">自动回车</SelectItem>
-                  <SelectItem value="plain">不回车</SelectItem>
-                </SelectContent>
-              </Select>
+              <Button
+                type="button"
+                size="icon"
+                variant={autoEnter ? "secondary" : "outline"}
+                className={COMPOSER_ICON_BUTTON_CLASS}
+                aria-label={autoEnter ? "发送时自动回车" : "发送时不回车"}
+                aria-pressed={autoEnter}
+                title={autoEnter ? "发送时自动回车，点击改为不回车" : "发送时不回车，点击改为自动回车"}
+                onClick={() => setAutoEnter((value) => !value)}
+              >
+                <CornerDownLeft className="size-4" />
+              </Button>
               <span ref={shortcutButtonRef} className="inline-flex shrink-0">
                 <Button
                   type="button"
+                  size="icon"
                   variant={shortcutOpen || ctrl || alt || shift ? "secondary" : "outline"}
-                  className="h-8 rounded-lg px-2.5"
+                  className={COMPOSER_ICON_BUTTON_CLASS}
                   aria-label="终端快捷键"
                   aria-haspopup="dialog"
                   aria-expanded={shortcutOpen}
                   title="终端快捷键"
                   onClick={toggleShortcuts}
                 >
-                  <Command className="size-3.5" />
-                  快捷
+                  <Command className="size-4" />
                 </Button>
               </span>
             </div>
@@ -1286,7 +1284,7 @@ function TerminalChatViewport({
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-8 rounded-lg"
+                className={COMPOSER_ICON_BUTTON_CLASS}
                 aria-label="添加附件"
                 title="添加附件，也可拖入或粘贴文件"
                 disabled={uploading}
@@ -1294,28 +1292,28 @@ function TerminalChatViewport({
               >
                 <Paperclip className="size-4" />
               </Button>
-              <span ref={historyButtonRef} className="inline-flex">
+              <span ref={historyButtonRef} className="inline-flex shrink-0">
                 <Button
                   type="button"
+                  size="icon"
                   variant={historyOpen ? "secondary" : "outline"}
-                  className="h-8 rounded-lg px-2.5"
+                  className={COMPOSER_ICON_BUTTON_CLASS}
                   aria-label="命令历史"
                   aria-expanded={historyOpen}
                   title="命令历史"
                   onClick={toggleHistory}
                 >
-                  {historyLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <HistoryIcon className="size-3.5" />}
-                  历史
+                  {historyLoading ? <LoaderCircle className="size-4 animate-spin" /> : <HistoryIcon className="size-4" />}
                 </Button>
               </span>
-              <Button type="button" size="icon" className="size-8 rounded-lg" aria-label="发送到终端" onClick={submitLine} disabled={uploading || (!draft.trim() && attachments.length === 0)}>
+              <Button type="button" size="icon" className={COMPOSER_ICON_BUTTON_CLASS} aria-label="发送到终端" title="发送到终端" onClick={submitLine} disabled={uploading || (!draft.trim() && attachments.length === 0)}>
                 {uploading ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </Button>
             </div>
           </div>
           </div>
         </div>
-      </div>
+      </footer>
       ) : null}
       <Dialog open={pasteOpen} onOpenChange={(open) => { if (!open) closePasteDialog(); }}>
         <DialogContent

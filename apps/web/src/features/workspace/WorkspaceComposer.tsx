@@ -49,6 +49,12 @@ import type { WorkspaceSettings } from "./SettingsDialog";
 import { PromptEnhanceDialog } from "./PromptEnhanceDialog";
 import { PromptTemplatePicker } from "./PromptTemplatePicker";
 import { joinInsertedTemplate } from "./prompt-templates";
+import {
+  COMPOSER_DOCK_CLASS,
+  COMPOSER_SHELL_CLASS,
+  COMPOSER_TEXTAREA_CLASS,
+  COMPOSER_WIDTH_CLASS
+} from "./composer-layout";
 
 export function WorkspaceComposer({
   workspaceView,
@@ -222,11 +228,11 @@ export function WorkspaceComposer({
   return (
     <>
       <footer
-        className={`composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8 ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
+        className={`${COMPOSER_DOCK_CLASS} ${workspaceView === "chat" && activeSession ? "" : "hidden"}`}
       >
-        <div className="chat-content-width mx-auto">
+        <div className={COMPOSER_WIDTH_CLASS}>
           <div
-            className="composer-shell overflow-visible rounded-2xl p-3"
+            className={COMPOSER_SHELL_CLASS}
             data-drop={dragActive ? "true" : "false"}
             onDragEnter={(event) => {
               if (!event.dataTransfer.types.includes("Files")) return;
@@ -394,7 +400,7 @@ export function WorkspaceComposer({
                   send();
                 }
               }}
-              className="max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-2 py-1 text-base leading-6 shadow-none outline-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent sm:min-h-14 sm:text-sm"
+              className={COMPOSER_TEXTAREA_CLASS}
               title={
                 workspaceSettings.sendWithEnter
                   ? "Enter 发送，Shift+Enter 换行"
