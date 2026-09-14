@@ -1,3 +1,11 @@
+export function terminalFontSize(viewportWidth: number) {
+  return viewportWidth < 640 ? 11 : 12;
+}
+
+export function canFitTerminal(width: number, height: number) {
+  return width >= 16 && height >= 16;
+}
+
 export function sliceVisibleLines(
   lines: readonly string[],
   viewportY: number,

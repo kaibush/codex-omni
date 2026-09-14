@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -56,12 +56,14 @@ import {
 } from "./composer-attachments";
 import { LiveDuration } from "./WorkspaceStatus";
 import {
+  canFitTerminal,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
   encodeTerminalComposerPayload,
   encodeTerminalModifiedInput,
   filterCommandHistory,
   isCoarsePointer,
+  terminalFontSize,
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
@@ -140,7 +142,21 @@ function statusLabel(session: TerminalChatSession, connected: boolean) {
   return parts.join(" · ");
 }
 
-function TerminalChatViewport({ project, session, onChange }: { project: Project; session: TerminalChatSession; onChange: (next: Partial<TerminalChatSession>) => void }) {
+function TerminalChatViewport({
+  project,
+  session,
+  onChange,
+  active = true,
+  tabBar,
+  sessionActions
+}: {
+  project: Project;
+  session: TerminalChatSession;
+  onChange: (next: Partial<TerminalChatSession>) => void;
+  active?: boolean;
+  tabBar: ReactNode;
+  sessionActions: ReactNode;
+}) {
   const { resolvedTheme } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
@@ -157,6 +173,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   const onChangeRef = useRef(onChange);
   const outputRef = useRef("");
   const firstSeqRef = useRef(1);
+  const fitRef = useRef<() => void>(() => {});
   const pageVisibleRef = useRef(document.visibilityState === "visible");
   const lastPointerType = useRef<string | undefined>(undefined);
   const chromePointerStartX = useRef(0);
@@ -389,8 +406,8 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
     if (!element) return;
     const instance = new Terminal({
       cursorBlink: true,
-      fontSize: window.innerWidth < 640 ? 12 : 13,
-      lineHeight: 1.2,
+      fontSize: terminalFontSize(window.innerWidth),
+      lineHeight: 1.15,
       scrollback: 5000,
       disableStdin: false,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
@@ -400,9 +417,10 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
     instance.loadAddon(fit);
     instance.open(element);
     terminal.current = instance;
-    if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) instance.focus();
+    if (active && shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) instance.focus();
     const detachTouchScroll = attachTerminalTouchScroll(element, () => terminal.current);
     const fitTerminal = () => {
+      if (!canFitTerminal(element.clientWidth, element.clientHeight)) return;
       try {
         fit.fit();
         if (socket.current?.readyState === WebSocket.OPEN) {
@@ -412,6 +430,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
         // Hidden while switching workspace tabs.
       }
     };
+    fitRef.current = fitTerminal;
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(element);
     const onHostPaste = (event: ClipboardEvent) => {
@@ -458,7 +477,6 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
           }
           if (typeof message.seq === "number") lastSeq.current = message.seq;
           if (message.payload?.terminal) applyChange(message.payload.terminal);
-          if (message.payload?.truncated) instance.write("\r\n\x1b[90m[仅显示最近输出，可加载更早历史]\x1b[0m\r\n");
         } else if (message.type === "terminal.output") {
           if (typeof message.seq === "number" && message.seq <= lastSeq.current) return;
           instance.write(String(message.payload?.data ?? ""));
@@ -513,6 +531,17 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   useEffect(() => {
     if (terminal.current) terminal.current.options.theme = xtermTheme(resolvedTheme);
   }, [resolvedTheme]);
+  useEffect(() => {
+    if (!active) {
+      terminal.current?.blur();
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      fitRef.current();
+      if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) terminal.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active]);
 
   const focusTerminalIfAppropriate = () => {
     if (shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
@@ -905,20 +934,20 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
       className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100"
       {...dropHandlers}
     >
-      <div className="relative flex min-h-10 shrink-0 items-center gap-2 border-b border-border bg-muted px-3 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
-        <span className={`size-2 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
-        <span className="min-w-0 truncate">{statusLabel(session, connected)}</span>
-        {session.state === "running" ? (
-          <span className="hidden shrink-0 sm:inline">
-            · 时长 <LiveDuration startedAt={session.createdAt} />
-          </span>
-        ) : null}
-        <span className="ml-auto hidden max-w-[30%] truncate font-mono dark:text-slate-500 sm:block" title={session.cwd}>{session.cwd}</span>
+      <div className="relative flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-muted/70 px-2 text-[11px] text-muted-foreground [scrollbar-width:none] dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300 [&::-webkit-scrollbar]:hidden">
+        {tabBar}
+        <span className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
+        <span className="min-w-0 max-w-[9rem] truncate sm:max-w-[16rem]" title={statusLabel(session, connected)}>
+          {connected ? (session.pid ? `PID ${session.pid}` : "已连接") : "恢复中"}
+          {session.state === "running" ? <> · <LiveDuration startedAt={session.createdAt} /></> : null}
+        </span>
+        <span className="hidden min-w-0 max-w-[28%] truncate font-mono dark:text-slate-500 lg:block" title={session.cwd}>{session.cwd}</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
         <button
           type="button"
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10"
+          className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 hover:bg-accent disabled:opacity-40 dark:hover:bg-white/10 ${firstSeq > 1 ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground dark:text-slate-300"}`}
           aria-label="加载更早输出"
-          title={firstSeq > 1 ? "加载更早输出" : "已是最早输出"}
+          title={firstSeq > 1 ? "仅显示最近输出，点击加载更早历史" : "已是最早输出"}
           disabled={loadingEarlier || firstSeq <= 1}
           {...chromeActivateProps(() => { void loadEarlier(); })}
         >
@@ -931,8 +960,10 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
         <button type="button" className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
           <Download className="size-3.5" />
         </button>
+        {sessionActions}
+        </div>
         {searchOpen && (
-          <form className="absolute right-2 top-10 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
+          <form className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
             <div className="flex gap-1.5">
               <input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索终端历史" className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100" />
               <Button type="submit" size="sm" className="h-8">搜索</Button>
@@ -949,10 +980,10 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
         )}
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div className="absolute inset-0 p-2 sm:p-3">
+        <div className="absolute inset-0 p-1">
         <div ref={host} className="h-full touch-none overscroll-contain" />
         {dragActive ? (
-          <div className="pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-xl border border-dashed border-sky-400/70 bg-sky-500/10 text-sm text-sky-800 dark:border-sky-400/50 dark:text-sky-100 sm:inset-3">
+          <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border border-dashed border-sky-400/70 bg-sky-500/10 text-sm text-sky-800 dark:border-sky-400/50 dark:text-sky-100">
             松开鼠标即可添加附件
           </div>
         ) : null}
@@ -963,9 +994,9 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
         )}
         </div>
       </div>
-      <div className="composer-dock shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 sm:pb-4 lg:px-8">
+      <div className="composer-dock shrink-0 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1 sm:px-3 sm:pb-2">
         <div className="chat-content-width mx-auto">
-          <div className="composer-shell overflow-visible rounded-2xl p-3" data-drop={dragActive ? "true" : "false"}>
+          <div className="composer-shell overflow-visible rounded-2xl p-2" data-drop={dragActive ? "true" : "false"}>
           {dragActive ? <div className="composer-drop-hint">松开鼠标即可添加附件</div> : null}
           {attachments.length > 0 ? (
             <div className="composer-attachments">
@@ -1032,7 +1063,7 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
               autoComplete="off"
               spellCheck={false}
               lang="zh-CN"
-              className="max-h-40 min-h-12 w-full resize-none border-0 bg-transparent px-2 py-1 font-mono text-base leading-6 shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent sm:min-h-14 sm:text-sm"
+              className="max-h-40 min-h-10 w-full resize-none border-0 bg-transparent px-2 py-1 font-mono text-sm leading-5 shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent sm:min-h-12 sm:text-sm"
               onChange={(event) => setDraft(event.target.value)}
               onPaste={(event) => {
                 const files = filesFromClipboard(event.clipboardData);
@@ -1191,7 +1222,17 @@ function TerminalChatViewport({ project, session, onChange }: { project: Project
   );
 }
 
-export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { project: Project; sessionId?: string; onOpenSession?: (sessionId: string) => void }) {
+export function TerminalChatPanel({
+  project,
+  sessionId = "",
+  onOpenSession,
+  active = true
+}: {
+  project: Project;
+  sessionId?: string;
+  onOpenSession?: (sessionId: string) => void;
+  active?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState("");
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
@@ -1262,77 +1303,89 @@ export function TerminalChatPanel({ project, sessionId = "", onOpenSession }: { 
     if (!window.confirm(running ? `删除终端对话「${item.title}」？进程会被停止。` : `删除终端对话「${item.title}」？`)) return;
     remove.mutate(item);
   };
+  const tabBar = (
+    <>
+      <SquareTerminal className="size-3.5 shrink-0 text-primary" />
+      <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className={`flex h-7 shrink-0 items-center rounded-lg border text-[11px] ${
+              selected?.id === item.id
+                ? "border-primary/30 bg-primary/10 text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            <button
+              type="button"
+              className="flex h-full items-center gap-1 px-1.5"
+              onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
+            >
+              <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
+              <span className="max-w-24 truncate">{item.title}</span>
+            </button>
+            <button
+              type="button"
+              className="grid size-6 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={`关闭 ${item.title}`}
+              disabled={remove.isPending}
+              onClick={() => closeTab(item)}
+            >
+              <Delete className="size-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <select aria-label="选择终端 profile" className="h-7 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px]" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
+        <option value="" disabled>新建</option>
+        {(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+      </select>
+      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
+      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
+    </>
+  );
+  const sessionActions = selected ? (
+    <>
+      <select
+        aria-label="重启策略"
+        className="h-7 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px] sm:max-w-36"
+        value={selected.restartPolicy}
+        disabled={configure.isPending}
+        onChange={(event) => configure.mutate({ id: selected.id, restartPolicy: event.target.value as "manual" | "on-unexpected-exit" })}
+      >
+        <option value="manual">手动重启</option>
+        <option value="on-unexpected-exit">异常退出自动重启</option>
+      </select>
+      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button>
+      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
+    </>
+  ) : null;
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-3">
-        <SquareTerminal className="size-4 shrink-0 text-primary" />
-        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className={`flex h-8 shrink-0 items-center rounded-lg border text-xs ${
-                selected?.id === item.id
-                  ? "border-primary/30 bg-primary/10 text-foreground"
-                  : "border-transparent text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              <button
-                type="button"
-                className="flex h-full items-center gap-1.5 px-2"
-                onClick={() => { setSelectedId(item.id); onOpenSession?.(item.sessionId); }}
-              >
-                <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-                <span className="max-w-28 truncate">{item.title}</span>
-              </button>
-              <button
-                type="button"
-                className="grid size-7 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                aria-label={`关闭 ${item.title}`}
-                disabled={remove.isPending}
-                onClick={() => closeTab(item)}
-              >
-                <Delete className="size-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-        <select aria-label="选择终端 profile" className="h-8 max-w-36 rounded-lg border border-border bg-background px-2 text-xs" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
-          <option value="" disabled>新建终端</option>
-          {(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-        </select>
-        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}</Button>
-        <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-4 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
-      </div>
       {selected ? (
-        <>
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
-            <span className="truncate">{selected.title} · {selected.profileId}</span>
-            {selected.state === "needs_attention" ? <span className="text-destructive">已暂停自动重启</span> : <span>{selected.state}</span>}
-            <select
-              aria-label="重启策略"
-              className="ml-auto h-7 max-w-40 rounded-lg border border-border bg-background px-2 text-xs"
-              value={selected.restartPolicy}
-              disabled={configure.isPending}
-              onChange={(event) => configure.mutate({ id: selected.id, restartPolicy: event.target.value as "manual" | "on-unexpected-exit" })}
-            >
-              <option value="manual">手动重启</option>
-              <option value="on-unexpected-exit">异常退出自动重启</option>
-            </select>
-            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button>
-            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
-            <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="删除终端对话" onClick={() => closeTab(selected)} disabled={remove.isPending}><Delete className="size-3.5" /></Button>
-          </div>
-          <TerminalChatViewport key={selected.id} project={project} session={selected} onChange={selectedChange} />
-        </>
+        <TerminalChatViewport
+          key={selected.id}
+          project={project}
+          session={selected}
+          onChange={selectedChange}
+          active={active}
+          tabBar={tabBar}
+          sessionActions={sessionActions}
+        />
       ) : (
-        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
-          <div>
-            <SquareTerminal className="mx-auto size-10 text-muted-foreground" />
-            <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
-            <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
-            <Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button>
+        <>
+          <div className="flex h-9 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-muted/70 px-2 text-[11px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {tabBar}
           </div>
-        </div>
+          <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
+            <div>
+              <SquareTerminal className="mx-auto size-10 text-muted-foreground" />
+              <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
+              <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
+              <Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );

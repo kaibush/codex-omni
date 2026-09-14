@@ -207,6 +207,10 @@ export function Workspace() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
     defaultWorkspaceView(params.sessionId)
   );
+  const [terminalChatVisited, setTerminalChatVisited] = useState(false);
+  const lastTerminalChatSessionId = useRef("");
+  const workspaceViewRef = useRef(workspaceView);
+  workspaceViewRef.current = workspaceView;
   const openWorkspace = useCallback(
     (nextProjectId: string, nextSessionId = "", replace = false, view?: WorkspaceView) => {
       setWorkspaceView(view ?? defaultWorkspaceView(nextSessionId));
@@ -1228,8 +1232,18 @@ export function Workspace() {
     sessions.data?.find((s) => s.id === sessionId && s.projectId === projectId) ??
     null;
   useEffect(() => {
-    if (activeSession?.kind === "terminal-chat") setWorkspaceView("terminal-chat");
+    if (activeSession?.kind === "terminal-chat") {
+      lastTerminalChatSessionId.current = activeSession.id;
+      setWorkspaceView("terminal-chat");
+      setTerminalChatVisited(true);
+    }
   }, [activeSession?.id, activeSession?.kind]);
+  useEffect(() => {
+    setTerminalChatVisited(workspaceViewRef.current === "terminal-chat");
+  }, [projectId]);
+  useEffect(() => {
+    if (workspaceView === "terminal-chat") setTerminalChatVisited(true);
+  }, [workspaceView]);
   useDocumentTitle(
     workspaceDocumentTitle({
       projectName: activeProject?.name,
@@ -1403,7 +1417,9 @@ export function Workspace() {
       return;
     }
     if (view === "terminal-chat" && activeSession?.kind !== "terminal-chat") {
-      const terminalSession = projectSessions.find((session) => session.kind === "terminal-chat");
+      const terminalSession =
+        projectSessions.find((session) => session.id === lastTerminalChatSessionId.current) ??
+        projectSessions.find((session) => session.kind === "terminal-chat");
       openWorkspace(projectId, terminalSession?.id ?? "", false, "terminal-chat");
       return;
     }
@@ -2495,19 +2511,21 @@ export function Workspace() {
                 </Suspense>
               </div>
             )}
-            {activeProject && workspaceView === "terminal-chat" && (
-              <div className="min-h-0 flex-1 overflow-hidden">
+            {activeProject && terminalChatVisited ? (
+              <div className={workspaceView === "terminal-chat" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}>
                 <Suspense
                   fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
                 >
                   <TerminalChatPanel
+                    key={activeProject.id}
                     project={activeProject}
                     sessionId={sessionId}
+                    active={workspaceView === "terminal-chat"}
                     onOpenSession={(nextSessionId) => openWorkspace(projectId, nextSessionId, false, "terminal-chat")}
                   />
                 </Suspense>
               </div>
-            )}
+            ) : null}
           </>
         ) : (
           <>

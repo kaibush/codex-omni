@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canFitTerminal,
   isCoarsePointer,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
@@ -16,11 +17,26 @@ import {
   shouldSubmitTerminalKeyboard,
   sliceVisibleLines,
   terminalCopyPayload,
+  terminalFontSize,
   terminalKeyboardFieldProps,
   touchScrollLines,
   visibleBufferText,
   xtermTheme
 } from "./terminal-chrome";
+
+describe("terminal density", () => {
+  it("uses a compact font so more rows fit on phone and desktop", () => {
+    expect(terminalFontSize(390)).toBe(11);
+    expect(terminalFontSize(1280)).toBe(12);
+  });
+
+  it("does not fit or resize a hidden terminal", () => {
+    expect(canFitTerminal(800, 600)).toBe(true);
+    expect(canFitTerminal(0, 600)).toBe(false);
+    expect(canFitTerminal(800, 0)).toBe(false);
+    expect(canFitTerminal(8, 8)).toBe(false);
+  });
+});
 
 describe("visible buffer extraction", () => {
   const lines = ["one", "two", "three", "four", "five"];
