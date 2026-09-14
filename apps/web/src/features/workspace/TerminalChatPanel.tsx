@@ -217,6 +217,8 @@ function TerminalChatViewport({
   const historyButtonRef = useRef<HTMLSpanElement | null>(null);
   const shortcutPanelRef = useRef<HTMLDivElement | null>(null);
   const shortcutButtonRef = useRef<HTMLSpanElement | null>(null);
+  const searchPanelRef = useRef<HTMLFormElement | null>(null);
+  const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const comboRef = useRef<HTMLInputElement | null>(null);
   const comboComposing = useRef(false);
   const comboKeySent = useRef(false);
@@ -386,6 +388,20 @@ function TerminalChatViewport({
     setHistoryQuery("");
     setShortcutOpen((open) => !open);
   };
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchHits([]);
+  };
+  const toggleSearch = () => {
+    setSearchOpen((open) => {
+      if (open) {
+        setSearchQuery("");
+        setSearchHits([]);
+      }
+      return !open;
+    });
+  };
   const toggleComposerOpen = () => {
     setComposerOpen((value) => {
       const next = !value;
@@ -419,20 +435,27 @@ function TerminalChatViewport({
   };
 
   useEffect(() => {
-    if (!historyOpen && !shortcutOpen) return;
+    if (!historyOpen && !shortcutOpen && !searchOpen) return;
     const onPointerDown = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (historyOpen && (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target))) return;
       if (shortcutOpen && (shortcutPanelRef.current?.contains(target) || shortcutButtonRef.current?.contains(target))) return;
+      if (searchOpen && (searchPanelRef.current?.contains(target) || searchButtonRef.current?.contains(target))) return;
       setHistoryOpen(false);
       setShortcutOpen(false);
+      setSearchOpen(false);
+      setSearchQuery("");
+      setSearchHits([]);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setHistoryOpen(false);
       setHistoryQuery("");
       setShortcutOpen(false);
+      setSearchOpen(false);
+      setSearchQuery("");
+      setSearchHits([]);
     };
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
@@ -440,7 +463,7 @@ function TerminalChatViewport({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [historyOpen, shortcutOpen]);
+  }, [historyOpen, shortcutOpen, searchOpen]);
 
   useEffect(() => {
     const element = host.current;
@@ -1018,7 +1041,7 @@ function TerminalChatViewport({
       className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100"
       {...dropHandlers}
     >
-      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300">
+      <div className={`relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300${searchOpen ? " z-30" : ""}`}>
         <div className="flex min-w-0 flex-1 items-center gap-1">{tabBar}</div>
         <span className={`hidden size-1.5 shrink-0 rounded-full sm:inline ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
         <span className="hidden min-w-0 max-w-[9rem] truncate sm:inline sm:max-w-[16rem]" title={statusLabel(session, connected)}>
@@ -1044,7 +1067,7 @@ function TerminalChatViewport({
         <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="放大终端字体" title="放大终端字体" disabled={!canIncreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}>
           <ZoomIn className="size-3.5" />
         </button>
-        <button type="button" className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10" aria-label="搜索终端历史" {...chromeActivateProps(() => setSearchOpen((value) => !value))}>
+        <button ref={searchButtonRef} type="button" className={`${searchOpen ? "grid" : "hidden"} size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10`} aria-label={searchOpen ? "关闭搜索" : "搜索终端历史"} aria-expanded={searchOpen} title={searchOpen ? "关闭搜索" : "搜索终端历史"} {...chromeActivateProps(toggleSearch)}>
           <Search className="size-3.5" />
         </button>
         <button type="button" className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
@@ -1062,9 +1085,9 @@ function TerminalChatViewport({
               <ChevronUp className="size-3.5" />
               {loadingEarlier ? "加载中" : "加载更早输出"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setSearchOpen(true)}>
+            <DropdownMenuItem onSelect={toggleSearch}>
               <Search className="size-3.5" />
-              搜索历史
+              {searchOpen ? "关闭搜索" : "搜索历史"}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={downloadLog}>
               <Download className="size-3.5" />
@@ -1074,10 +1097,24 @@ function TerminalChatViewport({
         </DropdownMenu>
         </div>
         {searchOpen && (
-          <form className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
+          <form ref={searchPanelRef} className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
             <div className="flex gap-1.5">
-              <input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜索终端历史" className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  closeSearch();
+                }}
+                placeholder="搜索终端历史"
+                className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
+              />
               <Button type="submit" size="sm" className="h-8">搜索</Button>
+              <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0 rounded-lg" aria-label="关闭搜索" title="关闭搜索" onClick={closeSearch}>
+                <X className="size-4" />
+              </Button>
             </div>
             <div className="mt-2 max-h-52 overflow-y-auto text-[11px] text-muted-foreground dark:text-slate-300">
               {searchHits.length ? searchHits.map((hit) => (
@@ -1091,6 +1128,9 @@ function TerminalChatViewport({
         )}
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden">
+        {searchOpen ? (
+          <button type="button" className="absolute inset-0 z-20 bg-black/25 sm:bg-transparent" aria-label="关闭搜索" onClick={closeSearch} />
+        ) : null}
         <div className="absolute inset-0 p-1">
         <div ref={host} className="h-full touch-none overscroll-contain" />
         {dragActive ? (
