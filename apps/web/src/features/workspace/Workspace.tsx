@@ -87,7 +87,6 @@ import { ApprovalAuditDialog } from "@/features/workspace/ApprovalAuditDialog";
 import { CommandPalette } from "@/features/workspace/CommandPalette";
 import type { PaletteAction } from "@/features/workspace/command-palette";
 import { quoteMarkdown, sanitizeFileRef } from "@/features/workspace/markdown-refs";
-import { summarizeMessageText } from "@/features/workspace/message-summary";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
@@ -2115,30 +2114,6 @@ export function Workspace() {
       toast.error(error instanceof Error ? error.message : "收藏失败");
     }
   };
-  const saveMessageNote = async (text: string, title?: string) => {
-    if (!projectId || !text.trim()) return;
-    try {
-      await api(`/api/projects/${projectId}/notes`, {
-        method: "POST",
-        body: JSON.stringify({
-          kind: "note",
-          title: (title ?? text.trim().slice(0, 40) ?? "消息笔记").slice(0, 80),
-          content: text.trim().slice(0, 20_000)
-        })
-      });
-      toast.success("已保存到项目笔记");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存笔记失败");
-    }
-  };
-  const summarizeMessage = async (text: string) => {
-    const summary = summarizeMessageText(text);
-    if (!summary.content) {
-      toast.message("这条消息没有可摘要的内容");
-      return;
-    }
-    await saveMessageNote(summary.content, summary.title);
-  };
   const copyMessageLink = async (id: string) => {
     const url = `${window.location.origin}${workspacePath(projectId, sessionId)}#${encodeURIComponent(id)}`;
     const copied = await copyTextToClipboard(url);
@@ -2428,8 +2403,6 @@ export function Workspace() {
               copyMessageLink={copyMessageLink}
               starredIds={starredIds}
               onStarMessage={(id) => void toggleStarMessage(id)}
-              onSaveNote={(text) => void saveMessageNote(text)}
-              onSummarize={(text) => void summarizeMessage(text)}
               setCreateFile={setCreateFile}
               setCreateFilePath={setCreateFilePath}
               socket={socket}

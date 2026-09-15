@@ -114,8 +114,6 @@ export function WorkspaceTimeline({
   copyMessageLink,
   starredIds,
   onStarMessage,
-  onSaveNote,
-  onSummarize,
   setCreateFile,
   setCreateFilePath,
   socket,
@@ -176,8 +174,6 @@ export function WorkspaceTimeline({
   copyMessageLink: (id: string) => void;
   starredIds: string[];
   onStarMessage: (messageId: string) => void;
-  onSaveNote: (text: string) => void;
-  onSummarize: (text: string) => void;
   setCreateFile: (value: { content: string; language: string } | null) => void;
   setCreateFilePath: (value: string) => void;
   socket: { current: WebSocket | null };
@@ -613,16 +609,6 @@ export function WorkspaceTimeline({
                       onStar={
                         item.messageId && (item.kind === "user" || item.kind === "assistant")
                           ? () => onStarMessage(item.messageId!)
-                          : undefined
-                      }
-                      onSaveNote={
-                        item.kind === "user" || item.kind === "assistant"
-                          ? () => onSaveNote(item.text ?? "")
-                          : undefined
-                      }
-                      onSummarize={
-                        item.kind === "user" || item.kind === "assistant"
-                          ? () => onSummarize(item.text ?? "")
                           : undefined
                       }
                       onCreateFile={onCreateFile}

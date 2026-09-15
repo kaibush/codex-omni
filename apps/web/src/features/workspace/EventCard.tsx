@@ -33,8 +33,6 @@ import {
   ScrollText,
   SquareTerminal,
   Star,
-  StickyNote,
-  TextSelect,
   User,
   Wrench,
   ShieldQuestion,
@@ -667,8 +665,6 @@ type EventCardProps = {
   onCreateFile?: ((content: string, language: string) => void) | undefined;
   starred?: boolean | undefined;
   onStar?: (() => void) | undefined;
-  onSaveNote?: (() => void) | undefined;
-  onSummarize?: (() => void) | undefined;
   lite?: boolean | undefined;
   liteHeight?: number | undefined;
   onLoadFull?: (() => void) | undefined;
@@ -707,8 +703,6 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     sameHandler(prev.onCopyLink, next.onCopyLink) &&
     sameHandler(prev.onCreateFile, next.onCreateFile) &&
     sameHandler(prev.onStar, next.onStar) &&
-    sameHandler(prev.onSaveNote, next.onSaveNote) &&
-    sameHandler(prev.onSummarize, next.onSummarize) &&
     prev.lite === next.lite &&
     prev.liteHeight === next.liteHeight &&
     sameHandler(prev.onLoadFull, next.onLoadFull)
@@ -736,8 +730,6 @@ function EventCardComponent({
   onCreateFile,
   starred,
   onStar,
-  onSaveNote,
-  onSummarize,
   lite = false,
   liteHeight,
   onLoadFull
@@ -851,28 +843,6 @@ function EventCardComponent({
                 />
               </button>
             ) : null}
-            {onSaveNote ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label="标记为项目笔记"
-                title="标记为项目笔记"
-                onClick={onSaveNote}
-              >
-                <StickyNote aria-hidden="true" />
-              </button>
-            ) : null}
-            {onSummarize ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label="生成摘要"
-                title="生成摘要"
-                onClick={onSummarize}
-              >
-                <TextSelect aria-hidden="true" />
-              </button>
-            ) : null}
             <CopyButton
               text={
                 userVisibleText ||
@@ -949,28 +919,6 @@ function EventCardComponent({
                   aria-hidden="true"
                   className={starred ? "fill-amber-400 text-amber-400" : ""}
                 />
-              </button>
-            ) : null}
-            {onSaveNote ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label="标记为项目笔记"
-                title="标记为项目笔记"
-                onClick={onSaveNote}
-              >
-                <StickyNote aria-hidden="true" />
-              </button>
-            ) : null}
-            {onSummarize ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label="生成摘要"
-                title="生成摘要"
-                onClick={onSummarize}
-              >
-                <TextSelect aria-hidden="true" />
               </button>
             ) : null}
             <button

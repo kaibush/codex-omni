@@ -93,13 +93,11 @@ describe("EventCard copy controls", () => {
         onCreateFile={() => undefined}
         onOpenFile={() => undefined}
         onStar={() => undefined}
-        onSaveNote={() => undefined}
-        onSummarize={() => undefined}
       />
     );
     expect(html).toContain('aria-label="收藏消息"');
-    expect(html).toContain('aria-label="标记为项目笔记"');
-    expect(html).toContain('aria-label="生成摘要"');
+    expect(html).not.toContain('aria-label="标记为项目笔记"');
+    expect(html).not.toContain('aria-label="生成摘要"');
     expect(html).toContain('aria-label="编辑并重新发送"');
     expect(html).toContain('aria-label="重试本 turn"');
     expect(html).toContain('aria-label="引用到输入框"');
