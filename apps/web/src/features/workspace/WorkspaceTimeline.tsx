@@ -112,8 +112,6 @@ export function WorkspaceTimeline({
   retryMessage,
   quoteToInput,
   copyMessageLink,
-  starredIds,
-  onStarMessage,
   setCreateFile,
   setCreateFilePath,
   socket,
@@ -172,8 +170,6 @@ export function WorkspaceTimeline({
   retryMessage: (item: TimelineItem) => void;
   quoteToInput: (text: string) => void;
   copyMessageLink: (id: string) => void;
-  starredIds: string[];
-  onStarMessage: (messageId: string) => void;
   setCreateFile: (value: { content: string; language: string } | null) => void;
   setCreateFilePath: (value: string) => void;
   socket: { current: WebSocket | null };
@@ -605,12 +601,6 @@ export function WorkspaceTimeline({
                           : undefined
                       }
                       onCopyLink={() => void copyMessageLink(item.id)}
-                      starred={item.messageId ? starredIds.includes(item.messageId) : false}
-                      onStar={
-                        item.messageId && (item.kind === "user" || item.kind === "assistant")
-                          ? () => onStarMessage(item.messageId!)
-                          : undefined
-                      }
                       onCreateFile={onCreateFile}
                       onOpenFile={onOpenFile}
                       onApproval={onApproval}

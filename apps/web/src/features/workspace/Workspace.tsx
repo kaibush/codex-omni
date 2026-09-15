@@ -224,7 +224,6 @@ export function Workspace() {
   );
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [highlightMessageId, setHighlightMessageId] = useState("");
-  const [starredIds, setStarredIds] = useState<string[]>([]);
   const [messageHits, setMessageHits] = useState<
     Array<{ projectId: string; sessionId: string; messageId: string }>
   >([]);
@@ -399,23 +398,6 @@ export function Workspace() {
   useEffect(() => {
     persistSidebarWidth(sidebarWidth);
   }, [sidebarWidth]);
-  useEffect(() => {
-    if (!sessionId) {
-      setStarredIds([]);
-      return;
-    }
-    let cancelled = false;
-    void api<{ ids: string[] }>(`/api/sessions/${sessionId}/stars`)
-      .then((result) => {
-        if (!cancelled) setStarredIds(result.ids);
-      })
-      .catch(() => {
-        if (!cancelled) setStarredIds([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId]);
   useEffect(() => {
     const applyHash = () => {
       const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
@@ -2099,21 +2081,6 @@ export function Workspace() {
     );
     requestAnimationFrame(() => inputRef.current?.focus());
   };
-  const toggleStarMessage = async (messageId: string) => {
-    const starred = !starredIds.includes(messageId);
-    try {
-      await api(`/api/messages/${messageId}/star`, {
-        method: "PUT",
-        body: JSON.stringify({ starred })
-      });
-      setStarredIds((current) =>
-        starred ? [...current, messageId] : current.filter((id) => id !== messageId)
-      );
-      toast.success(starred ? "已收藏消息" : "已取消收藏");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "收藏失败");
-    }
-  };
   const copyMessageLink = async (id: string) => {
     const url = `${window.location.origin}${workspacePath(projectId, sessionId)}#${encodeURIComponent(id)}`;
     const copied = await copyTextToClipboard(url);
@@ -2401,8 +2368,6 @@ export function Workspace() {
               retryMessage={retryMessage}
               quoteToInput={quoteToInput}
               copyMessageLink={copyMessageLink}
-              starredIds={starredIds}
-              onStarMessage={(id) => void toggleStarMessage(id)}
               setCreateFile={setCreateFile}
               setCreateFilePath={setCreateFilePath}
               socket={socket}

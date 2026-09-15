@@ -92,10 +92,9 @@ describe("EventCard copy controls", () => {
         onCopyLink={() => undefined}
         onCreateFile={() => undefined}
         onOpenFile={() => undefined}
-        onStar={() => undefined}
       />
     );
-    expect(html).toContain('aria-label="收藏消息"');
+    expect(html).not.toContain('aria-label="收藏消息"');
     expect(html).not.toContain('aria-label="标记为项目笔记"');
     expect(html).not.toContain('aria-label="生成摘要"');
     expect(html).toContain('aria-label="编辑并重新发送"');
@@ -105,6 +104,18 @@ describe("EventCard copy controls", () => {
     expect(html).toContain('aria-label="在项目中创建文件"');
     expect(html).toContain("file-ref-link");
     expect(html).toContain("src/app.ts:12");
+  });
+
+  it("keeps file path links in user bubbles", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{ id: "user-agents", kind: "user", text: "把这段约束写到当前项目的 AGENTS.md 里" }}
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(html).toContain("event-card-user");
+    expect(html).toContain("file-ref-link");
+    expect(html).toContain("AGENTS.md");
   });
 
   it("opens bare file paths and markdown file links from chat", () => {

@@ -32,7 +32,6 @@ import {
   RotateCcw,
   ScrollText,
   SquareTerminal,
-  Star,
   User,
   Wrench,
   ShieldQuestion,
@@ -663,8 +662,6 @@ type EventCardProps = {
   onQuote?: (() => void) | undefined;
   onCopyLink?: (() => void) | undefined;
   onCreateFile?: ((content: string, language: string) => void) | undefined;
-  starred?: boolean | undefined;
-  onStar?: (() => void) | undefined;
   lite?: boolean | undefined;
   liteHeight?: number | undefined;
   onLoadFull?: (() => void) | undefined;
@@ -691,7 +688,6 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     prev.providerName === next.providerName &&
     prev.projectId === next.projectId &&
     prev.projectPath === next.projectPath &&
-    prev.starred === next.starred &&
     sameHandler(prev.onApproval, next.onApproval) &&
     sameHandler(prev.onFork, next.onFork) &&
     sameHandler(prev.onOpenFile, next.onOpenFile) &&
@@ -702,7 +698,6 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     sameHandler(prev.onQuote, next.onQuote) &&
     sameHandler(prev.onCopyLink, next.onCopyLink) &&
     sameHandler(prev.onCreateFile, next.onCreateFile) &&
-    sameHandler(prev.onStar, next.onStar) &&
     prev.lite === next.lite &&
     prev.liteHeight === next.liteHeight &&
     sameHandler(prev.onLoadFull, next.onLoadFull)
@@ -728,8 +723,6 @@ function EventCardComponent({
   onQuote,
   onCopyLink,
   onCreateFile,
-  starred,
-  onStar,
   lite = false,
   liteHeight,
   onLoadFull
@@ -829,20 +822,6 @@ function EventCardComponent({
                 <Link2 aria-hidden="true" />
               </button>
             ) : null}
-            {onStar ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label={starred ? "取消收藏" : "收藏消息"}
-                title={starred ? "取消收藏" : "收藏消息"}
-                onClick={onStar}
-              >
-                <Star
-                  aria-hidden="true"
-                  className={starred ? "fill-amber-400 text-amber-400" : ""}
-                />
-              </button>
-            ) : null}
             <CopyButton
               text={
                 userVisibleText ||
@@ -905,20 +884,6 @@ function EventCardComponent({
                 onClick={onCopyLink}
               >
                 <Link2 aria-hidden="true" />
-              </button>
-            ) : null}
-            {onStar ? (
-              <button
-                type="button"
-                className="copy-button copy-button-message"
-                aria-label={starred ? "取消收藏" : "收藏消息"}
-                title={starred ? "取消收藏" : "收藏消息"}
-                onClick={onStar}
-              >
-                <Star
-                  aria-hidden="true"
-                  className={starred ? "fill-amber-400 text-amber-400" : ""}
-                />
               </button>
             ) : null}
             <button

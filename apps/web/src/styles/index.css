@@ -1929,11 +1929,21 @@ button.user-attachment-path {
 }
 
 .file-ref-link {
+  display: inline;
+  margin: 0;
+  border: 0;
+  background: none;
+  padding: 0;
   color: var(--primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
+}
+.event-card-user .file-ref-link {
+  color: inherit;
+  text-decoration-color: color-mix(in oklab, var(--primary-foreground) 72%, transparent);
 }
 .timeline-view-float {
   position: sticky;
