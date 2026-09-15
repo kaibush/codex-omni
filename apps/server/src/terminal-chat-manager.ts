@@ -1,22 +1,14 @@
 import type { IPty } from "node-pty";
 import * as pty from "node-pty";
 import type { Store, TerminalSessionRow } from "@codex-omni/db";
-import { buildTerminalEnv, resolveTerminalRuntime } from "./terminal-shell.js";
+import { buildTerminalEnv, resolveTerminalLaunch, resolveTerminalRuntime } from "./terminal-shell.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
-type Profile = { id: string; name: string; executable: string; args: string[] };
 type Managed = { row: TerminalSessionRow; process: IPty | null; subscribers: Set<WebSocket>; timer: NodeJS.Timeout | null; generation: number };
 type TerminalPatch = Parameters<Store["updateTerminalSession"]>[1];
 
-const PROFILES: Profile[] = [
-  { id: "codex", name: "Codex", executable: "codex", args: [] },
-  { id: "claude-code", name: "Claude Code", executable: "claude", args: [] },
-  { id: "shell", name: "Shell", executable: "", args: [] }
-];
 const MAX_RESTARTS = 3;
 const RESTART_WINDOW = 5 * 60_000;
-
-export const terminalProfiles = () => PROFILES.map((profile) => ({ ...profile }));
 
 export function terminalSnapshotFromEvents(
   events: Array<{ seq: number; kind: string; data: string }>,
@@ -64,7 +56,11 @@ export class TerminalChatManager {
     for (const socket of item.subscribers) this.send(socket, event);
   }
   private profile(id: string) {
-    return PROFILES.find((profile) => profile.id === id);
+    return this.store.getTerminalProfile(id);
+  }
+  private launchCommand(item: Managed) {
+    const profile = this.profile(item.row.profileId);
+    return (profile?.command ?? item.row.command ?? "").trim();
   }
   private persist(item: Managed, patch: TerminalPatch) {
     const next = this.store.updateTerminalSession(item.row.id, patch);
@@ -90,10 +86,11 @@ export class TerminalChatManager {
   }
 
   create(input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string; restartPolicy?: "manual" | "on-unexpected-exit" }) {
-    if (!this.profile(input.profileId)) throw new Error("不支持的终端 profile");
+    const profile = this.profile(input.profileId);
+    if (!profile) throw new Error("不支持的终端 profile");
     const running = [...this.items.values()].filter((item) => item.row?.projectId === input.projectId && item.row?.desiredState === "running").length;
     if (running >= 12) throw new Error("每个工程最多同时运行 12 个终端对话");
-    const row = this.store.createTerminalSession(input);
+    const row = this.store.createTerminalSession({ ...input, command: profile.command });
     const item: Managed = { row, process: null, subscribers: new Set(), timer: null, generation: 0 };
     this.items.set(row.id, item);
     this.start(row.id, false);
@@ -129,19 +126,16 @@ export class TerminalChatManager {
   private start(id: string, restoring: boolean) {
     const item = this.items.get(id);
     if (this.shuttingDown || !item?.row || item.process || item.row.desiredState !== "running") return;
-    const profile = this.profile(item.row.profileId);
-    if (!profile) return this.fail(item, "找不到终端 profile");
     const runtime = resolveTerminalRuntime();
-    const executable = profile.executable || runtime.shell;
-    const args = profile.executable ? profile.args : runtime.args;
+    const launch = resolveTerminalLaunch(this.launchCommand(item), runtime);
     const generation = ++item.generation;
     try {
-      const child = pty.spawn(executable, args, {
+      const child = pty.spawn(launch.shell, launch.args, {
         name: "xterm-256color",
         cols: 120,
         rows: 30,
         cwd: item.row.cwd,
-        env: buildTerminalEnv({ shell: executable, terminalId: id, home: runtime.home, username: runtime.username })
+        env: buildTerminalEnv({ shell: launch.shell, terminalId: id, home: runtime.home, username: runtime.username })
       });
       item.process = child;
       if (!this.persist(item, { state: "running", pid: child.pid, lastError: null, nextRestartAt: null })) {

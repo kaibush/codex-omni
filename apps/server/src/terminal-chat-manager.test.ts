@@ -31,23 +31,38 @@ vi.mock("node-pty", () => ({
   })
 }));
 
+import * as pty from "node-pty";
 import { Store, type TerminalSessionRow } from "@codex-omni/db";
 import { TerminalChatManager, terminalSnapshotFromEvents } from "./terminal-chat-manager.js";
 
 const row = (overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow => ({
-  id: "terminal-1", sessionId: "session-1", projectId: "project-1", profileId: "shell", title: "Shell", cwd: "/tmp", desiredState: "running", state: "provisioning", restartPolicy: "manual", pid: null, lastSeq: 0, lastOutputAt: null, lastExitCode: null, lastSignal: null, restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null, lastError: null, createdAt: 1, updatedAt: 1, stoppedAt: null, ...overrides
+  id: "terminal-1", sessionId: "session-1", projectId: "project-1", profileId: "shell", command: "", title: "Shell", cwd: "/tmp", desiredState: "running", state: "provisioning", restartPolicy: "manual", pid: null, lastSeq: 0, lastOutputAt: null, lastExitCode: null, lastSignal: null, restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null, lastError: null, createdAt: 1, updatedAt: 1, stoppedAt: null, ...overrides
 });
+
+const defaultProfiles = {
+  shell: { id: "shell", name: "Shell", command: "", sortOrder: 2, createdAt: 1, updatedAt: 1 },
+  codex: { id: "codex", name: "Codex", command: "codex", sortOrder: 0, createdAt: 1, updatedAt: 1 },
+  "claude-code": { id: "claude-code", name: "Claude Code", command: "claude", sortOrder: 1, createdAt: 1, updatedAt: 1 }
+};
 
 function makeStore() {
   const rows = new Map<string, TerminalSessionRow>();
   const sessions = new Set<string>(["session-1"]);
   const events: Array<{ terminalId: string; seq: number; kind: string; data: string }> = [];
+  const profiles = { ...defaultProfiles };
   let nextId = 1;
   return {
+    profiles,
     store: {
       listTerminalSessions: () => [...rows.values()],
-      createTerminalSession: (input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string }) => {
-        const created = row({ id: `terminal-${nextId++}`, ...input, state: "provisioning" });
+      getTerminalProfile: (id: string) => profiles[id as keyof typeof profiles],
+      createTerminalSession: (input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string; command?: string }) => {
+        const created = row({
+          id: `terminal-${nextId++}`,
+          ...input,
+          command: input.command ?? profiles[input.profileId as keyof typeof profiles]?.command ?? "",
+          state: "provisioning"
+        });
         rows.set(created.id, created);
         sessions.add(created.sessionId);
         return created;
@@ -141,6 +156,59 @@ describe("TerminalChatManager", () => {
     manager.stop(terminal.id);
     ptyMocks.instances[0]!.emitExit(1, 2);
     expect(manager.get(terminal.id)).toMatchObject({ state: "stopped", desiredState: "stopped" });
+  });
+
+  it("launches custom profile commands through the login shell", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    manager.create({
+      projectId: "project-1",
+      sessionId: "session-1",
+      title: "Claude Code",
+      cwd: "/tmp",
+      profileId: "claude-code"
+    });
+    expect(pty.spawn).toHaveBeenCalled();
+    const args = vi.mocked(pty.spawn).mock.calls.at(-1)?.[1];
+    expect(args).toEqual(expect.arrayContaining(["-c", "claude"]));
+  });
+
+  it("restarts with the live profile command after it is edited", () => {
+    const { store, profiles } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({
+      projectId: "project-1",
+      sessionId: "session-1",
+      title: "Claude Code",
+      cwd: "/tmp",
+      profileId: "claude-code"
+    });
+    profiles["claude-code"] = {
+      ...profiles["claude-code"],
+      command: "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json"
+    };
+    manager.restart(terminal.id);
+    const args = vi.mocked(pty.spawn).mock.calls.at(-1)?.[1];
+    expect(args).toEqual(expect.arrayContaining([
+      "-c",
+      "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json"
+    ]));
+  });
+
+  it("keeps using the session snapshot after the profile is deleted", () => {
+    const { store, profiles } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({
+      projectId: "project-1",
+      sessionId: "session-1",
+      title: "Claude Code",
+      cwd: "/tmp",
+      profileId: "claude-code"
+    });
+    delete (profiles as Record<string, unknown>)["claude-code"];
+    manager.restart(terminal.id);
+    const args = vi.mocked(pty.spawn).mock.calls.at(-1)?.[1];
+    expect(args).toEqual(expect.arrayContaining(["-c", "claude"]));
   });
 
   it("updates restart policy without spawning another process", () => {

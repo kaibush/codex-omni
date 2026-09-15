@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTerminalEnv,
   loginShellArgs,
+  resolveTerminalLaunch,
   resolveTerminalShell,
   resolveTerminalUser
 } from "./terminal-shell.js";
@@ -89,6 +90,48 @@ describe("buildTerminalEnv", () => {
       COLORTERM: "truecolor",
       LANG: "C.UTF-8",
       CODEX_OMNI_TERMINAL_ID: "term-1"
+    });
+  });
+});
+
+describe("resolveTerminalLaunch", () => {
+  const runtime = {
+    username: "root",
+    home: "/root",
+    loginShell: "/usr/bin/zsh",
+    shell: "/usr/bin/zsh",
+    args: ["-l"]
+  };
+
+  it("starts a login shell when the command is empty", () => {
+    expect(resolveTerminalLaunch("", runtime)).toEqual({
+      shell: "/usr/bin/zsh",
+      args: ["-l"]
+    });
+  });
+
+  it("runs complex commands through the login shell", () => {
+    expect(
+      resolveTerminalLaunch(
+        "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json",
+        runtime
+      )
+    ).toEqual({
+      shell: "/usr/bin/zsh",
+      args: [
+        "-l",
+        "-c",
+        "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json"
+      ]
+    });
+  });
+
+  it("uses PowerShell -Command on Windows", () => {
+    expect(
+      resolveTerminalLaunch("codex", { ...runtime, shell: "powershell.exe", args: [] }, "win32")
+    ).toEqual({
+      shell: "powershell.exe",
+      args: ["-NoLogo", "-Command", "codex"]
     });
   });
 });

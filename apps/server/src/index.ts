@@ -48,7 +48,7 @@ import {
 import { nextRunAt, startScheduledJobs } from "./scheduled-jobs.js";
 import { RunManager } from "./run-manager.js";
 import { TerminalManager, terminalHostLabel } from "./terminal-manager.js";
-import { TerminalChatManager, terminalProfiles } from "./terminal-chat-manager.js";
+import { TerminalChatManager } from "./terminal-chat-manager.js";
 import { compactMessageForClient } from "./session-history.js";
 import { backfillSessionRolloutTools } from "./session-rollout.js";
 import { clearThreadGoal, readThreadGoal } from "./thread-goal.js";
@@ -1745,7 +1745,39 @@ app.delete("/api/terminals/:id", { preHandler: auth }, async (req, reply) => {
   if (!deleted) return reply.code(404).send({ error: "Terminal not found" });
   return { ok: true };
 });
-app.get("/api/terminal-profiles", { preHandler: auth }, async () => ({ profiles: terminalProfiles() }));
+app.get("/api/terminal-profiles", { preHandler: auth }, async () => ({ profiles: store.listTerminalProfiles() }));
+app.post("/api/terminal-profiles", { preHandler: auth }, async (req) => {
+  const body = z
+    .object({
+      name: z.string().trim().min(1).max(80),
+      command: z.string().max(4000).default("")
+    })
+    .parse(req.body ?? {});
+  return store.upsertTerminalProfile({
+    name: body.name,
+    command: body.command.trim()
+  });
+});
+app.put("/api/terminal-profiles/:id", { preHandler: auth }, async (req, reply) => {
+  const id = routeId(req);
+  if (!store.getTerminalProfile(id)) return reply.code(404).send({ error: "Terminal profile not found" });
+  const body = z
+    .object({
+      name: z.string().trim().min(1).max(80),
+      command: z.string().max(4000).default("")
+    })
+    .parse(req.body ?? {});
+  return store.upsertTerminalProfile({
+    id,
+    name: body.name,
+    command: body.command.trim()
+  });
+});
+app.delete("/api/terminal-profiles/:id", { preHandler: auth }, async (req, reply) => {
+  if (!store.deleteTerminalProfile(routeId(req)))
+    return reply.code(404).send({ error: "Terminal profile not found" });
+  return { ok: true };
+});
 app.get("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req, reply) => {
   const projectId = routeId(req);
   if (!store.getProject(projectId)) return reply.code(404).send({ error: "Project not found" });
@@ -1759,8 +1791,10 @@ app.post("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req
     profileId: z.string().min(1).default("shell"),
     restartPolicy: z.enum(["manual", "on-unexpected-exit"]).default("manual")
   }).parse(req.body ?? {});
+  const profile = store.getTerminalProfile(body.profileId);
+  if (!profile) return reply.code(400).send({ error: "不支持的终端 profile" });
   const existingTitles = store.listTerminalSessions(projectId).map((item) => item.title);
-  const title = body.title?.trim() || nextNumberedTitle(existingTitles, `${body.profileId} 终端`);
+  const title = body.title?.trim() || nextNumberedTitle(existingTitles, profile.name);
   const session = store.createSession({ projectId, title, kind: "terminal-chat" });
   try {
     const terminal = terminalChats.create({ projectId, sessionId: session.id, title: session.title, cwd: rootPath, profileId: body.profileId, restartPolicy: body.restartPolicy });

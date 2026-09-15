@@ -121,6 +121,23 @@ export function resolveTerminalRuntime(options: ResolveOptions = {}): TerminalRu
   };
 }
 
+export function resolveTerminalLaunch(
+  command: string,
+  runtime: TerminalRuntime,
+  platform: NodeJS.Platform = process.platform
+): TerminalShell {
+  const trimmed = command.trim();
+  if (!trimmed) return { shell: runtime.shell, args: [...runtime.args] };
+  if (platform === "win32") {
+    const name = shellName(runtime.shell);
+    if (name === "powershell" || name === "pwsh") {
+      return { shell: runtime.shell, args: ["-NoLogo", "-Command", trimmed] };
+    }
+    return { shell: runtime.shell, args: ["/d", "/s", "/c", trimmed] };
+  }
+  return { shell: runtime.shell, args: [...runtime.args, "-c", trimmed] };
+}
+
 export function buildTerminalEnv(input: {
   env?: NodeJS.ProcessEnv;
   shell: string;

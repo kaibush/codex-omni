@@ -64,6 +64,7 @@ export type TerminalSessionRow = {
   sessionId: string;
   projectId: string;
   profileId: string;
+  command: string;
   title: string;
   cwd: string;
   desiredState: "running" | "stopped";
@@ -211,6 +212,19 @@ export type PromptTemplateRow = {
   createdAt: number;
   updatedAt: number;
 };
+export type TerminalProfileRow = {
+  id: string;
+  name: string;
+  command: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+};
+export const DEFAULT_TERMINAL_PROFILES: Array<Pick<TerminalProfileRow, "id" | "name" | "command" | "sortOrder">> = [
+  { id: "codex", name: "Codex", command: "codex", sortOrder: 0 },
+  { id: "claude-code", name: "Claude Code", command: "claude", sortOrder: 1 },
+  { id: "shell", name: "Shell", command: "", sortOrder: 2 }
+];
 export type TaskStatus = "todo" | "doing" | "done" | "blocked";
 export type TaskRow = {
   id: string;
@@ -520,6 +534,7 @@ export class Store {
         session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
         profile_id TEXT NOT NULL,
+        command TEXT NOT NULL DEFAULT '',
         title TEXT NOT NULL,
         cwd TEXT NOT NULL,
         desired_state TEXT NOT NULL DEFAULT 'running',
@@ -549,6 +564,14 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_terminal_events_created ON terminal_events(terminal_id,created_at);
     `);
+    const terminalSessionColumns = new Set(
+      (this.db.prepare("PRAGMA table_info(terminal_sessions)").all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    );
+    if (!terminalSessionColumns.has("command")) {
+      this.db.exec("ALTER TABLE terminal_sessions ADD COLUMN command TEXT NOT NULL DEFAULT ''");
+    }
     const runColumns = new Set(
       (this.db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>).map(
         (column) => column.name
@@ -578,6 +601,14 @@ export class Store {
         name TEXT NOT NULL,
         command TEXT,
         content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS terminal_profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -654,6 +685,7 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next ON scheduled_jobs(enabled,next_run_at);
     `);
+    this.seedDefaultTerminalProfiles();
     this.ensureMessageSearch();
   }
   private ensureMessageSearch() {
@@ -1070,6 +1102,7 @@ export class Store {
     projectId: string;
     sessionId: string;
     profileId: string;
+    command?: string;
     title: string;
     cwd: string;
     restartPolicy?: "manual" | "on-unexpected-exit";
@@ -1078,16 +1111,22 @@ export class Store {
     const id = nanoid();
     this.db
       .prepare(
-        `INSERT INTO terminal_sessions(id,session_id,project_id,profile_id,title,cwd,desired_state,state,restart_policy,created_at,updated_at)
-         VALUES(@id,@sessionId,@projectId,@profileId,@title,@cwd,'running','provisioning',@restartPolicy,@now,@now)`
+        `INSERT INTO terminal_sessions(id,session_id,project_id,profile_id,command,title,cwd,desired_state,state,restart_policy,created_at,updated_at)
+         VALUES(@id,@sessionId,@projectId,@profileId,@command,@title,@cwd,'running','provisioning',@restartPolicy,@now,@now)`
       )
-      .run({ ...input, id, restartPolicy: input.restartPolicy ?? "manual", now });
+      .run({
+        ...input,
+        id,
+        command: input.command ?? "",
+        restartPolicy: input.restartPolicy ?? "manual",
+        now
+      });
     return this.getTerminalSession(id)!;
   }
   getTerminalSession(id: string): TerminalSessionRow | undefined {
     return this.db
       .prepare(
-        `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt
+        `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,command,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt
          FROM terminal_sessions WHERE id=?`
       )
       .get(id) as TerminalSessionRow | undefined;
@@ -1098,7 +1137,7 @@ export class Store {
       .get(sessionId) as { id: string } | undefined;
   }
   listTerminalSessions(projectId?: string) {
-    const query = `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt FROM terminal_sessions ${projectId ? "WHERE project_id=?" : ""} ORDER BY updated_at DESC,id DESC`;
+    const query = `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,command,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt FROM terminal_sessions ${projectId ? "WHERE project_id=?" : ""} ORDER BY updated_at DESC,id DESC`;
     return (projectId ? this.db.prepare(query).all(projectId) : this.db.prepare(query).all()) as TerminalSessionRow[];
   }
   updateTerminalSession(id: string, input: Partial<Pick<TerminalSessionRow, "title" | "desiredState" | "state" | "restartPolicy" | "pid" | "lastSeq" | "lastOutputAt" | "lastExitCode" | "lastSignal" | "restartCount" | "restartWindowStartedAt" | "nextRestartAt" | "lastError" | "stoppedAt">>) {
@@ -1788,6 +1827,64 @@ export class Store {
   }
   deletePromptTemplate(id: string) {
     return this.db.prepare("DELETE FROM prompt_templates WHERE id=?").run(id).changes > 0;
+  }
+  private seedDefaultTerminalProfiles() {
+    const count = (
+      this.db.prepare("SELECT COUNT(*) as count FROM terminal_profiles").get() as { count: number }
+    ).count;
+    if (count > 0) return;
+    const now = Date.now();
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO terminal_profiles(id,name,command,sort_order,created_at,updated_at)
+       VALUES(?,?,?,?,?,?)`
+    );
+    const seed = this.db.transaction(() => {
+      for (const profile of DEFAULT_TERMINAL_PROFILES) {
+        insert.run(profile.id, profile.name, profile.command, profile.sortOrder, now, now);
+      }
+    });
+    seed();
+  }
+  listTerminalProfiles(): TerminalProfileRow[] {
+    return this.db
+      .prepare(
+        "SELECT id,name,command,sort_order as sortOrder,created_at as createdAt,updated_at as updatedAt FROM terminal_profiles ORDER BY sort_order,created_at,id"
+      )
+      .all() as TerminalProfileRow[];
+  }
+  getTerminalProfile(id: string) {
+    return this.db
+      .prepare(
+        "SELECT id,name,command,sort_order as sortOrder,created_at as createdAt,updated_at as updatedAt FROM terminal_profiles WHERE id=?"
+      )
+      .get(id) as TerminalProfileRow | undefined;
+  }
+  upsertTerminalProfile(input: {
+    id?: string;
+    name: string;
+    command: string;
+    sortOrder?: number;
+  }) {
+    const id = input.id ?? nanoid();
+    const now = Date.now();
+    const current = this.getTerminalProfile(id);
+    const maxOrder = (
+      this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) as value FROM terminal_profiles").get() as {
+        value: number;
+      }
+    ).value;
+    const sortOrder = input.sortOrder ?? current?.sortOrder ?? maxOrder + 1;
+    this.db
+      .prepare(
+        `INSERT INTO terminal_profiles(id,name,command,sort_order,created_at,updated_at)
+         VALUES(?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name,command=excluded.command,sort_order=excluded.sort_order,updated_at=excluded.updated_at`
+      )
+      .run(id, input.name, input.command, sortOrder, now, now);
+    return this.getTerminalProfile(id)!;
+  }
+  deleteTerminalProfile(id: string) {
+    return this.db.prepare("DELETE FROM terminal_profiles WHERE id=?").run(id).changes > 0;
   }
   getTask(id: string) {
     return this.db

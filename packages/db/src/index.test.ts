@@ -365,6 +365,36 @@ describe("Store", () => {
     expect(store.listSessions(project.id)).toEqual([]);
   });
 
+  it("seeds default terminal profiles and stores custom launch commands", () => {
+    store = new Store(":memory:");
+    expect(store.listTerminalProfiles().map((item) => item.id)).toEqual(["codex", "claude-code", "shell"]);
+    const created = store.upsertTerminalProfile({
+      name: "Grok Claude",
+      command: "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json"
+    });
+    expect(created.command).toContain("IS_SANDBOX=1");
+    const updated = store.upsertTerminalProfile({
+      id: "claude-code",
+      name: "Claude Code",
+      command: "IS_SANDBOX=1 claude --dangerously-skip-permissions"
+    });
+    expect(updated.command).toBe("IS_SANDBOX=1 claude --dangerously-skip-permissions");
+    expect(store.deleteTerminalProfile(created.id)).toBe(true);
+    expect(store.getTerminalProfile(created.id)).toBeUndefined();
+    expect(store.getTerminalProfile("claude-code")?.command).toContain("claude");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = store.createSession({ projectId: project.id, title: "Claude Code", kind: "terminal-chat" });
+    const terminal = store.createTerminalSession({
+      projectId: project.id,
+      sessionId: session.id,
+      profileId: "claude-code",
+      command: "IS_SANDBOX=1 claude --dangerously-skip-permissions",
+      title: session.title,
+      cwd: "/tmp"
+    });
+    expect(store.getTerminalSession(terminal.id)?.command).toBe("IS_SANDBOX=1 claude --dangerously-skip-permissions");
+  });
+
   it("cascades terminal sessions when a session is deleted", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });

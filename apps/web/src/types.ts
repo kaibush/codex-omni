@@ -6,6 +6,14 @@ export type PromptTemplate = {
   createdAt: number;
   updatedAt: number;
 };
+export type TerminalProfile = {
+  id: string;
+  name: string;
+  command: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+};
 export type WorkspaceTask = {
   id: string;
   projectId: string;
@@ -326,6 +334,7 @@ export type TerminalChatSession = {
   sessionId: string;
   projectId: string;
   profileId: string;
+  command?: string;
   title: string;
   cwd: string;
   desiredState: "running" | "stopped";

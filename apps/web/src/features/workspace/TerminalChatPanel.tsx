@@ -27,6 +27,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Settings2,
   Square,
   X,
   ZoomIn,
@@ -55,7 +56,7 @@ import { useTheme } from "@/context/theme-provider";
 import { api, apiUpload, terminalChatWsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { createId } from "@/lib/utils";
-import type { Project, Session, TerminalChatSession } from "@/types";
+import type { Project, Session, TerminalChatSession, TerminalProfile } from "@/types";
 import {
   ATTACHMENT_UPLOAD_DIR,
   attachmentUploadPath,
@@ -68,7 +69,9 @@ import {
 } from "./composer-attachments";
 import { LiveDuration } from "./WorkspaceStatus";
 import { PromptTemplatePicker } from "./PromptTemplatePicker";
+import { TerminalProfileManager, TerminalProfilePicker } from "./TerminalProfilePicker";
 import { joinInsertedTemplate } from "./prompt-templates";
+import { defaultTerminalProfileId } from "./terminal-profiles";
 import {
   COMPOSER_DOCK_CLASS,
   COMPOSER_ICON_BUTTON_CLASS,
@@ -105,7 +108,6 @@ import {
 } from "./terminal-chrome";
 
 type SessionList = { items: TerminalChatSession[] };
-type Profile = { id: string; name: string; executable: string; args: string[] };
 type TerminalHistoryItem = { seq: number; kind: string; data: string; createdAt?: number };
 
 const control = (key: string) => String.fromCharCode(key.toUpperCase().charCodeAt(0) & 31);
@@ -1409,7 +1411,9 @@ export function TerminalChatPanel({
     setFontSize(size);
   };
   const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
-  const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: Profile[] }>("/api/terminal-profiles") });
+  const [manageProfilesOpen, setManageProfilesOpen] = useState(false);
+  const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: TerminalProfile[] }>("/api/terminal-profiles") });
+  const profileItems = profiles.data?.profiles ?? [];
   const create = useMutation({
     mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }),
     onSuccess: (result) => {
@@ -1495,6 +1499,14 @@ export function TerminalChatPanel({
     setSelectedId(item.id);
     onOpenSession?.(item.sessionId);
   };
+  const createFromProfile = (profileId?: string) => {
+    const id = profileId || defaultTerminalProfileId(profileItems);
+    if (!id) {
+      if (!profiles.isLoading) setManageProfilesOpen(true);
+      return;
+    }
+    create.mutate(id);
+  };
   const selectedIndex = selected ? items.findIndex((item) => item.id === selected.id) : -1;
   const renderTabBar = () => (
     <>
@@ -1541,16 +1553,18 @@ export function TerminalChatPanel({
               <DropdownMenuItem disabled>还没有终端对话</DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={create.isPending} onSelect={() => create.mutate("shell")}>
-              <Plus className="size-3.5" />
-              新建终端对话
-            </DropdownMenuItem>
-            {(profiles.data?.profiles ?? []).filter((profile) => profile.id !== "shell").map((profile) => (
-              <DropdownMenuItem key={profile.id} disabled={create.isPending} onSelect={() => create.mutate(profile.id)}>
+            {profileItems.length ? profileItems.map((profile) => (
+              <DropdownMenuItem key={profile.id} disabled={create.isPending} onSelect={() => createFromProfile(profile.id)}>
                 <Plus className="size-3.5" />
                 新建 {profile.name}
               </DropdownMenuItem>
-            ))}
+            )) : (
+              <DropdownMenuItem disabled>还没有启动命令</DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => setManageProfilesOpen(true)}>
+              <Settings2 className="size-3.5" />
+              管理启动命令
+            </DropdownMenuItem>
             {selected ? (
               <>
                 <DropdownMenuSeparator />
@@ -1601,11 +1615,12 @@ export function TerminalChatPanel({
           </div>
         ))}
       </div>
-      <select aria-label="选择终端 profile" className="hidden h-8 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px] sm:block" value="" onChange={(event) => { if (event.target.value) { create.mutate(event.target.value); event.target.value = ""; } }} disabled={create.isPending}>
-        <option value="" disabled>新建</option>
-        {(profiles.data?.profiles ?? []).map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-      </select>
-      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="新建终端对话" onClick={() => create.mutate("shell")} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
+      <TerminalProfilePicker
+        onCreate={createFromProfile}
+        creating={create.isPending}
+        onManage={() => setManageProfilesOpen(true)}
+      />
+      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="新建终端对话" onClick={() => createFromProfile()} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
       <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
     </>
   );
@@ -1627,6 +1642,7 @@ export function TerminalChatPanel({
   ) : null;
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-background">
+      <TerminalProfileManager open={manageProfilesOpen} onOpenChange={setManageProfilesOpen} />
       {visitedItems.length ? (
         visitedItems.map((item) => (
           <div
@@ -1657,7 +1673,7 @@ export function TerminalChatPanel({
               <BotMessageSquare className="mx-auto size-10 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
               <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
-              <Button className="mt-4" size="sm" onClick={() => create.mutate("shell")}><Plus className="size-4" />新建终端对话</Button>
+              <Button className="mt-4" size="sm" onClick={() => createFromProfile()}><Plus className="size-4" />新建终端对话</Button>
             </div>
           </div>
         </>
