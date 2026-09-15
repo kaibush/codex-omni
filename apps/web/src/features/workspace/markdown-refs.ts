@@ -2,12 +2,13 @@ export const FILE_PATH_PATTERN =
   String.raw`(?:\./)?(?:/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,9}|[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|scss|html|vue|py|go|rs|java|kt|rb|php|yml|yaml|toml|xml|svg|png|jpg|jpeg|gif|webp|pdf|sh|bash|zsh|sql|txt|lock|map))`;
 
 export const FILE_REF_PATTERN = new RegExp(
-  String.raw`(^|[^A-Za-z0-9_./-])@?(${FILE_PATH_PATTERN})(?::(\d+))?\b`,
+  String.raw`(^|[^A-Za-z0-9_./%~-])@?(${FILE_PATH_PATTERN})(?::(\d+))?\b`,
   "g"
 );
 
 const FENCE_PATTERN = /```[\s\S]*?```/g;
 const MARKDOWN_LINK_PATTERN = /\[[^\]]*]\([^)]*\)/g;
+const INLINE_CODE_PATTERN = /(`+)([^`]*?)\1/g;
 const SKIP_HREF_PATTERN = /^(?:https?:|mailto:|javascript:|#)/i;
 const INLINE_CODE_FILE_PATTERN = new RegExp("`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+))?`", "g");
 
@@ -39,6 +40,7 @@ const LANGUAGE_EXT: Record<string, string> = {
 };
 
 function protectSegments(text: string, pattern: RegExp, store: string[]) {
+  pattern.lastIndex = 0;
   return text.replace(pattern, (block) => {
     const token = `\0P${store.length}\0`;
     store.push(block);
@@ -76,9 +78,14 @@ function looksLikeHostedPath(path: string) {
   return /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(first);
 }
 
+function looksLikeHomeOrDotRootPath(path: string) {
+  return path.startsWith("~") || path.startsWith("/.");
+}
+
 export function looksLikeProjectFilePath(path: string) {
   const value = sanitizeFileRef(path).replace(/\\/g, "/");
   if (!value || value.includes("://") || value.startsWith("#")) return false;
+  if (looksLikeHomeOrDotRootPath(value)) return false;
   if (looksLikeHostedPath(value)) return false;
   const pattern = new RegExp(`^(?:${FILE_PATH_PATTERN})$`);
   return pattern.test(value);
@@ -98,20 +105,31 @@ function fileRefMarkdown(path: string, line?: string | number | null) {
   return `[${label}](${fileRefHref(path, lineNumber)})`;
 }
 
+function convertInlineCodeFileRefs(block: string) {
+  return block.replace(INLINE_CODE_FILE_PATTERN, (match, path: string, line?: string) =>
+    looksLikeProjectFilePath(path) ? fileRefMarkdown(path, line) : match
+  );
+}
+
 export function linkFileRefs(text: string) {
   const protectedBlocks: string[] = [];
   let working = protectSegments(text, FENCE_PATTERN, protectedBlocks);
   working = protectSegments(working, MARKDOWN_LINK_PATTERN, protectedBlocks);
-  working = working.replace(INLINE_CODE_FILE_PATTERN, (match, path: string, line?: string) =>
-    looksLikeProjectFilePath(path) ? fileRefMarkdown(path, line) : match
-  );
+  working = working.replace(INLINE_CODE_PATTERN, (block) => {
+    const converted = convertInlineCodeFileRefs(block);
+    if (converted !== block) return converted;
+    const token = `\0P${protectedBlocks.length}\0`;
+    protectedBlocks.push(block);
+    return token;
+  });
+  working = protectSegments(working, MARKDOWN_LINK_PATTERN, protectedBlocks);
   working = working.replace(
     FILE_REF_PATTERN,
     (match, prefix: string, path: string, line: string | undefined, offset: number) => {
       const start = offset + prefix.length;
       const before = working.slice(Math.max(0, start - 12), start);
       if (/[a-z]+:\/\/$/i.test(before)) return match;
-      if (!looksLikeProjectFilePath(path)) return match;
+      if (prefix === "~" || !looksLikeProjectFilePath(path)) return match;
       return `${prefix}${fileRefMarkdown(path, line)}`;
     }
   );

@@ -106,6 +106,30 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("src/app.ts:12");
   });
 
+  it("renders markdown lists and bold text in user bubbles", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "user-md",
+          kind: "user",
+          text: [
+            "**终端启动命令**",
+            "",
+            "- 「新建」下拉支持增删改启动命令，可写环境变量和复杂参数，例如 `IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json`",
+            "- 命令通过登录 Shell 执行；留空则开普通 Shell"
+          ].join("\n")
+        }}
+        onOpenFile={() => undefined}
+      />
+    );
+    expect(html).toContain("<strong>");
+    expect(html).toContain("终端启动命令");
+    expect(html).toContain("<li>");
+    expect(html).toContain("~/.claude/settings.grok.json");
+    expect(html).not.toContain("**终端启动命令**");
+    expect(html).not.toContain("codex-file:");
+  });
+
   it("keeps file path links in user bubbles", () => {
     const html = renderToStaticMarkup(
       <EventCard

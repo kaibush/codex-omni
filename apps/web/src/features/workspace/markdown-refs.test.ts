@@ -22,10 +22,34 @@ describe("markdown file refs", () => {
 
   it("turns bare and backtick file paths into custom links", () => {
     const linked = linkFileRefs("see src/app.ts and `apps/web/src/foo.ts`");
-    expect(linked).toContain("[src/app.ts](codex-file:src%2Fapp.ts)");
-    expect(linked).toContain("[apps/web/src/foo.ts](codex-file:apps%2Fweb%2Fsrc%2Ffoo.ts)");
-    expect(linked).not.toContain("`apps/web/src/foo.ts`");
-    expect(linkFileRefs("open @src/app.ts")).toContain("[src/app.ts](codex-file:src%2Fapp.ts)");
+    expect(linked).toBe(
+      "see [src/app.ts](codex-file:src%2Fapp.ts) and [apps/web/src/foo.ts](codex-file:apps%2Fweb%2Fsrc%2Ffoo.ts)"
+    );
+    expect(linkFileRefs("open @src/app.ts")).toBe("open [src/app.ts](codex-file:src%2Fapp.ts)");
+    expect(looksLikeProjectFilePath("/root/project/foo.ts")).toBe(true);
+    expect(linkFileRefs("see /root/project/foo.ts")).toContain(
+      "[/root/project/foo.ts](codex-file:%2Froot%2Fproject%2Ffoo.ts)"
+    );
+  });
+
+  it("does not rewrite home-dir config paths as project files", () => {
+    const command =
+      "IS_SANDBOX=1 claude --dangerously-skip-permissions --settings ~/.claude/settings.grok.json";
+    expect(linkFileRefs(command)).toBe(command);
+    expect(linkFileRefs("例如 `" + command + "`")).toBe("例如 `" + command + "`");
+    expect(linkFileRefs("run `cat src/app.ts`")).toBe("run `cat src/app.ts`");
+    expect(looksLikeProjectFilePath("/.claude/settings.grok.json")).toBe(false);
+    expect(looksLikeProjectFilePath("~/.claude/settings.grok.json")).toBe(false);
+    expect(
+      linkFileRefs(
+        [
+          "**终端启动命令**",
+          "",
+          "- 例如 `" + command + "`",
+          "- 命令通过登录 Shell 执行；留空则开普通 Shell"
+        ].join("\n")
+      )
+    ).not.toContain("codex-file:");
   });
 
   it("does not treat https urls as file refs", () => {
