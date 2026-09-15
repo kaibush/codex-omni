@@ -289,6 +289,64 @@ describe("Store", () => {
     ).toEqual(all.map((message) => message.id));
   });
 
+  it("lists every user question in outline order", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = store.createSession({ projectId: project.id });
+    store.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "第一个问题\n细节",
+      providerId: null,
+      eventType: "user.message",
+      createdAt: 1000
+    });
+    store.addMessage({
+      sessionId: session.id,
+      role: "assistant",
+      content: "回复",
+      providerId: null,
+      eventType: "assistant.message",
+      createdAt: 1001
+    });
+    store.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "第二个问题",
+      providerId: null,
+      eventType: "user.message",
+      createdAt: 1002
+    });
+    const outline = store.listSessionUserOutline(session.id);
+    expect(outline.map((item) => item.title)).toEqual(["第一个问题", "第二个问题"]);
+  });
+
+  it("loads a message page around a target user question", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = store.createSession({ projectId: project.id });
+    const ids: string[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const row = store.addMessage({
+        sessionId: session.id,
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `m${index}`,
+        providerId: null,
+        eventType: "message",
+        createdAt: 1000 + index
+      });
+      ids.push(row.id);
+    }
+    const target = ids[4]!;
+    const page = store.listMessagePageAround(session.id, target, { limit: 5 });
+    expect(page).not.toBeNull();
+    expect(page!.messages.some((message) => message.id === target)).toBe(true);
+    expect(page!.messages).toHaveLength(5);
+    expect(page!.hasMore).toBe(true);
+    expect(page!.nextCursor?.id).toBe(page!.messages[0]!.id);
+    expect(store.listMessagePageAround(session.id, "missing", { limit: 5 })).toBeNull();
+  });
+
   it("deletes a session and names it from the first user message", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });

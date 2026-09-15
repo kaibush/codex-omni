@@ -125,6 +125,20 @@ export type MessagePage = {
   nextCursor: MessageCursor | null;
   hasMore: boolean;
 };
+export type SessionOutlineItem = {
+  id: string;
+  title: string;
+  createdAt: number;
+};
+
+export function outlineTitleFromUserText(content: string) {
+  const line = content
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .find(Boolean);
+  return (line || "消息").slice(0, 48);
+}
 export type RunStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted";
 export type RunRow = {
   id: string;
@@ -1671,6 +1685,73 @@ export class Store {
     const hasMore = rows.length > limit;
     const messages = rows.slice(0, limit).reverse();
     const oldest = messages[0];
+    return {
+      messages,
+      hasMore,
+      nextCursor: hasMore && oldest ? { createdAt: oldest.createdAt, id: oldest.id } : null
+    };
+  }
+  listSessionUserOutline(sessionId: string): SessionOutlineItem[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, content, created_at as createdAt
+         FROM messages
+         WHERE session_id=? AND role='user'
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(sessionId) as Array<{ id: string; content: string; createdAt: number }>;
+    return rows.map((row) => ({
+      id: row.id,
+      title: outlineTitleFromUserText(row.content),
+      createdAt: row.createdAt
+    }));
+  }
+  listMessagePageAround(
+    sessionId: string,
+    aroundId: string,
+    options: { limit?: number } = {}
+  ): MessagePage | null {
+    const target = this.getMessage(aroundId);
+    if (!target || target.sessionId !== sessionId) return null;
+    const limit = Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50)));
+    const params = {
+      sessionId,
+      createdAt: target.createdAt,
+      id: target.id,
+      limit
+    };
+    const older = this.db
+      .prepare(
+        `SELECT id,session_id as sessionId,role,content,provider_id as providerId,event_type as eventType,item_id as itemId,data_json as dataJson,created_at as createdAt,updated_at as updatedAt
+         FROM messages
+         WHERE session_id=@sessionId
+           AND (created_at < @createdAt OR (created_at = @createdAt AND id < @id))
+         ORDER BY created_at DESC, id DESC
+         LIMIT @limit`
+      )
+      .all(params) as MessageRow[];
+    const newer = this.db
+      .prepare(
+        `SELECT id,session_id as sessionId,role,content,provider_id as providerId,event_type as eventType,item_id as itemId,data_json as dataJson,created_at as createdAt,updated_at as updatedAt
+         FROM messages
+         WHERE session_id=@sessionId
+           AND (created_at > @createdAt OR (created_at = @createdAt AND id > @id))
+         ORDER BY created_at ASC, id ASC
+         LIMIT @limit`
+      )
+      .all(params) as MessageRow[];
+    const maxBefore = Math.min(older.length, limit - 1);
+    const maxAfter = Math.min(newer.length, limit - 1);
+    let beforeCount = Math.min(maxBefore, Math.floor((limit - 1) / 2));
+    let afterCount = Math.min(maxAfter, limit - 1 - beforeCount);
+    if (beforeCount + afterCount < limit - 1) {
+      beforeCount = Math.min(maxBefore, limit - 1 - afterCount);
+    }
+    const olderWindow = older.slice(0, beforeCount).reverse();
+    const newerWindow = newer.slice(0, afterCount);
+    const messages = [...olderWindow, target, ...newerWindow];
+    const oldest = messages[0];
+    const hasMore = older.length > beforeCount;
     return {
       messages,
       hasMore,

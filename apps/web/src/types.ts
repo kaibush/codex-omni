@@ -155,6 +155,11 @@ export type Message = {
   updatedAt: number;
 };
 export type MessageCursor = Pick<Message, "createdAt" | "id">;
+export type SessionOutlineItem = {
+  id: string;
+  title: string;
+  createdAt: number;
+};
 export type ThreadGoalStatus =
   | "active"
   | "paused"

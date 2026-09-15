@@ -78,6 +78,7 @@ import type {
   RuntimeInfo,
   Session,
   SessionDetailPage,
+  SessionOutlineItem,
   SessionSnapshot,
   TerminalChatSession,
   ThreadGoal,
@@ -87,6 +88,10 @@ import { ApprovalAuditDialog } from "@/features/workspace/ApprovalAuditDialog";
 import { CommandPalette } from "@/features/workspace/CommandPalette";
 import type { PaletteAction } from "@/features/workspace/command-palette";
 import { quoteMarkdown, sanitizeFileRef } from "@/features/workspace/markdown-refs";
+import {
+  findTimelineItemByMessageId,
+  mergeSessionOutline
+} from "@/features/workspace/timeline-outline";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
@@ -474,6 +479,12 @@ export function Workspace() {
   const detail = useQuery({
     queryKey: ["session", sessionId],
     queryFn: () => api<SessionDetailPage>(`/api/sessions/${sessionId}?limit=${SESSION_PAGE_SIZE}`),
+    enabled: Boolean(sessionId),
+    refetchOnWindowFocus: false
+  });
+  const outlineQuery = useQuery({
+    queryKey: ["session-outline", sessionId],
+    queryFn: () => api<{ items: SessionOutlineItem[] }>(`/api/sessions/${sessionId}/outline`),
     enabled: Boolean(sessionId),
     refetchOnWindowFocus: false
   });
@@ -1018,6 +1029,7 @@ export function Workspace() {
           })
         );
         void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+        void qc.invalidateQueries({ queryKey: ["session-outline", sessionId] });
         return;
       }
       if (event.type === "run.reconnecting") {
@@ -1312,6 +1324,49 @@ export function Workspace() {
       }
     }
   }, [hasOlderMessages, historyCursor, sessionId]);
+  const jumpToOutlineMessage = useCallback(
+    async (messageId: string) => {
+      if (!sessionId || !messageId) return;
+      const loaded = findTimelineItemByMessageId(eventsRef.current, messageId);
+      stickToBottom.current = false;
+      historyExpanded.current = true;
+      setFollowingLive(false);
+      setHighlightMessageId(loaded?.id ?? messageId);
+      if (loaded) {
+        setTimelineLockId(loaded.id);
+        return;
+      }
+      const requestId = ++historyRequestId.current;
+      historyLoadingRef.current = true;
+      setHistoryLoading(true);
+      try {
+        const page = await api<SessionDetailPage>(
+          `/api/sessions/${sessionId}?limit=${SESSION_PAGE_SIZE}&aroundId=${encodeURIComponent(messageId)}`
+        );
+        if (currentSessionId.current !== sessionId || historyRequestId.current !== requestId) return;
+        const next = page.messages
+          .filter(isVisibleTimelineMessage)
+          .map((message) => fromMessage(message));
+        const target = findTimelineItemByMessageId(next, messageId);
+        setEvents(next);
+        setHistoryCursor(page.nextCursor);
+        setHasOlderMessages(page.hasMore);
+        setTimelineLockId(target?.id ?? messageId);
+        setHighlightMessageId(target?.id ?? messageId);
+      } catch (error) {
+        if (currentSessionId.current === sessionId && historyRequestId.current === requestId) {
+          setTimelineLockId(undefined);
+          setSendNotice(error instanceof Error ? error.message : "定位消息失败");
+        }
+      } finally {
+        if (historyRequestId.current === requestId) {
+          historyLoadingRef.current = false;
+          if (currentSessionId.current === sessionId) setHistoryLoading(false);
+        }
+      }
+    },
+    [sessionId]
+  );
   const loadFullMessage = useCallback(async (item: TimelineItem) => {
     if (!item.messageId) return;
     try {
@@ -2387,6 +2442,8 @@ export function Workspace() {
               threadGoal={detail.data?.threadGoal ?? null}
               clearingGoal={clearingGoal}
               onClearThreadGoal={() => void clearThreadGoal()}
+              outlineItems={mergeSessionOutline(outlineQuery.data?.items ?? [], events)}
+              onJumpOutline={(id) => void jumpToOutlineMessage(id)}
             />}
             {workspaceView !== "terminal-chat" && <WorkspaceComposer
               workspaceView={workspaceView}

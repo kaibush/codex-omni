@@ -2001,26 +2001,35 @@ button.user-attachment-path {
   color: var(--foreground);
 }
 .timeline-outline-toggle {
-  display: none;
+  display: inline-flex;
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  z-index: 30;
+  z-index: 32;
   border-radius: 0.5rem;
   background: var(--card);
 }
 .timeline-outline-toggle.is-open {
   background: var(--muted);
 }
+.timeline-outline-scrim {
+  display: none;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+}
 .timeline-outline {
   display: none;
   position: absolute;
   top: 3.25rem;
   right: 0.75rem;
-  z-index: 29;
+  z-index: 31;
   width: 13.5rem;
   max-height: min(28rem, calc(100% - 4.25rem));
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: color-mix(in oklab, var(--card) 96%, transparent);
@@ -2033,12 +2042,44 @@ button.user-attachment-path {
   flex-direction: column;
   gap: 0.15rem;
 }
-@media (min-width: 768px) {
+.timeline-outline-heading {
+  margin: 0 0 0.15rem;
+  padding: 0.1rem 0.4rem 0.3rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.chat-pane:has(.timeline-outline.is-open) .timeline-view-float {
+  display: none;
+}
+@media (max-width: 767px) {
   .timeline-outline-toggle {
-    display: inline-flex;
+    top: 0.5rem;
+    right: 0.5rem;
   }
-  .chat-pane:has(.timeline-outline.is-open) .timeline-view-float {
-    display: none;
+  .timeline-outline-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    border: 0;
+    background: color-mix(in oklab, var(--background) 45%, transparent);
+  }
+  .timeline-outline {
+    top: 3.1rem;
+    right: 0.5rem;
+    left: 0.5rem;
+    width: auto;
+    max-height: min(70dvh, calc(100% - 3.75rem));
+  }
+  .timeline-outline-heading {
+    margin: 0 0 0.2rem;
+    padding: 0.15rem 0.4rem 0.35rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.7rem;
+  }
+  .chat-pane:has(.timeline-outline-toggle) .chat-content-width {
+    padding-top: 2.75rem;
   }
 }
 
@@ -2057,6 +2098,13 @@ button.user-attachment-path {
 .timeline-outline button.is-active {
   background: var(--muted);
   color: var(--foreground);
+}
+@media (max-width: 767px) {
+  .timeline-outline button {
+    min-height: 2.25rem;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.82rem;
+  }
 }
 .timeline-outline-index {
   display: grid;

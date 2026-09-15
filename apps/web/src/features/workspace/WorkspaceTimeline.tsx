@@ -27,7 +27,7 @@ import {
 } from "@/lib/live-follow";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import { isThreadGoalLocked, type ThreadGoal } from "@/lib/thread-goal";
-import type { Session, TimelineItem } from "@/types";
+import type { Session, SessionOutlineItem, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
 import { ThreadGoalBanner } from "./ThreadGoalBanner";
 import { VirtualTimeline } from "./VirtualTimeline";
@@ -130,7 +130,9 @@ export function WorkspaceTimeline({
   loadFullMessage,
   threadGoal,
   clearingGoal,
-  onClearThreadGoal
+  onClearThreadGoal,
+  outlineItems,
+  onJumpOutline
 }: {
   workspaceView: "chat" | "files" | "git" | "terminal" | "terminal-chat";
   messageHits: Array<{ projectId: string; sessionId: string; messageId: string }>;
@@ -189,6 +191,8 @@ export function WorkspaceTimeline({
   threadGoal?: ThreadGoal | null;
   clearingGoal?: boolean;
   onClearThreadGoal?: () => void;
+  outlineItems: SessionOutlineItem[];
+  onJumpOutline: (id: string) => void;
 }) {
   const detail = { isError: detailError, refetch: refetchDetail };
   const timelineView: TimelineView = isTimelineView(workspaceSettings.timelineView)
@@ -206,7 +210,6 @@ export function WorkspaceTimeline({
       showReasoning ? displayEvents : displayEvents.filter((item) => item.kind !== "reasoning"),
     [displayEvents, showReasoning]
   );
-  const outlineEvents = timelineItems;
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
   const pointerScroll = useRef<{
@@ -316,9 +319,9 @@ export function WorkspaceTimeline({
         </div>
       ) : null}
       <TimelineOutline
-        items={outlineEvents}
+        items={outlineItems}
         activeId={highlightMessageId}
-        onJump={(id) => setHighlightMessageId(id)}
+        onJump={onJumpOutline}
       />
       {isThreadGoalLocked(threadGoal) && threadGoal && onClearThreadGoal ? (
         <ThreadGoalBanner
@@ -566,7 +569,7 @@ export function WorkspaceTimeline({
                       lite={meta.lite}
                       liteHeight={meta.height}
                       onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
-                      highlighted={highlightMessageId === item.id}
+                      highlighted={highlightMessageId === item.id || highlightMessageId === item.messageId}
                       defaultOpen={
                         timelineView === "expanded" ||
                         (item.kind !== "reasoning" &&

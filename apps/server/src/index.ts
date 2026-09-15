@@ -1013,7 +1013,8 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     .object({
       limit: z.coerce.number().int().min(1).max(200).default(50),
       beforeCreatedAt: z.coerce.number().int().optional(),
-      beforeId: z.string().min(1).optional()
+      beforeId: z.string().min(1).optional(),
+      aroundId: z.string().min(1).optional()
     })
     .superRefine((value, context) => {
       if ((value.beforeCreatedAt == null) !== (value.beforeId == null)) {
@@ -1022,11 +1023,17 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
           message: "beforeCreatedAt and beforeId must be provided together"
         });
       }
+      if (value.aroundId && (value.beforeCreatedAt != null || value.beforeId != null)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "aroundId cannot be combined with before cursor"
+        });
+      }
     })
     .parse(req.query ?? {});
   // Pagination should only read SQLite. Re-walking Codex rollout JSONL on every
   // "load older messages" request is what made history scrolling feel stuck.
-  if (provider && session.threadId && query.beforeCreatedAt == null) {
+  if (provider && session.threadId && query.beforeCreatedAt == null && !query.aroundId) {
     try {
       backfillSessionRolloutTools({
         store,
@@ -1039,12 +1046,15 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
       // Rollout files are optional; keep the session readable if Codex home is missing.
     }
   }
-  const page = store.listMessagePage(id, {
-    limit: query.limit,
-    ...(query.beforeCreatedAt != null && query.beforeId
-      ? { before: { createdAt: query.beforeCreatedAt, id: query.beforeId } }
-      : {})
-  });
+  const page = query.aroundId
+    ? store.listMessagePageAround(id, query.aroundId, { limit: query.limit })
+    : store.listMessagePage(id, {
+        limit: query.limit,
+        ...(query.beforeCreatedAt != null && query.beforeId
+          ? { before: { createdAt: query.beforeCreatedAt, id: query.beforeId } }
+          : {})
+      });
+  if (!page) return reply.code(404).send({ error: "Message not found" });
   const latestRun = store.getLatestRunMessage(id);
   return {
     session,
@@ -1053,6 +1063,11 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     latestRun: latestRun ? compactMessageForClient(latestRun) : null,
     threadGoal: await sessionThreadGoal(session)
   };
+});
+app.get("/api/sessions/:id/outline", { preHandler: auth }, async (req, reply) => {
+  const session = store.getSession(routeId(req));
+  if (!session) return reply.code(404).send({ error: "Session not found" });
+  return { items: store.listSessionUserOutline(session.id) };
 });
 app.put("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
