@@ -170,8 +170,7 @@ function isCompletedTurnResidue(item: TimelineItem) {
 function historicalHasCompletedTurn(items: TimelineItem[]) {
   const lastUser = findLastIndex(items, (item) => item.kind === "user");
   const lastAssistant = findLastIndex(items, isCompletedAssistant);
-  if (lastAssistant <= lastUser) return false;
-  return items.slice(lastUser + 1, lastAssistant).some(isCompletedTurnResidue);
+  return lastAssistant > lastUser;
 }
 
 export function hideSupersededStreamErrors(items: TimelineItem[]): TimelineItem[] {
@@ -419,26 +418,26 @@ export function mergeSessionTimeline(input: {
       : []
   );
   const extraUserIndex = input.current.findIndex(
-    (item) => item.kind === "user" && !historicalIds.has(item.id)
+    (item, index) =>
+      item.kind === "user" &&
+      !historicalIds.has(item.id) &&
+      (lastHistoricalIndex < 0 || index > lastHistoricalIndex)
   );
-  const liveStillStreaming = input.current.some(
-    (item) => item.streaming && (item.kind === "assistant" || item.kind === "tool")
-  );
-  const persistCompletedTurn = !liveStillStreaming && historicalHasCompletedTurn(input.historical);
+  const persistCompletedTurn = historicalHasCompletedTurn(input.historical);
   const inFlight = extras.filter((item) => {
     if (olderIds.has(item.id)) return false;
     if (isStaleInFlightError(item, input.current, newestCreatedAt)) return false;
-    if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
-    if (item.kind === "approval" && (!item.data?.status || item.data.status === "pending")) {
-      return true;
-    }
     // After the latest page already contains a finished reply, leftover live
     // thinking/tool cards are almost always the same turn with different ids
     // (rollout backfill vs websocket). Appending them after the assistant is
     // what made the timeline look shuffled until a full refresh.
-    if (persistCompletedTurn && isCompletedTurnResidue(item) && !item.streaming) {
+    if (persistCompletedTurn && isCompletedTurnResidue(item)) {
       const liveIndex = input.current.findIndex((entry) => entry.id === item.id);
       if (extraUserIndex < 0 || liveIndex < extraUserIndex) return false;
+    }
+    if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
+    if (item.kind === "approval" && (!item.data?.status || item.data.status === "pending")) {
+      return true;
     }
     if (afterHistoricalIds.has(item.id)) return true;
     return (item.createdAt ?? 0) > newestCreatedAt;

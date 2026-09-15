@@ -10,9 +10,11 @@ import {
   persistExpandedProjectIds,
   SIDEBAR_PROJECT_EXPANDED_KEY,
   timelineMessageId,
+  upsert,
   toggleExpandedProjectId,
   type QueuedCommand
 } from "./workspace-model";
+import type { TimelineItem } from "@/types";
 
 const command = (id: number, size: number): QueuedCommand => ({
   id: String(id),
@@ -72,6 +74,20 @@ describe("timeline message ids", () => {
       updatedAt: 2
     };
     expect(timelineMessageId(message)).toBe("assistant-run-1-s1:m1");
+  });
+});
+
+describe("timeline upsert", () => {
+  it("inserts timestamped late events at their original position", () => {
+    const current: TimelineItem[] = [
+      { id: "user", kind: "user", createdAt: 10 },
+      { id: "assistant", kind: "assistant", createdAt: 40 }
+    ];
+    expect(
+      upsert(current, "tool", { kind: "tool", createdAt: 20, data: { command: "ls" } }).map(
+        (item) => item.id
+      )
+    ).toEqual(["user", "tool", "assistant"]);
   });
 });
 

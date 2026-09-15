@@ -887,6 +887,13 @@ export function Workspace() {
 
       if (event.type === "session.snapshot") {
         const snapshot = payload as SessionSnapshot;
+        settledTurn = Boolean(
+          (snapshot.run && snapshot.run.status !== "running") ||
+            (!snapshot.run &&
+              snapshot.session?.status &&
+              snapshot.session.status !== "idle" &&
+              snapshot.session.status !== "running")
+        );
         if (snapshot.session) {
           qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
             current?.map((item) =>
@@ -1192,7 +1199,8 @@ export function Workspace() {
             data,
             text: output,
             providerId: providerIdRef.current,
-            streaming: event.type === "tool.started" || rest.status === "in_progress"
+            streaming: event.type === "tool.started" || rest.status === "in_progress",
+            ...(typeof payload.createdAt === "number" ? { createdAt: payload.createdAt } : {})
           });
         }
         if (event.type === "file.change")

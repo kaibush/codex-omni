@@ -1401,7 +1401,8 @@ export class RunManager {
           type: "tool.output",
           payload: {
             ...rolloutToolPayload(change.event),
-            itemId: change.itemId.slice(separator + 1)
+            itemId: change.itemId.slice(separator + 1),
+            ...(change.event.timestamp != null ? { createdAt: change.event.timestamp } : {})
           }
         });
       }

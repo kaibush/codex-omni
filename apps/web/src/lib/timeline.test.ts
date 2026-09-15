@@ -74,6 +74,7 @@ describe("mergeSessionTimeline", () => {
           item("assistant-1", 40, { kind: "assistant", text: "冷却区已经能同步。" })
         ],
         current: [
+          item("old-user", 1, { kind: "user", text: "earlier" }),
           item("user-1", 10, { kind: "user", text: "go" }),
           item("think-1", 15, { kind: "reasoning", text: "先改去重" }),
           item("tool-live-1", 30, { kind: "tool", data: { command: "python3" } }),
@@ -85,6 +86,27 @@ describe("mergeSessionTimeline", () => {
         historyExpanded: false
       }).map((entry) => entry.id)
     ).toEqual(["user-1", "tool-jsonl-1", "tool-jsonl-2", "assistant-1"]);
+  });
+
+  it("drops streaming leftover tools after a persisted completed reply", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 40, { kind: "assistant", text: "done" })
+        ],
+        current: [
+          item("user-1", 10, { kind: "user", text: "go" }),
+          item("assistant-1", 40, { kind: "assistant", text: "done" }),
+          item("tool-late", 50, {
+            kind: "tool",
+            streaming: true,
+            data: { command: "late rollout call" }
+          })
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user-1", "assistant-1"]);
   });
 
   it("keeps live activity extras while the assistant is still streaming", () => {

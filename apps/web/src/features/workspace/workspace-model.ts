@@ -193,5 +193,12 @@ export function upsert(items: TimelineItem[], id: string, next: Omit<TimelineIte
       return createdAt == null ? { ...x, ...next, id } : { ...x, ...next, id, createdAt };
     });
   }
-  return [...items, { ...next, id, createdAt: next.createdAt ?? Date.now() }];
+  const createdAt = next.createdAt ?? Date.now();
+  const entry = { ...next, id, createdAt };
+  // Rollout backfill events can arrive after the assistant reply even though
+  // their original timestamps place them earlier in the turn.
+  if (next.createdAt == null) return [...items, entry];
+  const insertAt = items.findIndex((item) => (item.createdAt ?? 0) > createdAt);
+  if (insertAt < 0) return [...items, entry];
+  return [...items.slice(0, insertAt), entry, ...items.slice(insertAt)];
 }
