@@ -296,3 +296,6 @@ export {
   isTerminalBridgeEvent,
   workerExitError
 } from "./worker-stream.js";
+
+export { bundledCodexCliPath, bundledCodexVersions } from "./codex-versions.js";
+export type { BundledCodexVersions } from "./codex-versions.js";

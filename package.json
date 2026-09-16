@@ -13,7 +13,7 @@
     "test": "pnpm -r test",
     "test:e2e": "playwright test",
     "lint": "eslint .",
-    "ci:check": "pnpm typecheck && pnpm test && pnpm lint",
+    "ci:check": "pnpm typecheck && pnpm test && pnpm lint && node scripts/check-codex-sdk.mjs",
     "format": "prettier --write .",
     "user:create": "pnpm --filter @codex-omni/server user:create",
     "start": "pnpm --filter @codex-omni/server start",

@@ -31,3 +31,5 @@ jobs:
         run: pnpm test
       - name: Lint
         run: pnpm lint
+      - name: Check Codex SDK pin
+        run: node scripts/check-codex-sdk.mjs

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Blocks,
   BookOpen,
   Clock3,
@@ -270,6 +271,41 @@ export function SystemSettingsPage() {
                       value={runtimeQuery.data?.host.hostname || "未读取"}
                     />
                   </SettingsFormGrid>
+                </SettingsCard>
+                <SettingsCard
+                  title="Codex 运行时"
+                  description="对话使用工作台内置的 Codex SDK 和 CLI。PATH 上的 codex 只做对照，不会接管当前对话。"
+                >
+                  <SettingsFormGrid>
+                    <SettingsInfoRow
+                      label="内置 SDK"
+                      value={runtimeQuery.data?.codex?.sdkVersion || "未读取"}
+                    />
+                    <SettingsInfoRow
+                      label="内置 CLI"
+                      value={runtimeQuery.data?.codex?.bundledCliVersion || "未读取"}
+                    />
+                    <SettingsInfoRow
+                      label="PATH codex"
+                      value={runtimeQuery.data?.codex?.pathCliVersion || "未安装"}
+                    />
+                    <SettingsInfoRow
+                      label="npm 最新稳定版"
+                      value={runtimeQuery.data?.codex?.npmLatestVersion || "未读取"}
+                    />
+                  </SettingsFormGrid>
+                  {runtimeQuery.data?.codex?.warnings.length ? (
+                    <div className="mt-6 rounded-lg border bg-muted/40 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                        <div className="space-y-2 text-sm leading-6">
+                          {runtimeQuery.data.codex.warnings.map((warning) => (
+                            <p key={warning}>{warning}</p>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </SettingsCard>
                 <SettingsCard
                   title="主机资源"

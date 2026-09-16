@@ -389,8 +389,18 @@ export type HostInfo = {
   storage: HostResource & { path: string };
 };
 
+export type CodexRuntimeInfo = {
+  sdkVersion: string;
+  bundledCliVersion: string;
+  pathCliVersion: string | null;
+  npmLatestVersion: string | null;
+  npmLatestCheckedAt: string | null;
+  warnings: string[];
+};
+
 export type RuntimeInfo = {
   defaultCodexHome: string;
   providersRoot: string;
   host: HostInfo;
+  codex?: CodexRuntimeInfo;
 };

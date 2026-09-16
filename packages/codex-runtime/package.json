@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@codex-omni/protocol": "workspace:*",
-    "@openai/codex-sdk": "0.153.4",
+    "@openai/codex-sdk": "0.154.0",
     "nanoid": "^5.1.5",
     "zod": "^3.25.76"
   },

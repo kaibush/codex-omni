@@ -54,6 +54,7 @@ import { backfillSessionRolloutTools } from "./session-rollout.js";
 import { clearThreadGoal, readThreadGoal } from "./thread-goal.js";
 import { searchWorkspace } from "./workspace-search.js";
 import { collectHostInfo } from "./host-info.js";
+import { collectCodexRuntimeInfo } from "./codex-runtime-info.js";
 import { UpdateCheckService } from "./update-check.js";
 import { resolveStaticDir } from "./static-dir.js";
 import { resolveDatabasePath } from "./database-path.js";
@@ -560,7 +561,8 @@ app.get("/api/providers/:id/models", { preHandler: auth }, async (req, reply) =>
 app.get("/api/runtime", { preHandler: auth }, async () => ({
   defaultCodexHome,
   providersRoot,
-  host: await collectHostInfo(path.dirname(dataPath))
+  host: await collectHostInfo(path.dirname(dataPath)),
+  codex: await collectCodexRuntimeInfo()
 }));
 app.get("/api/system/version", { preHandler: auth }, async () => updateCheck.snapshot());
 app.post("/api/system/update/check", { preHandler: auth }, async () => updateCheck.check());
