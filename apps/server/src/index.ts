@@ -18,7 +18,12 @@ import {
 } from "@codex-omni/protocol";
 import { assertExternalCodexHome, resolveProviderHome } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
-import { browseDirectory } from "./filesystem.js";
+import {
+  browseDirectory,
+  readFilesystemBinaryFile,
+  readFilesystemTextFile,
+  statFilesystemFile
+} from "./filesystem.js";
 import {
   buildApiKeyProviderFiles,
   parseMcpServers,
@@ -599,6 +604,29 @@ app.get("/api/projects", { preHandler: auth }, async () => store.listProjects())
 app.get("/api/filesystem/browse", { preHandler: auth }, async (req) => {
   const pathValue = z.string().optional().parse(queryValue(req, "path"));
   return browseDirectory(pathValue);
+});
+app.get("/api/filesystem/file", { preHandler: auth }, async (req) => {
+  const pathValue = z.string().min(1).parse(queryValue(req, "path"));
+  return readFilesystemTextFile(pathValue);
+});
+app.get("/api/filesystem/file/meta", { preHandler: auth }, async (req) => {
+  const pathValue = z.string().min(1).parse(queryValue(req, "path"));
+  return statFilesystemFile(pathValue);
+});
+app.get("/api/filesystem/file/download", { preHandler: auth }, async (req, reply) => {
+  const pathValue = z.string().min(1).parse(queryValue(req, "path"));
+  const inline = queryValue(req, "inline") === "1" || queryValue(req, "inline") === "true";
+  const file = await readFilesystemBinaryFile(pathValue);
+  reply.header("content-type", file.contentType);
+  reply.header(
+    "content-disposition",
+    `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`
+  );
+  if (inline && file.contentType.startsWith("image/")) {
+    reply.header("cache-control", "no-store");
+  }
+  reply.header("x-file-path", encodeURIComponent(file.path));
+  return reply.send(file.buffer);
 });
 app.get("/api/projects/:id/files", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));

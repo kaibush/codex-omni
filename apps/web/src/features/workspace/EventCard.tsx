@@ -73,7 +73,7 @@ import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
 import { VirtualLog } from "./VirtualLog";
 import { fileChangeEntries } from "./file-change";
-import { toProjectRelativePath } from "./file-workspace";
+import { resolveOpenableFilePath } from "./file-workspace";
 import {
   downloadTextFile,
   linkFileRefs,
@@ -445,31 +445,48 @@ function CollabCard({
 function projectImageSrc(
   projectId: string | undefined,
   path: string,
-  projectPath?: string | undefined
+  projectPath?: string | undefined,
+  projectDisplayPath?: string | undefined
 ) {
-  if (!projectId || !path) return "";
-  const relative = toProjectRelativePath(path, projectPath);
-  if (!relative) return "";
-  return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(relative)}&inline=1`;
+  if (!path) return "";
+  const opened = resolveOpenableFilePath(path, projectPath, projectDisplayPath);
+  if (!opened) return "";
+  if (!opened.external && projectId) {
+    return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(opened.path)}&inline=1`;
+  }
+  if (opened.external) {
+    return `/api/filesystem/file/download?path=${encodeURIComponent(opened.path)}&inline=1`;
+  }
+  return "";
+}
+
+function openableFilePath(
+  path: string,
+  projectPath?: string | undefined,
+  projectDisplayPath?: string | undefined
+) {
+  return resolveOpenableFilePath(path, projectPath, projectDisplayPath)?.path ?? "";
 }
 
 function UserAttachmentList({
   attachments,
   projectId,
   projectPath,
+  projectDisplayPath,
   onOpenFile
 }: {
   attachments: QueuedAttachmentMeta[];
   projectId?: string | undefined;
   projectPath?: string | undefined;
+  projectDisplayPath?: string | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
 }) {
   if (!attachments.length) return null;
   return (
     <div className="user-attachments">
       {attachments.map((item) => {
-        const relative = toProjectRelativePath(item.path, projectPath) ?? item.path;
-        const src = item.kind === "image" ? projectImageSrc(projectId, item.path, projectPath) : "";
+        const relative = openableFilePath(item.path, projectPath, projectDisplayPath) || item.path;
+        const src = item.kind === "image" ? projectImageSrc(projectId, item.path, projectPath, projectDisplayPath) : "";
         return (
           <figure key={`${item.kind}:${item.path}`} className="user-attachment">
             {src ? <BoundedImage src={src} alt={item.name} className="notice-image" /> : null}
@@ -479,7 +496,7 @@ function UserAttachmentList({
                   type="button"
                   className="user-attachment-path"
                   onClick={() => {
-                    if (relative.trim()) onOpenFile(relative, null);
+                    if (item.path.trim()) onOpenFile(item.path, null);
                   }}
                 >
                   {relative}
@@ -499,17 +516,19 @@ function ViewImageCard({
   path,
   projectId,
   projectPath,
+  projectDisplayPath,
   onOpenFile
 }: {
   path: string;
   projectId?: string | undefined;
   projectPath?: string | undefined;
+  projectDisplayPath?: string | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
 }) {
   const [failed, setFailed] = useState(false);
-  const src = projectImageSrc(projectId, path, projectPath);
+  const src = projectImageSrc(projectId, path, projectPath, projectDisplayPath);
   const name = path.split("/").filter(Boolean).at(-1) || path;
-  const openPath = toProjectRelativePath(path, projectPath) ?? path;
+  const openPath = openableFilePath(path, projectPath, projectDisplayPath);
   return (
     <div className="plan-card">
       {src && !failed ? (
@@ -527,7 +546,7 @@ function ViewImageCard({
           className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs disabled:opacity-50"
           disabled={!openPath.trim()}
           onClick={() => {
-            if (openPath.trim()) onOpenFile(openPath, null);
+            if (openPath.trim()) onOpenFile(path, null);
           }}
         >
           在文件中打开
@@ -652,6 +671,7 @@ type EventCardProps = {
   highlighted?: boolean | undefined;
   projectId?: string | undefined;
   projectPath?: string | undefined;
+  projectDisplayPath?: string | undefined;
   onApproval?: (requestId: string, decision: "accept" | "acceptForSession" | "decline") => void;
   onFork?: (() => void) | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
@@ -688,6 +708,7 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     prev.providerName === next.providerName &&
     prev.projectId === next.projectId &&
     prev.projectPath === next.projectPath &&
+    prev.projectDisplayPath === next.projectDisplayPath &&
     sameHandler(prev.onApproval, next.onApproval) &&
     sameHandler(prev.onFork, next.onFork) &&
     sameHandler(prev.onOpenFile, next.onOpenFile) &&
@@ -713,6 +734,7 @@ function EventCardComponent({
   highlighted = false,
   projectId,
   projectPath,
+  projectDisplayPath,
   onApproval,
   onFork,
   onOpenFile,
@@ -846,6 +868,7 @@ function EventCardComponent({
             attachments={userAttachments}
             projectId={projectId}
             projectPath={projectPath}
+            projectDisplayPath={projectDisplayPath}
             onOpenFile={onOpenFile}
           />
         </div>
@@ -1072,6 +1095,7 @@ function EventCardComponent({
             path={path}
             projectId={projectId}
             projectPath={projectPath}
+            projectDisplayPath={projectDisplayPath}
             onOpenFile={onOpenFile}
           />
         ) : null}

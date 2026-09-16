@@ -7,7 +7,10 @@ import {
   browseDirectory,
   isPathInside,
   parentDirectory,
-  parseAllowedRoots
+  parseAllowedRoots,
+  readFilesystemBinaryFile,
+  readFilesystemTextFile,
+  statFilesystemFile
 } from "./filesystem.js";
 
 const temps: string[] = [];
@@ -53,5 +56,52 @@ describe("filesystem helpers", () => {
     expect(result.parent).toBe(null);
 
     await expect(browseDirectory("/tmp", [root])).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+
+describe("filesystem file reads", () => {
+  it("reads text and binary files inside allowed roots as read-only", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-omni-fs-file-"));
+    temps.push(root);
+    const note = path.join(root, "note.txt");
+    const image = path.join(root, "shot.png");
+    await writeFile(note, "hello outside\n");
+    await writeFile(image, Buffer.from([137, 80, 78, 71]));
+
+    const text = await readFilesystemTextFile(note, [root]);
+    expect(text).toMatchObject({
+      name: "note.txt",
+      content: "hello outside\n",
+      writable: false
+    });
+    expect(text.path.endsWith("note.txt")).toBe(true);
+
+    const meta = await statFilesystemFile(note, [root]);
+    expect(meta).toMatchObject({ name: "note.txt", type: "file", text: true, writable: false });
+
+    const binary = await readFilesystemBinaryFile(image, [root]);
+    expect(binary.name).toBe("shot.png");
+    expect(binary.contentType).toBe("image/png");
+    expect(binary.buffer.equals(Buffer.from([137, 80, 78, 71]))).toBe(true);
+  });
+
+  it("rejects files outside allowed roots", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-omni-fs-inside-"));
+    const outside = await mkdtemp(path.join(os.tmpdir(), "codex-omni-fs-outside-"));
+    temps.push(root, outside);
+    const secret = path.join(outside, "secret.txt");
+    await writeFile(secret, "nope\n");
+    await expect(readFilesystemTextFile(secret, [root])).rejects.toMatchObject({ statusCode: 403 });
+    await expect(statFilesystemFile(secret, [root])).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("rejects relative paths even when they resolve inside allowed roots", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "codex-omni-fs-rel-"));
+    temps.push(root);
+    const note = path.join(root, "note.txt");
+    await writeFile(note, "hello\n");
+    await expect(readFilesystemTextFile("note.txt", [root])).rejects.toMatchObject({ statusCode: 400 });
+    await expect(statFilesystemFile("./note.txt", [root])).rejects.toMatchObject({ statusCode: 400 });
   });
 });

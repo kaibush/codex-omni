@@ -76,6 +76,22 @@ describe("markdown file refs", () => {
       path: "apps/web/src/foo.ts",
       line: 18
     });
+    expect(parseProjectFileHref("apps/web/src/foo.ts:12:5")).toEqual({
+      path: "apps/web/src/foo.ts",
+      line: 12
+    });
+    expect(parseProjectFileHref("apps/web/src/foo.ts#L18")).toEqual({
+      path: "apps/web/src/foo.ts",
+      line: 18
+    });
+    expect(parseProjectFileHref("/apps/web/src/foo.ts")).toEqual({
+      path: "/apps/web/src/foo.ts",
+      line: null
+    });
+    expect(parseProjectFileHref("/tmp/gamepad.png")).toEqual({
+      path: "/tmp/gamepad.png",
+      line: null
+    });
     expect(parseProjectFileHref("codex-file:src%2Fapp.ts?line=12")).toEqual({
       path: "src/app.ts",
       line: 12

@@ -1,8 +1,10 @@
+import { parseFileLocation } from "./file-workspace";
+
 export const FILE_PATH_PATTERN =
   String.raw`(?:\./)?(?:/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,9}|[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|scss|html|vue|py|go|rs|java|kt|rb|php|yml|yaml|toml|xml|svg|png|jpg|jpeg|gif|webp|pdf|sh|bash|zsh|sql|txt|lock|map))`;
 
 export const FILE_REF_PATTERN = new RegExp(
-  String.raw`(^|[^A-Za-z0-9_./%~-])@?(${FILE_PATH_PATTERN})(?::(\d+))?\b`,
+  String.raw`(^|[^A-Za-z0-9_./%~-])@?(${FILE_PATH_PATTERN})(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?)?\b`,
   "g"
 );
 
@@ -10,7 +12,7 @@ const FENCE_PATTERN = /```[\s\S]*?```/g;
 const MARKDOWN_LINK_PATTERN = /\[[^\]]*]\([^)]*\)/g;
 const INLINE_CODE_PATTERN = /(`+)([^`]*?)\1/g;
 const SKIP_HREF_PATTERN = /^(?:https?:|mailto:|javascript:|#)/i;
-const INLINE_CODE_FILE_PATTERN = new RegExp("`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+))?`", "g");
+const INLINE_CODE_FILE_PATTERN = new RegExp("`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+)(?::\\d+)?|#L(\\d+)(?:C\\d+)?)?`", "g");
 
 const LANGUAGE_EXT: Record<string, string> = {
   typescript: "ts",
@@ -106,8 +108,10 @@ function fileRefMarkdown(path: string, line?: string | number | null) {
 }
 
 function convertInlineCodeFileRefs(block: string) {
-  return block.replace(INLINE_CODE_FILE_PATTERN, (match, path: string, line?: string) =>
-    looksLikeProjectFilePath(path) ? fileRefMarkdown(path, line) : match
+  return block.replace(
+    INLINE_CODE_FILE_PATTERN,
+    (match, path: string, colonLine?: string, hashLine?: string) =>
+      looksLikeProjectFilePath(path) ? fileRefMarkdown(path, colonLine || hashLine) : match
   );
 }
 
@@ -125,12 +129,12 @@ export function linkFileRefs(text: string) {
   working = protectSegments(working, MARKDOWN_LINK_PATTERN, protectedBlocks);
   working = working.replace(
     FILE_REF_PATTERN,
-    (match, prefix: string, path: string, line: string | undefined, offset: number) => {
+    (match, prefix: string, path: string, colonLine: string | undefined, hashLine: string | undefined, offset: number) => {
       const start = offset + prefix.length;
       const before = working.slice(Math.max(0, start - 12), start);
       if (/[a-z]+:\/\/$/i.test(before)) return match;
       if (prefix === "~" || !looksLikeProjectFilePath(path)) return match;
-      return `${prefix}${fileRefMarkdown(path, line)}`;
+      return `${prefix}${fileRefMarkdown(path, colonLine || hashLine)}`;
     }
   );
   return restoreSegments(working, protectedBlocks);
@@ -158,20 +162,13 @@ export function parseProjectFileHref(href: string | undefined) {
   if (fromCodex) return fromCodex;
   if (SKIP_HREF_PATTERN.test(trimmed)) return null;
 
-  let raw = sanitizeFileRef(trimmed);
+  const located = parseFileLocation(trimmed);
+  let raw = located.path.replace(/\\/g, "/");
   if (!raw) return null;
-
-  let line: number | null = null;
-  const lineMatch = raw.match(/^(.*?):(\d+)$/);
-  if (lineMatch?.[1] && lineMatch[2] && !/^[A-Za-z]:$/.test(lineMatch[1])) {
-    raw = lineMatch[1];
-    line = Number(lineMatch[2]);
-  }
-  raw = sanitizeFileRef(raw).replace(/\\/g, "/");
-  if (!looksLikeProjectFilePath(raw) && !looksLikeRelativeOpenPath(raw)) return null;
+  if (!looksLikeProjectFilePath(raw) && !looksLikeRelativeOpenPath(raw) && !raw.startsWith("/")) return null;
   return {
     path: raw,
-    line: Number.isFinite(line) && line && line > 0 ? line : null
+    line: located.line
   };
 }
 

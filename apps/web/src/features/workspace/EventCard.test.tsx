@@ -527,6 +527,9 @@ describe("EventCard copy controls", () => {
     expect(outside).toContain("查看图片");
     expect(outside).toContain("在文件中打开");
     expect(outside).toContain("/tmp/gamepad.png");
+    expect(outside).toContain(
+      `/api/filesystem/file/download?path=${encodeURIComponent("/tmp/gamepad.png")}&amp;inline=1`
+    );
     expect(outside).not.toContain("files/download?path=tmp");
   });
 

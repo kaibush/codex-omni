@@ -116,7 +116,12 @@ import {
   extractMentions,
   type SlashCommand
 } from "@/features/workspace/composer-mentions";
-import type { FilePreview, FileSearchMatch, OpenFileRequest } from "@/features/workspace/file-workspace";
+import {
+  resolveOpenableFilePath,
+  type FilePreview,
+  type FileSearchMatch,
+  type OpenFileRequest
+} from "@/features/workspace/file-workspace";
 import { RunningCenterDialog, useActiveRuns } from "@/features/workspace/RunningCenterDialog";
 import { ProjectKnowledgeDialog } from "@/features/workspace/ProjectKnowledgeDialog";
 import { ScheduleDialog } from "@/features/workspace/ScheduleDialog";
@@ -261,13 +266,23 @@ export function Workspace() {
   const [createFile, setCreateFile] = useState<{ content: string; language: string } | null>(null);
   const [createFilePath, setCreateFilePath] = useState("");
   const [openFileRequest, setOpenFileRequest] = useState<OpenFileRequest | null>(null);
+  const activeProjectRef = useRef<Project | undefined>(undefined);
   const requestOpenFile = useCallback((path: string, line: number | null) => {
+    const project = activeProjectRef.current;
     const cleaned = sanitizeFileRef(path);
-    if (!cleaned) return;
+    const opened = resolveOpenableFilePath(cleaned, project?.realPath, project?.displayPath);
+    if (!opened) {
+      toast.error("无法打开该文件路径。");
+      return;
+    }
     openFileNonce.current += 1;
     setFilesVisited(true);
     setWorkspaceView("files");
-    setOpenFileRequest({ path: cleaned, line, nonce: openFileNonce.current });
+    setOpenFileRequest({
+      path: cleaned,
+      line: line ?? opened.line,
+      nonce: openFileNonce.current
+    });
   }, []);
   const [editorCommand, setEditorCommand] = useState<"goto-line" | "toggle-outline" | null>(null);
   const [enhanceNonce, setEnhanceNonce] = useState(0);
@@ -1238,6 +1253,7 @@ export function Workspace() {
     };
   }, [pageVisible, sessionId, projectId, qc, reconnectNonce]);
   const activeProject = projects.data?.find((p) => p.id === projectId);
+  activeProjectRef.current = activeProject;
   const activeSession =
     (detail.data?.session?.id === sessionId && detail.data.session.projectId === projectId
       ? detail.data.session
@@ -2408,6 +2424,7 @@ export function Workspace() {
               onTimelineLockHandled={handleTimelineLockHandled}
               activeSession={activeSession ?? undefined}
               projectPath={activeProject?.realPath}
+              projectDisplayPath={activeProject?.displayPath}
               sessionLoading={sessionLoading}
               detailError={detail.isError}
               refetchDetail={() => void detail.refetch()}

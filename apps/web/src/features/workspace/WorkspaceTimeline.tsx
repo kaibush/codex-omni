@@ -98,6 +98,7 @@ export function WorkspaceTimeline({
   onTimelineLockHandled,
   activeSession,
   projectPath,
+  projectDisplayPath,
   sessionLoading,
   detailError,
   refetchDetail,
@@ -157,6 +158,7 @@ export function WorkspaceTimeline({
   onTimelineLockHandled?: (() => void) | undefined;
   activeSession: Session | undefined;
   projectPath?: string | undefined;
+  projectDisplayPath?: string | undefined;
   sessionLoading: boolean;
   detailError: boolean;
   refetchDetail: () => void;
@@ -583,6 +585,7 @@ export function WorkspaceTimeline({
                       }
                       projectId={activeSession?.projectId}
                       projectPath={projectPath}
+                      projectDisplayPath={projectDisplayPath}
                       onReply={onReply}
                       onOpenThread={onOpenThread}
                       onFork={

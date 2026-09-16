@@ -97,6 +97,82 @@ export type EditorTab = {
 };
 
 export const MAX_EDITABLE_FILE_BYTES = 2 * 1024 * 1024;
+const CODEX_UPLOADS_MARKER = "/.codex-uploads/";
+const SYSTEM_ABSOLUTE_SEGMENTS = new Set([
+  "tmp",
+  "var",
+  "usr",
+  "etc",
+  "dev",
+  "proc",
+  "sys",
+  "opt",
+  "home",
+  "private",
+  "mnt",
+  "media",
+  "boot",
+  "run",
+  "root",
+  "users",
+  "volumes",
+  "workspace",
+  "workspaces"
+]);
+const REPO_RELATIVE_FIRST_SEGMENTS = new Set([
+  "apps",
+  "packages",
+  "src",
+  "lib",
+  "docs",
+  "web",
+  "server",
+  "client",
+  "frontend",
+  "backend",
+  "services",
+  "features",
+  "modules",
+  "crates",
+  "cmd",
+  "pkg",
+  "internal",
+  "tools",
+  "scripts",
+  "examples",
+  "tests",
+  "test",
+  "shared",
+  "components",
+  "pages",
+  "e2e",
+  "fixtures",
+  "proto",
+  "apis",
+  "types",
+  "plugins",
+  "addons",
+  "website",
+  "android",
+  "ios",
+  "desktop",
+  "electron",
+  "config",
+  "configs",
+  "public",
+  "assets",
+  "content",
+  "core",
+  "common",
+  "utils",
+  "helpers",
+  "hooks",
+  "store",
+  "stores",
+  "ui",
+  "infra",
+  "deploy"
+]);
 
 export function joinProjectPath(directory: string, name: string) {
   const parent = directory.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -109,25 +185,132 @@ function toPosixPath(value: string) {
   return value.replace(/\\/g, "/");
 }
 
-export function toProjectRelativePath(inputPath: string, projectRealPath?: string | null) {
+function positiveInt(value: string | undefined) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function parseFileLocation(inputPath: string) {
   let raw = toPosixPath(inputPath).trim().replace(/^['"`]+/, "").replace(/['"`]+$/, "");
   if (/^file:\/\//i.test(raw)) {
     raw = raw.replace(/^file:\/\//i, "");
     if (raw.toLowerCase().startsWith("localhost")) raw = raw.slice("localhost".length);
   }
-  if (!raw) return null;
-  const isAbsolute = raw.startsWith("/") || /^[A-Za-z]:\//.test(raw);
-  if (!isAbsolute) {
-    const relative = raw.replace(/^\.\//, "").replace(/\/+$/, "");
-    return relative || null;
+  raw = raw.replace(/^@/, "");
+  let line: number | null = null;
+  let column: number | null = null;
+  const hashMatch = raw.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
+  if (hashMatch?.[1] != null && hashMatch[2]) {
+    raw = hashMatch[1];
+    line = positiveInt(hashMatch[2]);
+    column = positiveInt(hashMatch[3]);
+  } else {
+    const colonMatch = raw.match(/^(.*?):(\d+)(?::(\d+))?$/);
+    if (colonMatch?.[1] && colonMatch[2] && !/^[A-Za-z]:$/.test(colonMatch[1])) {
+      raw = colonMatch[1];
+      line = positiveInt(colonMatch[2]);
+      column = positiveInt(colonMatch[3]);
+    }
   }
-  const root = toPosixPath(projectRealPath ?? "").replace(/\/+$/, "");
-  if (!root) return null;
-  if (raw === root) return null;
-  const prefix = `${root}/`;
+  return {
+    path: raw.trim(),
+    line,
+    column
+  };
+}
+
+export function isFilesystemAbsolutePath(path: string) {
+  const raw = toPosixPath(path).trim();
+  return raw.startsWith("/") || /^[A-Za-z]:\//.test(raw);
+}
+
+function stripGitDiffPrefix(raw: string) {
+  return raw.replace(/^(?:a|b)\//, "");
+}
+
+function normalizeRelativeCandidate(raw: string) {
+  return stripGitDiffPrefix(raw.replace(/^\.\//, "")).replace(/\/+$/, "");
+}
+
+function relativeUnderRoot(raw: string, root: string) {
+  const normalizedRoot = toPosixPath(root).replace(/\/+$/, "");
+  if (!normalizedRoot) return null;
+  if (raw === normalizedRoot) return null;
+  const prefix = `${normalizedRoot}/`;
   if (!raw.startsWith(prefix)) return null;
-  const relative = raw.slice(prefix.length).replace(/\/+$/, "");
-  return relative || null;
+  return raw.slice(prefix.length).replace(/\/+$/, "") || null;
+}
+
+function relativeFromUploads(raw: string) {
+  if (raw.startsWith(".codex-uploads/")) return raw.replace(/\/+$/, "");
+  const index = raw.indexOf(CODEX_UPLOADS_MARKER);
+  if (index === -1) return null;
+  return raw.slice(index + 1).replace(/\/+$/, "") || null;
+}
+
+function relativeFromWorkspaceMount(raw: string, root: string) {
+  const base = toPosixPath(root).replace(/\/+$/, "").split("/").filter(Boolean).at(-1);
+  if (!base) return null;
+  for (const prefix of [`/workspace/${base}/`, `/workspaces/${base}/`]) {
+    if (raw.startsWith(prefix)) return raw.slice(prefix.length).replace(/\/+$/, "") || null;
+  }
+  return null;
+}
+
+function firstPathSegment(raw: string) {
+  return raw.replace(/^\/+/, "").split("/")[0]?.toLowerCase() ?? "";
+}
+
+function looksLikeRepoRelativeAbsolute(raw: string, roots: string[]) {
+  if (!raw.startsWith("/")) return false;
+  const first = firstPathSegment(raw);
+  if (!first || SYSTEM_ABSOLUTE_SEGMENTS.has(first) || !REPO_RELATIVE_FIRST_SEGMENTS.has(first)) {
+    return false;
+  }
+  return !roots.some((root) => firstPathSegment(root) === first);
+}
+
+export function toProjectRelativePath(inputPath: string, ...projectRoots: Array<string | null | undefined>) {
+  const location = parseFileLocation(inputPath);
+  const raw = location.path;
+  if (!raw) return null;
+  const roots = [
+    ...new Set(projectRoots.map((root) => toPosixPath(root ?? "").replace(/\/+$/, "")).filter(Boolean))
+  ];
+  for (const root of roots) {
+    const relative = relativeUnderRoot(raw, root);
+    if (relative) return relative;
+  }
+  for (const root of roots) {
+    const relative = relativeFromWorkspaceMount(raw, root);
+    if (relative) return relative;
+  }
+  const uploads = relativeFromUploads(raw);
+  if (uploads) return uploads;
+  if (!isFilesystemAbsolutePath(raw)) {
+    return normalizeRelativeCandidate(raw) || null;
+  }
+  if (looksLikeRepoRelativeAbsolute(raw, roots)) {
+    return normalizeRelativeCandidate(raw.replace(/^\/+/, "")) || null;
+  }
+  return null;
+}
+
+export function resolveOpenableFilePath(
+  inputPath: string,
+  ...projectRoots: Array<string | null | undefined>
+) {
+  const location = parseFileLocation(inputPath);
+  const raw = location.path;
+  if (!raw) return null;
+  const relative = toProjectRelativePath(raw, ...projectRoots);
+  if (relative) {
+    return { path: relative, line: location.line, column: location.column, external: false };
+  }
+  if (isFilesystemAbsolutePath(raw)) {
+    return { path: raw, line: location.line, column: location.column, external: true };
+  }
+  return null;
 }
 
 export function parentProjectPath(relativePath: string) {

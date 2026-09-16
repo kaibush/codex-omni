@@ -5,7 +5,9 @@ import {
   flattenVisibleFileEntries,
   joinProjectPath,
   parentProjectPath,
+  parseFileLocation,
   previewKindFor,
+  resolveOpenableFilePath,
   suggestedCopyPath,
   toProjectRelativePath,
   treeFilterPaths,
@@ -119,6 +121,59 @@ describe("file workspace helpers", () => {
     expect(toProjectRelativePath("`src/app.ts`", "/repo/app")).toBe("src/app.ts");
     expect(toProjectRelativePath('"docs/shot.png"', "/repo/app")).toBe("docs/shot.png");
     expect(toProjectRelativePath("file:///repo/app/src/app.ts", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("/apps/web/src/foo.ts", "/repo/app")).toBe("apps/web/src/foo.ts");
+    expect(toProjectRelativePath("/repo/app/src/app.ts", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("b/src/app.ts", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("src/app.ts:12:5", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("src/app.ts#L18", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("/workspace/app/.codex-uploads/foo.png", "/repo/app")).toBe(
+      ".codex-uploads/foo.png"
+    );
+    expect(toProjectRelativePath("/workspace/app/src/app.ts", "/repo/app")).toBe("src/app.ts");
+    expect(toProjectRelativePath("/workspace/app/src/app.ts", "/repo/app", "/workspace/app")).toBe(
+      "src/app.ts"
+    );
+    expect(toProjectRelativePath("/workspace/other/src/app.ts", "/repo/app")).toBeNull();
+    expect(toProjectRelativePath("/opt/app/secret.ts", "/repo/app")).toBeNull();
+    expect(toProjectRelativePath("/data/app/secret.ts", "/repo/app")).toBeNull();
+  });
+
+  it("parses file locations and keeps outside files openable as absolute paths", () => {
+    expect(parseFileLocation("src/app.ts:12:5")).toEqual({
+      path: "src/app.ts",
+      line: 12,
+      column: 5
+    });
+    expect(parseFileLocation("src/app.ts#L18C3")).toEqual({
+      path: "src/app.ts",
+      line: 18,
+      column: 3
+    });
+    expect(resolveOpenableFilePath("/tmp/gamepad.png", "/repo/app")).toEqual({
+      path: "/tmp/gamepad.png",
+      line: null,
+      column: null,
+      external: true
+    });
+    expect(resolveOpenableFilePath("/repo/app/src/app.ts:18", "/repo/app")).toEqual({
+      path: "src/app.ts",
+      line: 18,
+      column: null,
+      external: false
+    });
+    expect(resolveOpenableFilePath("/data/app/secret.ts", "/repo/app")).toEqual({
+      path: "/data/app/secret.ts",
+      line: null,
+      column: null,
+      external: true
+    });
+    expect(resolveOpenableFilePath("README.md", "/repo/app")).toEqual({
+      path: "README.md",
+      line: null,
+      column: null,
+      external: false
+    });
+    expect(resolveOpenableFilePath("")).toBeNull();
   });
 
   it("builds a unified diff for inserted and deleted lines", () => {

@@ -88,7 +88,9 @@ import {
   suggestedCopyPath,
   tabFromMedia,
   tabFromPreview,
-  toProjectRelativePath,
+  isFilesystemAbsolutePath,
+  parseFileLocation,
+  resolveOpenableFilePath,
   treeFilterPaths,
   unifiedDiff,
   visibleFileEntries,
@@ -264,8 +266,36 @@ function SymbolTree({
   );
 }
 
+function isExternalEditorPath(path: string) {
+  return isFilesystemAbsolutePath(path);
+}
+
+function fileMetaUrl(projectId: string, path: string) {
+  if (isExternalEditorPath(path)) {
+    return `/api/filesystem/file/meta?path=${encodeURIComponent(path)}`;
+  }
+  return `/api/projects/${projectId}/file/meta?path=${encodeURIComponent(path)}`;
+}
+
+function fileTextUrl(projectId: string, path: string) {
+  if (isExternalEditorPath(path)) {
+    return `/api/filesystem/file?path=${encodeURIComponent(path)}`;
+  }
+  return `/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`;
+}
+
 function mediaUrl(projectId: string, path: string) {
+  if (isExternalEditorPath(path)) {
+    return `/api/filesystem/file/download?path=${encodeURIComponent(path)}&inline=1`;
+  }
   return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}&inline=1`;
+}
+
+function fileDownloadUrl(projectId: string, path: string) {
+  if (isExternalEditorPath(path)) {
+    return `/api/filesystem/file/download?path=${encodeURIComponent(path)}`;
+  }
+  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}`;
 }
 
 function FilePreviewPane({
@@ -553,15 +583,15 @@ function FilesWorkspace({
     const poll = async () => {
       if (document.visibilityState !== "visible") return;
       for (const tab of tabsRef.current) {
-        if (isMediaPreview(tab.previewKind)) continue;
+        if (isMediaPreview(tab.previewKind) || isExternalEditorPath(tab.path)) continue;
         try {
           const meta = await api<FileMeta>(
-            `/api/projects/${project.id}/file/meta?path=${encodeURIComponent(tab.path)}`
+            fileMetaUrl(project.id, tab.path)
           );
           if (!meta.revision || meta.revision === tab.revision) continue;
           if (tab.conflict?.revision === meta.revision) continue;
           const latest = await api<FilePreview>(
-            `/api/projects/${project.id}/file?path=${encodeURIComponent(tab.path)}`
+            fileTextUrl(project.id, tab.path)
           );
           setTabs((current) =>
             current.map((item) => {
@@ -676,66 +706,96 @@ function FilesWorkspace({
       setMobilePane("editor");
       return;
     }
-    const relativePath =
-      toProjectRelativePath(cleaned, project.realPath) ??
-      toProjectRelativePath(cleaned, project.displayPath);
-    if (!relativePath) {
-      setError("该文件不在当前项目目录内，无法打开。");
+    const opened = resolveOpenableFilePath(cleaned, project.realPath, project.displayPath);
+    if (!opened) {
+      setError("无法打开该文件路径。");
       setMobilePane("editor");
       return;
     }
-    revealInTree(relativePath);
-    const existing = tabsRef.current.find((tab) => tab.path === relativePath);
+    const editorPath = opened.path;
+    const external = opened.external;
+    const targetLine = line ?? opened.line;
+    const originalPath = parseFileLocation(cleaned).path;
+    const fallbackPath =
+      !external && isFilesystemAbsolutePath(originalPath) && originalPath !== editorPath
+        ? originalPath
+        : null;
+    const existing =
+      tabsRef.current.find((tab) => tab.path === editorPath) ??
+      (fallbackPath ? tabsRef.current.find((tab) => tab.path === fallbackPath) : undefined);
     if (existing) {
-      setActivePath(relativePath);
-      setSelectedPath(relativePath);
+      setActivePath(existing.path);
+      if (!isExternalEditorPath(existing.path)) setSelectedPath(existing.path);
       setMobilePane("editor");
       if (isMediaPreview(existing.previewKind)) {
-        updateTab(relativePath, { mode: "preview", ...(line ? { line } : {}) });
-      } else if (line) {
-        updateTab(relativePath, { line, mode: "edit" });
+        updateTab(existing.path, { mode: "preview", ...(targetLine ? { line: targetLine } : {}) });
+      } else if (targetLine) {
+        updateTab(existing.path, { line: targetLine, mode: "edit" });
       }
       return;
     }
-    if (openingPathRef.current === relativePath) {
-      setActivePath(relativePath);
-      setSelectedPath(relativePath);
+    if (
+      openingPathRef.current &&
+      (openingPathRef.current === editorPath || openingPathRef.current === fallbackPath)
+    ) {
+      setActivePath(openingPathRef.current);
       setMobilePane("editor");
       return;
     }
+    const loadEditorTab = async (path: string, asExternal: boolean) => {
+      const meta = await api<FileMeta>(fileMetaUrl(project.id, path));
+      const kind = previewKindFor(path, meta.text);
+      if (isMediaPreview(kind)) {
+        return tabFromMedia({
+          path,
+          size: meta.size,
+          revision: meta.revision ?? `${meta.mtimeMs}:${meta.size}`,
+          writable: asExternal ? false : meta.writable,
+          previewKind: kind
+        });
+      }
+      const preview = await api<FilePreview>(fileTextUrl(project.id, path));
+      return {
+        ...tabFromPreview(preview, targetLine),
+        path,
+        writable: asExternal ? false : preview.writable
+      };
+    };
+
     try {
-      openingPathRef.current = relativePath;
-      setOpeningPath(relativePath);
+      openingPathRef.current = editorPath;
+      setOpeningPath(editorPath);
       setError("");
-      const meta = await api<FileMeta>(
-        `/api/projects/${project.id}/file/meta?path=${encodeURIComponent(relativePath)}`
-      );
-      const kind = previewKindFor(relativePath, meta.text);
-      const tab = isMediaPreview(kind)
-        ? tabFromMedia({
-            path: meta.path,
-            size: meta.size,
-            revision: meta.revision ?? `${meta.mtimeMs}:${meta.size}`,
-            writable: meta.writable,
-            previewKind: kind
-          })
-        : tabFromPreview(
-            await api<FilePreview>(
-              `/api/projects/${project.id}/file?path=${encodeURIComponent(relativePath)}`
-            ),
-            line
-          );
+      let tab: EditorTab;
+      let openedExternal = external;
+      try {
+        tab = await loadEditorTab(editorPath, external);
+      } catch (reason) {
+        if (!fallbackPath) throw reason;
+        tab = await loadEditorTab(fallbackPath, true);
+        openedExternal = true;
+      }
       setTabs((current) => [...current.filter((item) => item.path !== tab.path), tab]);
       setActivePath(tab.path);
-      setSelectedPath(tab.path);
-      setActiveDirectory(parentProjectPath(tab.path));
+      if (!openedExternal) {
+        revealInTree(tab.path);
+        setSelectedPath(tab.path);
+        setActiveDirectory(parentProjectPath(tab.path));
+      }
       setMobilePane("editor");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setMobilePane("editor");
     } finally {
-      if (openingPathRef.current === relativePath) openingPathRef.current = null;
-      setOpeningPath((current) => (current === relativePath ? null : current));
+      if (
+        openingPathRef.current === editorPath ||
+        (fallbackPath !== null && openingPathRef.current === fallbackPath)
+      ) {
+        openingPathRef.current = null;
+      }
+      setOpeningPath((current) =>
+        current === editorPath || (fallbackPath !== null && current === fallbackPath) ? null : current
+      );
     }
   };
 
@@ -748,7 +808,7 @@ function FilesWorkspace({
   }, [openRequest?.line, openRequest?.nonce, openRequest?.path]);
 
   useEffect(() => {
-    if (!activeTab || isMediaPreview(activeTab.previewKind)) {
+    if (!activeTab || isMediaPreview(activeTab.previewKind) || isExternalEditorPath(activeTab.path)) {
       setLanguage(null);
       return;
     }
@@ -786,7 +846,7 @@ function FilesWorkspace({
   }, []);
 
   const requestDefinition = async (line: number, column: number) => {
-    if (!activeTab || isMediaPreview(activeTab.previewKind)) return;
+    if (!activeTab || isMediaPreview(activeTab.previewKind) || isExternalEditorPath(activeTab.path)) return;
     try {
       const result = await api<LanguageAnalysis>(`/api/projects/${project.id}/language`, {
         method: "POST",
@@ -1035,10 +1095,7 @@ function FilesWorkspace({
   const downloadEntry = async (entry: FileEntry) => {
     if (entry.type === "directory") return;
     try {
-      await apiDownload(
-        `/api/projects/${project.id}/files/download?path=${encodeURIComponent(entry.path)}`,
-        entry.name
-      );
+      await apiDownload(fileDownloadUrl(project.id, entry.path), entry.name);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -1692,7 +1749,7 @@ function FilesWorkspace({
               >
                 <Eye className="size-3.5" /> 预览
               </Button>
-              {!isMediaPreview(activeTab.previewKind) && (
+              {!isMediaPreview(activeTab.previewKind) && !isExternalEditorPath(activeTab.path) && (
                 <Button
                   type="button"
                   size="sm"
@@ -1910,15 +1967,17 @@ function FilesWorkspace({
           <span className={tooLarge ? "text-destructive" : undefined}>
             {!activeTab
               ? "尚未打开文件"
-              : !activeTab.writable
-                ? "当前文件只读"
-                : tooLarge
-                  ? "内容超过 2 MB 保存上限"
-                  : dirty
-                    ? "有未保存的修改"
-                    : activeTab.conflict
-                      ? "磁盘版本与草稿不一致"
-                      : "已与磁盘同步"}
+              : isExternalEditorPath(activeTab.path)
+                ? "项目外文件，只读"
+                : !activeTab.writable
+                  ? "当前文件只读"
+                  : tooLarge
+                    ? "内容超过 2 MB 保存上限"
+                    : dirty
+                      ? "有未保存的修改"
+                      : activeTab.conflict
+                        ? "磁盘版本与草稿不一致"
+                        : "已与磁盘同步"}
           </span>
           <div className="flex items-center gap-3">
             {language?.diagnostics.length ? (
