@@ -5,6 +5,7 @@ import {
 } from "@codex-omni/protocol";
 import type { Message, TimelineItem } from "@/types";
 import type { TaskState } from "@/lib/task-state";
+import { compareTimelineItems, compareTimelineVersions } from "@/lib/timeline-order";
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
 export type RunState = TaskState;
@@ -163,6 +164,7 @@ export const timelineMessageId = (message: Message) => {
   return `${message.role}-${message.itemId}`;
 };
 export const fromMessage = (m: Message, options?: { preview?: boolean }): TimelineItem => {
+  const data = parseData(m.dataJson);
   const item: TimelineItem = {
     id: timelineMessageId(m),
     messageId: m.id,
@@ -173,10 +175,16 @@ export const fromMessage = (m: Message, options?: { preview?: boolean }): Timeli
           ? "system"
           : (m.role as TimelineItem["kind"]),
     text: m.content,
-    data: parseData(m.dataJson),
+    data,
     providerId: m.providerId,
-    streaming: false,
-    createdAt: m.createdAt
+    streaming:
+      m.eventType === "assistant.delta" ||
+      m.eventType === "tool.started" ||
+      (["reasoning", "tool", "file"].includes(m.role) &&
+        (data?.phase === "started" || data?.phase === "updated" || data?.status === "in_progress")),
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    ...(typeof data?.eventSeq === "number" ? { eventSeq: data.eventSeq } : {})
   };
   return compactTimelineItem(item, options);
 };
@@ -185,20 +193,26 @@ export const isVisibleTimelineMessage = (message: Message) =>
   !(message.role === "error" && parseReconnectNotice(message.content) !== null);
 
 export function upsert(items: TimelineItem[], id: string, next: Omit<TimelineItem, "id">) {
-  const found = items.some((x) => x.id === id);
-  if (found) {
-    return items.map((x) => {
-      if (x.id !== id) return x;
-      const createdAt = x.createdAt ?? next.createdAt;
-      return createdAt == null ? { ...x, ...next, id } : { ...x, ...next, id, createdAt };
-    });
+  const previous = items.find((item) => item.id === id);
+  if (previous) {
+    // A history response can overtake a queued WebSocket batch. Do not apply
+    // its old deltas again or let replay reopen an already completed card.
+    if (
+      (next.eventSeq != null && previous.eventSeq != null && next.eventSeq <= previous.eventSeq) ||
+      compareTimelineVersions(next, previous) < 0
+    )
+      return items;
   }
-  const createdAt = next.createdAt ?? Date.now();
-  const entry = { ...next, id, createdAt };
-  // Rollout backfill events can arrive after the assistant reply even though
-  // their original timestamps place them earlier in the turn.
-  if (next.createdAt == null) return [...items, entry];
-  const insertAt = items.findIndex((item) => (item.createdAt ?? 0) > createdAt);
-  if (insertAt < 0) return [...items, entry];
-  return [...items.slice(0, insertAt), entry, ...items.slice(insertAt)];
+  const entry = {
+    ...previous,
+    ...next,
+    id,
+    createdAt: next.messageId
+      ? (next.createdAt ?? previous?.createdAt ?? Date.now())
+      : (previous?.createdAt ?? next.createdAt ?? Date.now())
+  };
+  const result = previous
+    ? items.map((item) => (item.id === id ? entry : item))
+    : [...items, entry];
+  return result.sort(compareTimelineItems);
 }

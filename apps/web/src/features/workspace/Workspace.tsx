@@ -67,6 +67,7 @@ import {
   mergeSessionTimeline
 } from "@/lib/timeline";
 import { existingPlanTimelineId, isPlanTool, mergeToolEventData } from "@/lib/tool-event";
+import { timelineEventMetadata } from "@/lib/timeline-order";
 import { createId } from "@/lib/utils";
 import type {
   Message,
@@ -640,13 +641,15 @@ export function Workspace() {
         mergeSessionTimeline({
           historical,
           current: liveEventsRef.current,
-          historyExpanded: false
+          historyExpanded: false,
+          settled: Boolean(resolved && resolved.status !== "running")
         })
       );
       const merged = mergeSessionTimeline({
         historical,
         current: following ? liveEventsRef.current : current,
-        historyExpanded: expanded
+        historyExpanded: expanded,
+        settled: Boolean(resolved && resolved.status !== "running")
       });
       return following ? capTimelineEvents(merged) : capPausedTimelineEvents(merged, historical);
     });
@@ -747,6 +750,7 @@ export function Workspace() {
       }
     };
     const refreshSession = () => {
+      flushTimelineUpdates();
       void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
       void qc.invalidateQueries({ queryKey: ["session", sessionId] });
       void qc.invalidateQueries({ queryKey: ["active-runs"] });
@@ -1147,10 +1151,12 @@ export function Workspace() {
         setHasDeferredLiveEvents(true);
       }
       const skipNewCards = settledTurn;
+      const metadata = timelineEventMetadata(payload);
       enqueueTimelineUpdate((current) => {
         const put = (id: string, next: Omit<TimelineItem, "id">) => {
           if (
             skipNewCards &&
+            !metadata.messageId &&
             !current.some((item) => item.id === id) &&
             next.kind !== "user" &&
             next.kind !== "approval" &&
@@ -1158,7 +1164,7 @@ export function Workspace() {
           ) {
             return current;
           }
-          return upsert(current, id, compactTimelineItem(next));
+          return upsert(current, id, compactTimelineItem({ ...next, ...metadata }));
         };
         if (event.type === "assistant.delta" || event.type === "assistant.completed") {
           const id = `assistant-${event.requestId}-${payload.itemId}`;
@@ -1177,7 +1183,8 @@ export function Workspace() {
           return put(id, {
             kind: "reasoning",
             text: applyTextPatch(previous?.text ?? "", payload),
-            providerId: providerIdRef.current
+            providerId: providerIdRef.current,
+            streaming: payload.phase !== "completed"
           });
         }
         if (event.type === "turn.completed") {
@@ -1223,7 +1230,8 @@ export function Workspace() {
             kind: "approval",
             data: { ...payload, status: "pending" },
             text: payload.command,
-            providerId: providerIdRef.current
+            providerId: providerIdRef.current,
+            ...metadata
           });
         if (event.type === "run.failed")
           return upsert(current, `error-${event.requestId}-run.failed`, {
@@ -1235,7 +1243,8 @@ export function Workspace() {
                 ? payload.endedAt
                 : typeof payload.startedAt === "number"
                   ? payload.startedAt
-                  : Date.now()
+                  : Date.now(),
+            ...metadata
           });
         return current;
       });

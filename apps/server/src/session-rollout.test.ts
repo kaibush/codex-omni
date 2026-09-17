@@ -67,6 +67,7 @@ describe("backfillSessionRolloutTools", () => {
     expect(changes[0]?.itemId).toBe("turn-1:item_6");
     const message = store.getMessageByItemId(session.id, "turn-1:item_6");
     expect(message?.createdAt).toBe(startedAt);
+    expect(changes[0]?.message).toMatchObject({ id: message?.id, createdAt: startedAt });
     expect(JSON.parse(message?.dataJson ?? "{}")).toMatchObject({
       tool: "spawn_agent",
       nickname: "Pascal",

@@ -64,6 +64,80 @@ describe("mergeSessionTimeline", () => {
     ).toEqual(["m3", "m4", "live"]);
   });
 
+  it("does not append old replies outside the latest page when the browser clock is ahead", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [item("m3", 30), item("m4", 40)],
+        current: [
+          item("old-reply", 10_000, { kind: "assistant", text: "earlier reply" }),
+          item("m3", 30),
+          item("m4", 40)
+        ],
+        historyExpanded: false
+      }).map((entry) => entry.id)
+    ).toEqual(["m3", "m4"]);
+  });
+
+  it("keeps progress after a commentary reply while the turn is running", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user", 10),
+          item("commentary", 20, { kind: "assistant", text: "I will check the service." })
+        ],
+        current: [
+          item("user", 10),
+          item("commentary", 20, { kind: "assistant", text: "I will check the service." }),
+          item("tool", 30, { kind: "tool", streaming: true }),
+          item("reasoning", 40, { kind: "reasoning" })
+        ],
+        historyExpanded: false,
+        settled: false
+      }).map((entry) => entry.id)
+    ).toEqual(["user", "commentary", "tool", "reasoning"]);
+  });
+
+  it("inserts persisted backfill inside a stale history page instead of appending it", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [
+          item("user", 10),
+          item("reply", 40, { kind: "assistant", messageId: "msg-reply" })
+        ],
+        current: [
+          item("user", 10),
+          item("tool", 20, { kind: "tool", messageId: "msg-tool" }),
+          item("reply", 40, { kind: "assistant", messageId: "msg-reply" })
+        ],
+        historyExpanded: false,
+        settled: true
+      }).map((entry) => entry.id)
+    ).toEqual(["user", "tool", "reply"]);
+  });
+
+  it("prefers a newer persisted reply over a stale live text buffer", () => {
+    const result = mergeSessionTimeline({
+      historical: [
+        item("reply", 20, {
+          kind: "assistant",
+          text: "finished reply",
+          streaming: false,
+          eventSeq: 9
+        })
+      ],
+      current: [
+        item("reply", 2_000, {
+          kind: "assistant",
+          text: "partial",
+          streaming: true,
+          eventSeq: 7
+        })
+      ],
+      historyExpanded: false
+    });
+    expect(result[0]).toMatchObject({ text: "finished reply", createdAt: 20, streaming: false });
+  });
+
   it("drops leftover live activity after a persisted completed reply", () => {
     expect(
       mergeSessionTimeline({
@@ -83,7 +157,8 @@ describe("mergeSessionTimeline", () => {
           item("think-2", 51, { kind: "reasoning", text: "继续检查" }),
           item("tool-live-2", 52, { kind: "tool", data: { command: "ruff format" } })
         ],
-        historyExpanded: false
+        historyExpanded: false,
+        settled: true
       }).map((entry) => entry.id)
     ).toEqual(["user-1", "tool-jsonl-1", "tool-jsonl-2", "assistant-1"]);
   });
@@ -104,7 +179,8 @@ describe("mergeSessionTimeline", () => {
             data: { command: "late rollout call" }
           })
         ],
-        historyExpanded: false
+        historyExpanded: false,
+        settled: true
       }).map((entry) => entry.id)
     ).toEqual(["user-1", "assistant-1"]);
   });

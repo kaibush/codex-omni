@@ -8,6 +8,7 @@ import {
   planItemSignature
 } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
+import { compareTimelineItems, compareTimelineVersions } from "./timeline-order";
 
 export const TIMELINE_VIEWS = ["folded", "flat", "expanded"] as const;
 export type TimelineView = (typeof TIMELINE_VIEWS)[number];
@@ -165,12 +166,6 @@ function isCompletedTurnResidue(item: TimelineItem) {
     item.kind === "file" ||
     item.kind === "activity"
   );
-}
-
-function historicalHasCompletedTurn(items: TimelineItem[]) {
-  const lastUser = findLastIndex(items, (item) => item.kind === "user");
-  const lastAssistant = findLastIndex(items, isCompletedAssistant);
-  return lastAssistant > lastUser;
 }
 
 export function hideSupersededStreamErrors(items: TimelineItem[]): TimelineItem[] {
@@ -377,20 +372,23 @@ export function mergeSessionTimeline(input: {
   historical: TimelineItem[];
   current: TimelineItem[];
   historyExpanded: boolean;
+  settled?: boolean;
 }): TimelineItem[] {
   const liveById = new Map(input.current.map((item) => [item.id, item]));
   const historical = input.historical.map((item) => {
     const live = liveById.get(item.id);
     if (!live) return item;
-    const merged: TimelineItem = {
+    const liveIsNewer = compareTimelineVersions(live, item) > 0;
+    return {
+      ...live,
       ...item,
-      data: mergeToolEventData(live.data, item.data)
+      ...(liveIsNewer ? live : {}),
+      ...(item.createdAt != null ? { createdAt: item.createdAt } : {}),
+      ...(item.messageId ? { messageId: item.messageId } : {}),
+      data: liveIsNewer
+        ? mergeToolEventData(item.data, live.data)
+        : mergeToolEventData(live.data, item.data)
     };
-    const text = live.text || item.text;
-    if (text) merged.text = text;
-    if (live.streaming != null) merged.streaming = live.streaming;
-    else if (item.streaming != null) merged.streaming = item.streaming;
-    return merged;
   });
   const historicalIds = new Set(historical.map((item) => item.id));
   const extras = input.current.filter((item) => !historicalIds.has(item.id));
@@ -423,18 +421,24 @@ export function mergeSessionTimeline(input: {
       !historicalIds.has(item.id) &&
       (lastHistoricalIndex < 0 || index > lastHistoricalIndex)
   );
-  const persistCompletedTurn = historicalHasCompletedTurn(input.historical);
   const inFlight = extras.filter((item) => {
     if (olderIds.has(item.id)) return false;
+    const liveIndex = input.current.findIndex((entry) => entry.id === item.id);
+    const firstHistorical = historical[0];
+    // An overlap marks the page boundary even if an older live card still
+    // carries a skewed browser timestamp. It must not become a new tail card.
+    if (!input.historyExpanded && firstHistoricalIndex >= 0 && liveIndex < firstHistoricalIndex) {
+      return false;
+    }
     if (isStaleInFlightError(item, input.current, newestCreatedAt)) return false;
-    // After the latest page already contains a finished reply, leftover live
-    // thinking/tool cards are almost always the same turn with different ids
-    // (rollout backfill vs websocket). Appending them after the assistant is
-    // what made the timeline look shuffled until a full refresh.
-    if (persistCompletedTurn && isCompletedTurnResidue(item)) {
-      const liveIndex = input.current.findIndex((entry) => entry.id === item.id);
+    // Only a terminal run can retire legacy, unpersisted cards. A completed
+    // assistant message may be commentary in the middle of an active turn.
+    if (input.settled && !item.messageId && isCompletedTurnResidue(item)) {
       if (extraUserIndex < 0 || liveIndex < extraUserIndex) return false;
     }
+    // A backfill can be persisted after the HTTP snapshot was taken while
+    // belonging inside that page. Keep it at its authoritative position.
+    if (item.messageId && firstHistorical) return compareTimelineItems(item, firstHistorical) >= 0;
     if (item.streaming && (item.kind === "assistant" || item.kind === "tool")) return true;
     if (item.kind === "approval" && (!item.data?.status || item.data.status === "pending")) {
       return true;
@@ -442,5 +446,5 @@ export function mergeSessionTimeline(input: {
     if (afterHistoricalIds.has(item.id)) return true;
     return (item.createdAt ?? 0) > newestCreatedAt;
   });
-  return cleanTimelineItems([...older, ...historical, ...inFlight]);
+  return cleanTimelineItems([...older, ...[...historical, ...inFlight].sort(compareTimelineItems)]);
 }

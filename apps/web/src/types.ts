@@ -212,6 +212,8 @@ export type TimelineItem = {
   providerId?: string | null;
   streaming?: boolean;
   createdAt?: number;
+  updatedAt?: number;
+  eventSeq?: number;
 };
 
 export type QueuedTurn = {

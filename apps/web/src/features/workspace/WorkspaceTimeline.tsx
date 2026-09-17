@@ -83,7 +83,6 @@ export function WorkspaceTimeline({
   jumpMessageHit,
   setMessageHits,
   events,
-  setHighlightMessageId,
   chatScroll,
   stickToBottom,
   followingLive,

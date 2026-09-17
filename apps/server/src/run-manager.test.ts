@@ -284,6 +284,120 @@ describe("RunManager terminal state", () => {
   });
 });
 
+describe("RunManager timeline positions", () => {
+  it("publishes and replays the persisted position and version for every timeline event", async () => {
+    const { project, session, socket, sent } = fixture();
+    const progress: Array<Pick<BridgeEvent, "type" | "payload">> = [
+      {
+        type: "reasoning.delta",
+        payload: { itemId: "thinking", text: "inspect", phase: "completed" }
+      },
+      {
+        type: "assistant.completed",
+        payload: { itemId: "commentary", text: "Checking the service." }
+      },
+      { type: "tool.started", payload: { itemId: "command", tool: "command", command: "pwd" } },
+      {
+        type: "approval.requested",
+        payload: { itemId: "command", approvalId: "approval", command: "pwd" }
+      },
+      { type: "file.change", payload: { itemId: "file", changes: [] } },
+      { type: "assistant.delta", payload: { itemId: "reply", delta: "done" } },
+      {
+        type: "tool.output",
+        payload: { itemId: "command", tool: "command", output: "/tmp", status: "completed" }
+      },
+      { type: "assistant.completed", payload: { itemId: "reply", text: "done" } }
+    ];
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      for (const [index, event] of progress.entries()) {
+        onEvent(bridgeEvent({ ...event, seq: index + 1 }));
+        const published = sent.at(-1)!;
+        const row = store!.getMessage(published.payload.messageId);
+        expect(row, event.type).toBeDefined();
+        expect(published.payload).toMatchObject({
+          messageId: row!.id,
+          createdAt: row!.createdAt,
+          updatedAt: row!.updatedAt,
+          eventSeq: index + 1
+        });
+        expect(JSON.parse(row!.dataJson!)).toMatchObject({ eventSeq: index + 1 });
+      }
+      onEvent(bridgeEvent({ seq: progress.length + 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "check" },
+      socket
+    );
+    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+    const live = sent.filter((event) => event.payload?.eventSeq > 0);
+    const toolEvents = live.filter(
+      (event) => event.payload.itemId === "command" && event.type !== "approval.requested"
+    );
+    expect(toolEvents).toHaveLength(2);
+    expect(toolEvents[1]!.payload.createdAt).toBe(toolEvents[0]!.payload.createdAt);
+    expect(toolEvents[1]!.payload.messageId).toBe(toolEvents[0]!.payload.messageId);
+    sent.length = 0;
+    await manager.handle(
+      {
+        type: "session.subscribe",
+        sessionId: session.id,
+        lastRequestId: store!.getLatestRun(session.id)!.id,
+        lastSeq: 0
+      },
+      socket
+    );
+    expect(sent.filter((event) => event.payload?.eventSeq > 0)).toEqual(live);
+  });
+
+  it("recovers positions when replaying events recorded before message metadata existed", async () => {
+    const { project, session, socket, sent } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "assistant.completed",
+          payload: { itemId: "reply", text: "done" }
+        })
+      );
+      onEvent(bridgeEvent({ seq: 2, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "check" },
+      socket
+    );
+    const run = store!.getLatestRun(session.id)!;
+    const message = store!.getMessageByItemId(session.id, `${run.id}:reply`)!;
+    store!.appendRunEvent(
+      run.id,
+      session.id,
+      1,
+      JSON.stringify({
+        ...bridgeEvent({
+          seq: 1,
+          type: "assistant.completed",
+          payload: { itemId: "reply", text: "done" }
+        }),
+        requestId: run.id,
+        projectId: project.id,
+        sessionId: session.id
+      })
+    );
+    sent.length = 0;
+    await manager.handle(
+      { type: "session.subscribe", sessionId: session.id, lastRequestId: run.id, lastSeq: 0 },
+      socket
+    );
+    expect(sent.find((event) => event.type === "assistant.completed")?.payload).toMatchObject({
+      messageId: message.id,
+      createdAt: message.createdAt,
+      eventSeq: 1
+    });
+  });
+});
+
 describe("RunManager runtime inputs", () => {
   it("forwards provider-specific model limits without applying guesses to other providers", async () => {
     const { provider, project, session, socket } = fixture();

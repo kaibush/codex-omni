@@ -423,9 +423,37 @@ export class RunManager {
     if (!replayTruncated) {
       for (const item of replay) {
         if (socket.readyState !== socket.OPEN) break;
-        socket.send(item.eventJson);
+        const event = parseJson<ClientEvent | null>(item.eventJson, null);
+        if (event) this.send(socket, this.restoreReplayPosition(event));
       }
     }
+  }
+
+  private restoreReplayPosition(event: ClientEvent): ClientEvent {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    if (typeof payload.messageId === "string") return event;
+    const itemId =
+      event.type === "approval.requested"
+        ? `approval:${payload.approvalId}`
+        : typeof payload.itemId === "string"
+          ? `${event.requestId}:${payload.itemId}`
+          : event.type === "run.failed"
+            ? `${event.requestId}:run.failed`
+            : undefined;
+    const message = itemId ? this.store.getMessageByItemId(event.sessionId, itemId) : undefined;
+    if (!message) return event;
+    // Events written by older versions have no position. Recover it from the
+    // existing row rather than giving an old replay today's browser time.
+    return {
+      ...event,
+      payload: {
+        ...payload,
+        messageId: message.id,
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+        ...(typeof event.seq === "number" ? { eventSeq: event.seq } : {})
+      }
+    };
   }
 
   private persistRun(sessionId: string, status: RunStatus, extra: Record<string, unknown> = {}) {
@@ -660,10 +688,37 @@ export class RunManager {
   }
 
   private persistEvent(sessionId: string, providerId: string, event: BridgeEvent) {
-    if (this.cancelling.has(sessionId) && event.type === "run.failed") return;
+    if (this.cancelling.has(sessionId) && event.type === "run.failed") return event;
     const compact = compactStreamEvent(event);
-    this.store.appendRunEvent(compact.requestId, sessionId, compact.seq, JSON.stringify(compact));
-    const payload = (compact.payload ?? {}) as Record<string, any>;
+    const message = this.persistTimelineMessage(sessionId, providerId, compact);
+    const persisted = message
+      ? {
+          ...compact,
+          payload: {
+            ...(compact.payload as Record<string, unknown>),
+            messageId: message.id,
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+            eventSeq: compact.seq
+          }
+        }
+      : compact;
+    // Live delivery and reconnect replay must carry the same position as the
+    // history API. The browser's receipt time is not a message timestamp.
+    this.store.appendRunEvent(
+      persisted.requestId,
+      sessionId,
+      persisted.seq,
+      JSON.stringify(persisted)
+    );
+    return persisted;
+  }
+
+  private persistTimelineMessage(sessionId: string, providerId: string, compact: BridgeEvent) {
+    const payload: Record<string, any> = {
+      ...(compact.payload as Record<string, any>),
+      eventSeq: compact.seq
+    };
     const itemId = payload.itemId as string | undefined;
     const persistentItemId = itemId ? `${compact.requestId}:${itemId}` : undefined;
     const existing = persistentItemId
@@ -671,7 +726,7 @@ export class RunManager {
       : undefined;
     if (compact.type === "assistant.delta" || compact.type === "assistant.completed") {
       if (persistentItemId) {
-        this.store.upsertEventMessage({
+        return this.store.upsertEventMessage({
           sessionId,
           role: "assistant",
           content: applyTextPatch(existing?.content ?? "", payload),
@@ -688,23 +743,22 @@ export class RunManager {
       if (!approvalId) return;
       this.store.upsertApproval({
         id: approvalId,
-        runId: event.requestId,
+        runId: compact.requestId,
         sessionId,
         itemId: itemId ?? null,
         tool: String(payload.tool ?? "command"),
         command: String(payload.command ?? ""),
         payloadJson: JSON.stringify(payload)
       });
-      this.store.upsertEventMessage({
+      return this.store.upsertEventMessage({
         sessionId,
         role: "approval",
         content: String(payload.command ?? ""),
         providerId,
-        eventType: event.type,
+        eventType: compact.type,
         itemId: `approval:${approvalId}`,
         dataJson: JSON.stringify({ ...payload, status: "pending" })
       });
-      return;
     }
     const role =
       compact.type === "reasoning.delta"
@@ -753,7 +807,7 @@ export class RunManager {
       compact.type === "tool.started" || compact.type === "tool.output"
         ? truncateToolText(String(folded ?? ""))
         : { text: String(folded ?? ""), truncated: false };
-    this.store.upsertEventMessage({
+    return this.store.upsertEventMessage({
       sessionId,
       role,
       content: truncated.text,
@@ -1104,8 +1158,7 @@ export class RunManager {
       type: "run.started",
       payload: { status: "running", startedAt }
     };
-    this.persistEvent(session.id, provider.id, initialEvent);
-    this.broadcast(session.id, initialEvent);
+    this.broadcast(session.id, this.persistEvent(session.id, provider.id, initialEvent));
     const isFirstUserMessage = !this.store.hasMessageRole(session.id, "user");
     const userMessage = this.store.addMessage({
       sessionId: session.id,
@@ -1223,8 +1276,7 @@ export class RunManager {
           });
         }
       }
-      this.persistEvent(session.id, provider.id, event);
-      this.broadcast(session.id, event);
+      this.broadcast(session.id, this.persistEvent(session.id, provider.id, event));
       if (event.type === "thread.started") {
         const threadId = String(payload.threadId ?? "");
         if (threadId) {
@@ -1388,8 +1440,7 @@ export class RunManager {
         };
         // A transport-level completion is not task completion. Persist this
         // decision before publishing any success or starting queued work.
-        this.persistEvent(session.id, provider.id, interrupted);
-        this.broadcast(session.id, interrupted);
+        this.broadcast(session.id, this.persistEvent(session.id, provider.id, interrupted));
         this.finishRun(
           session.id,
           "interrupted",
@@ -1418,8 +1469,7 @@ export class RunManager {
         });
         return;
       }
-      this.persistEvent(session.id, provider.id, terminal);
-      this.broadcast(session.id, terminal);
+      this.broadcast(session.id, this.persistEvent(session.id, provider.id, terminal));
       this.finishRun(session.id, "completed", { ...terminalPayload, startedAt }, false);
       completed = true;
       if (lockedGoal) {
@@ -1564,7 +1614,9 @@ export class RunManager {
           payload: {
             ...rolloutToolPayload(change.event),
             itemId: change.itemId.slice(separator + 1),
-            ...(change.event.timestamp != null ? { createdAt: change.event.timestamp } : {})
+            messageId: change.message.id,
+            createdAt: change.message.createdAt,
+            updatedAt: change.message.updatedAt
           }
         });
       }

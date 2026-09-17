@@ -82,7 +82,7 @@ function persistRolloutEvent(input: {
   event: CollabRolloutEvent;
   createdAt?: number;
 }) {
-  input.store.upsertEventMessage({
+  return input.store.upsertEventMessage({
     sessionId: input.sessionId,
     role: "tool",
     content: input.event.prompt || input.event.nickname || "",
@@ -97,6 +97,7 @@ function persistRolloutEvent(input: {
 export type RolloutBackfillChange = {
   itemId: string;
   event: CollabRolloutEvent;
+  message: Pick<MessageRow, "id" | "createdAt" | "updatedAt">;
 };
 
 export function backfillSessionRolloutTools(input: {
@@ -147,7 +148,7 @@ export function backfillSessionRolloutTools(input: {
     if (best >= 0 && bestDist <= MATCH_WINDOW_MS) {
       used.add(best);
       const row = emptyErrors[best]!;
-      persistRolloutEvent({
+      const message = persistRolloutEvent({
         store: input.store,
         sessionId: input.sessionId,
         providerId: input.providerId,
@@ -155,11 +156,11 @@ export function backfillSessionRolloutTools(input: {
         event
       });
       recovered.add(event.itemId);
-      changes.push({ itemId: row.itemId!, event });
+      changes.push({ itemId: row.itemId!, event, message });
       continue;
     }
     const itemId = `jsonl:${event.itemId}`;
-    persistRolloutEvent({
+    const message = persistRolloutEvent({
       store: input.store,
       sessionId: input.sessionId,
       providerId: input.providerId,
@@ -168,7 +169,7 @@ export function backfillSessionRolloutTools(input: {
       ...(event.timestamp != null ? { createdAt: event.timestamp } : {})
     });
     recovered.add(event.itemId);
-    changes.push({ itemId, event });
+    changes.push({ itemId, event, message });
   }
   backfillSnapshot.set(cacheKey, snapshot);
   return changes;

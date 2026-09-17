@@ -1258,13 +1258,14 @@ export class Store {
       typeof input.createdAt === "number" && Number.isFinite(input.createdAt)
         ? input.createdAt
         : now;
-    this.db
+    return this.db
       .prepare(
         `INSERT INTO messages(id,session_id,role,content,provider_id,event_type,item_id,data_json,created_at,updated_at)
          VALUES(@id,@sessionId,@role,@content,@providerId,@eventType,@itemId,@dataJson,@createdAt,@now)
-         ON CONFLICT(session_id,item_id) DO UPDATE SET role=@role,content=@content,provider_id=@providerId,event_type=@eventType,data_json=@dataJson,updated_at=@now`
+         ON CONFLICT(session_id,item_id) DO UPDATE SET role=@role,content=@content,provider_id=@providerId,event_type=@eventType,data_json=@dataJson,updated_at=@now
+         RETURNING id,created_at as createdAt,updated_at as updatedAt`
       )
-      .run({
+      .get({
         id: nanoid(),
         sessionId: input.sessionId,
         role: input.role,
@@ -1275,7 +1276,7 @@ export class Store {
         dataJson: input.dataJson ?? null,
         createdAt,
         now
-      });
+      }) as Pick<MessageRow, "id" | "createdAt" | "updatedAt">;
   }
   listMessages(sessionId: string): MessageRow[] {
     return this.db
@@ -1782,7 +1783,7 @@ export class Store {
     const maxBefore = Math.min(older.length, limit - 1);
     const maxAfter = Math.min(newer.length, limit - 1);
     let beforeCount = Math.min(maxBefore, Math.floor((limit - 1) / 2));
-    let afterCount = Math.min(maxAfter, limit - 1 - beforeCount);
+    const afterCount = Math.min(maxAfter, limit - 1 - beforeCount);
     if (beforeCount + afterCount < limit - 1) {
       beforeCount = Math.min(maxBefore, limit - 1 - afterCount);
     }

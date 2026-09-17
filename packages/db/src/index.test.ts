@@ -255,6 +255,30 @@ describe("Store", () => {
     );
   });
 
+  it("returns the stored message position on both insert and update", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const session = store.createSession({ projectId: project.id });
+    const input = {
+      sessionId: session.id,
+      role: "tool" as const,
+      content: "started",
+      eventType: "tool.started",
+      itemId: "run:tool",
+      createdAt: 100
+    };
+    const first = store.upsertEventMessage(input);
+    const updated = store.upsertEventMessage({
+      ...input,
+      content: "done",
+      eventType: "tool.output",
+      createdAt: 200
+    });
+    expect(first.id).toBeTruthy();
+    expect(updated).toMatchObject({ id: first.id, createdAt: 100 });
+    expect(store.getMessage(first.id)).toMatchObject({ ...updated, content: "done" });
+  });
+
   it("pages backward through messages without gaps when timestamps match", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });

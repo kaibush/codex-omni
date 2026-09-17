@@ -163,7 +163,7 @@ export function parseProjectFileHref(href: string | undefined) {
   if (SKIP_HREF_PATTERN.test(trimmed)) return null;
 
   const located = parseFileLocation(trimmed);
-  let raw = located.path.replace(/\\/g, "/");
+  const raw = located.path.replace(/\\/g, "/");
   if (!raw) return null;
   if (!looksLikeProjectFilePath(raw) && !looksLikeRelativeOpenPath(raw) && !raw.startsWith("/")) return null;
   return {

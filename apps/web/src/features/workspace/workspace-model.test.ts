@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Message } from "@/types";
 import {
   boundOutboundCommands,
+  fromMessage,
   loadExpandedProjectIds,
   MAX_OUTBOUND_COMMAND_BYTES,
   MAX_OUTBOUND_COMMANDS,
@@ -88,6 +89,97 @@ describe("timeline upsert", () => {
         (item) => item.id
       )
     ).toEqual(["user", "tool", "assistant"]);
+  });
+
+  it("repositions an existing card when its persisted timestamp replaces the browser clock", () => {
+    const current: TimelineItem[] = [
+      { id: "user", kind: "user", createdAt: 10, messageId: "msg-user" },
+      { id: "assistant", kind: "assistant", createdAt: 40, messageId: "msg-assistant" },
+      { id: "tool", kind: "tool", createdAt: 1_000 }
+    ];
+    const result = upsert(current, "tool", {
+      kind: "tool",
+      createdAt: 20,
+      messageId: "msg-tool",
+      data: { status: "completed" }
+    });
+    expect(result.map((item) => item.id)).toEqual(["user", "tool", "assistant"]);
+    expect(result[1]?.createdAt).toBe(20);
+  });
+
+  it("uses SQLite's message id order for cards created in the same millisecond", () => {
+    let current: TimelineItem[] = [];
+    for (const messageId of ["a", "_", "A"]) {
+      current = upsert(current, `tool-${messageId}`, { kind: "tool", createdAt: 20, messageId });
+    }
+    expect(current.map((item) => item.messageId)).toEqual(["A", "_", "a"]);
+    expect(
+      upsert(current, "tool-_", { kind: "tool", text: "completed" }).map((item) => item.messageId)
+    ).toEqual(["A", "_", "a"]);
+  });
+
+  it("keeps the stored position when an unversioned update only has an arrival timestamp", () => {
+    const current: TimelineItem[] = [
+      { id: "tool", kind: "tool", createdAt: 20, messageId: "msg-tool" },
+      { id: "reply", kind: "assistant", createdAt: 40, messageId: "msg-reply" }
+    ];
+    const result = upsert(current, "tool", { kind: "tool", text: "done", createdAt: 1_000 });
+    expect(result.map((item) => item.id)).toEqual(["tool", "reply"]);
+    expect(result[0]?.createdAt).toBe(20);
+  });
+
+  it("restores the persisted event version and streaming phase from history", () => {
+    expect(
+      fromMessage({
+        id: "msg-assistant",
+        sessionId: "session",
+        role: "assistant",
+        content: "still working",
+        providerId: "provider",
+        eventType: "assistant.delta",
+        itemId: "run:assistant",
+        dataJson: JSON.stringify({ eventSeq: 7, phase: "updated" }),
+        createdAt: 20,
+        updatedAt: 30
+      })
+    ).toMatchObject({ messageId: "msg-assistant", eventSeq: 7, streaming: true });
+  });
+
+  it("ignores a delayed batch and duplicate replay after a newer history snapshot", () => {
+    const current: TimelineItem[] = [
+      {
+        id: "reply",
+        kind: "assistant",
+        messageId: "msg-reply",
+        createdAt: 20,
+        text: "finished reply",
+        streaming: false,
+        updatedAt: 30,
+        eventSeq: 9
+      }
+    ];
+    for (const eventSeq of [7, 9]) {
+      expect(
+        upsert(current, "reply", {
+          kind: "assistant",
+          text: "finished reply plus stale delta",
+          streaming: true,
+          createdAt: 20,
+          updatedAt: 30,
+          eventSeq
+        })
+      ).toBe(current);
+    }
+    expect(
+      upsert(current, "reply", {
+        kind: "assistant",
+        text: "a newer version",
+        streaming: false,
+        createdAt: 20,
+        updatedAt: 30,
+        eventSeq: 10
+      })[0]?.text
+    ).toBe("a newer version");
   });
 });
 
