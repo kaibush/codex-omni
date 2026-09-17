@@ -41,11 +41,13 @@ import {
 } from "./turn-completion.js";
 import {
   DEFAULT_FAILURE_RETRY_DELAY_MS,
+  DEFAULT_FAILURE_RETRY_MAX_DELAY_MS,
   FAILURE_RETRY_USER_MESSAGE,
   failureRetryBaseDelayMs,
   failureRetryDelayMs,
   failureRetryExhaustedNotice,
   failureRetryLimit,
+  failureRetryMaxDelayMs,
   failureRetryingNotice,
   isRetryableTurnFailure
 } from "./failure-retry.js";
@@ -82,7 +84,8 @@ const runtimeDefaults = {
     "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
   failureRetryEnabled: false,
   failureRetryMaxAttempts: 30,
-  failureRetryDelayMs: DEFAULT_FAILURE_RETRY_DELAY_MS
+  failureRetryDelayMs: DEFAULT_FAILURE_RETRY_DELAY_MS,
+  failureRetryMaxDelayMs: DEFAULT_FAILURE_RETRY_MAX_DELAY_MS
 };
 
 function isContinuationRequest(message: string, triggers: unknown) {
@@ -608,7 +611,8 @@ export class RunManager {
     if (this.activeRuns.has(input.sessionId) || this.worker.isActive(input.sessionId)) return;
     const delayMs = failureRetryDelayMs(
       attempt,
-      failureRetryBaseDelayMs(settings.failureRetryDelayMs)
+      failureRetryBaseDelayMs(settings.failureRetryDelayMs),
+      failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs)
     );
     this.broadcastContinuationNotice(
       input.sessionId,
@@ -1249,7 +1253,8 @@ export class RunManager {
       if (failureRetry && failureRetryAttempt > 0) {
         const delayMs = failureRetryDelayMs(
           failureRetryAttempt,
-          failureRetryBaseDelayMs(settings.failureRetryDelayMs)
+          failureRetryBaseDelayMs(settings.failureRetryDelayMs),
+          failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs)
         );
         if (delayMs > 0) {
           const proceeded = await this.waitForFailureRetry(session.id, delayMs);

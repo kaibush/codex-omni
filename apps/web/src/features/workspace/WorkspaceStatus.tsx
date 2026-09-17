@@ -18,18 +18,11 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { parseContextUsage } from "@/lib/context-usage";
 import { formatDateTime, formatMessageTime } from "@/lib/utils";
 import { taskStatusLabel, type TaskStatus } from "@/lib/task-state";
 import type { WorkspaceSettings } from "@/features/workspace/SettingsDialog";
+import { RuntimeSettingsTabs } from "./RuntimeSettingsTabs";
 import { placeRuntimeOptionsPanel } from "./runtime-options-layout";
 import {
   formatDuration,
@@ -351,122 +344,13 @@ export function RuntimeOptionsPanel({
             关闭
           </Button>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 max-sm:grid-cols-1">
-          <label className="field-label">
-            执行方式
-            <Select
-              value={settings.executionMode}
-              onValueChange={(value) =>
-                void onChange({
-                  ...settings,
-                  executionMode: value as WorkspaceSettings["executionMode"]
-                })
-              }
-            >
-              <SelectTrigger className="mt-1.5 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="execute">Execute</SelectItem>
-                <SelectItem value="plan">Plan</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="field-label">
-            文件权限
-            <Select
-              value={settings.sandbox}
-              onValueChange={(value) =>
-                void onChange({
-                  ...settings,
-                  sandbox: value as WorkspaceSettings["sandbox"]
-                })
-              }
-            >
-              <SelectTrigger className="mt-1.5 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="read-only">只读</SelectItem>
-                <SelectItem value="workspace-write">工作区可写</SelectItem>
-                <SelectItem value="danger-full-access">完全访问</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="field-label">
-            审批策略
-            <Select
-              value={settings.approvalPolicy}
-              onValueChange={(value) =>
-                void onChange({
-                  ...settings,
-                  approvalPolicy: value as WorkspaceSettings["approvalPolicy"]
-                })
-              }
-            >
-              <SelectTrigger className="mt-1.5 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="untrusted">建议模式</SelectItem>
-                <SelectItem value="on-request">平衡模式（推荐）</SelectItem>
-                <SelectItem value="never">全自动</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="field-label">
-            运行中发送方式
-            <Select
-              value={settings.sendMode}
-              onValueChange={(value) =>
-                void onChange({
-                  ...settings,
-                  sendMode: value as WorkspaceSettings["sendMode"]
-                })
-              }
-            >
-              <SelectTrigger className="mt-1.5 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="queue">排队等待</SelectItem>
-                <SelectItem value="steer">直接插入</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-        </div>
-        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-          允许命令访问网络
-          <Switch
-            checked={settings.networkAccessEnabled}
-            onCheckedChange={(checked) =>
-              void onChange({ ...settings, networkAccessEnabled: checked })
-            }
-          />
-        </label>
-        <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-          启用继续执行提示词
-          <Switch
-            checked={settings.continuationEnabled}
-            onCheckedChange={(checked) =>
-              void onChange({ ...settings, continuationEnabled: checked })
-            }
-          />
-        </label>
-        <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-          失败后自动重试
-          <Switch
-            checked={settings.failureRetryEnabled}
-            onCheckedChange={(checked) =>
-              void onChange({ ...settings, failureRetryEnabled: checked })
-            }
-          />
-        </label>
+        <RuntimeSettingsTabs
+          compact
+          settings={settings}
+          onChange={(next) => void onChange(next)}
+        />
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。遇到限流、超时等可恢复错误时，可自动发送继续执行直到成功。
-        </p>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Plan 只做只读规划；平衡模式仅在需要提升权限时确认。运行中发送可选排队等待或直接插入当前对话。修改后立即保存，并用于下一次发送。
+          修改后立即保存，并用于下一次发送。
         </p>
         {homePath ? (
           <p className="mt-2 truncate text-xs text-muted-foreground" title={homePath}>

@@ -4,6 +4,7 @@ import {
   failureRetryExhaustedNotice,
   failureRetryingNotice,
   failureRetryLimit,
+  failureRetryMaxDelayMs,
   isRetryableTurnFailure
 } from "./failure-retry.js";
 
@@ -24,6 +25,7 @@ describe("failure retry classification", () => {
 
   it("does not retry auth, billing or invalid-model errors", () => {
     expect(isRetryableTurnFailure("401 Unauthorized: invalid API key")).toBe(false);
+    expect(isRetryableTurnFailure("402 Payment Required")).toBe(false);
     expect(isRetryableTurnFailure("insufficient quota")).toBe(false);
     expect(isRetryableTurnFailure("model grok-4.6 does not exist")).toBe(false);
     expect(isRetryableTurnFailure("upstream failed")).toBe(false);
@@ -36,7 +38,12 @@ describe("failure retry classification", () => {
     expect(failureRetryDelayMs(3, 15_000)).toBe(60_000);
     expect(failureRetryDelayMs(4, 15_000)).toBe(90_000);
     expect(failureRetryDelayMs(8, 15_000)).toBe(90_000);
+    expect(failureRetryDelayMs(4, 15_000, 45_000)).toBe(45_000);
+    expect(failureRetryDelayMs(8, 15_000, 180_000)).toBe(180_000);
     expect(failureRetryDelayMs(1, 0)).toBe(0);
+    expect(failureRetryMaxDelayMs(undefined)).toBe(90_000);
+    expect(failureRetryMaxDelayMs(180_000)).toBe(180_000);
+    expect(failureRetryMaxDelayMs(1_000_000)).toBe(600_000);
     expect(failureRetryLimit(2)).toBe(2);
     expect(
       failureRetryingNotice({

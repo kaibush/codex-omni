@@ -43,7 +43,7 @@ export const settingsNavGroups: readonly SettingsNavGroup[] = [
             id: "runtime",
             href: "/settings/runtime",
             title: "运行与权限",
-            description: "文件权限、审批策略和 Plan / Execute"
+            description: "权限、发送方式和失败重试"
           },
           {
             id: "appearance",

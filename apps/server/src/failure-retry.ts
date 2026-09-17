@@ -1,13 +1,14 @@
 export const DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS = 30;
 export const DEFAULT_FAILURE_RETRY_DELAY_MS = 15_000;
 export const DEFAULT_FAILURE_RETRY_MAX_DELAY_MS = 90_000;
+export const FAILURE_RETRY_HARD_MAX_DELAY_MS = 600_000;
 export const FAILURE_RETRY_USER_MESSAGE = "自动重试：继续执行";
 
 const RETRYABLE_FAILURE =
   /rate\s*limit|ratelimit|too many requests|\b429\b|overloaded|capacity|temporar(?:y|ily) unavailable|\b503\b|\b502\b|\b504\b|bad gateway|gateway timeout|timed?\s*out|etimedout|econnreset|econnrefused|socket hang up|network error|fetch failed|stream disconnected|stream closed|stream retries exhausted|turn-timeout|service unavailable|codex 流在 turn\.completed 前结束/i;
 
 const NOT_RETRYABLE_FAILURE =
-  /unauthori[sz]ed|\b401\b|invalid\s+api\s*key|forbidden|\b403\b|payment required|billing|insufficient\s+(?:quota|credits)|model\s+(?:not\s+found|does\s+not\s+exist)|invalid\s+(?:model|request|parameter)|bad request|\b400\b/i;
+  /unauthori[sz]ed|\b401\b|\b402\b|invalid\s+api\s*key|forbidden|\b403\b|payment required|billing|insufficient\s+(?:quota|credits)|model\s+(?:not\s+found|does\s+not\s+exist)|invalid\s+(?:model|request|parameter)|bad request|\b400\b/i;
 
 export function isRetryableTurnFailure(reason: unknown) {
   const text = typeof reason === "string" ? reason.trim() : "";
@@ -16,10 +17,15 @@ export function isRetryableTurnFailure(reason: unknown) {
   return RETRYABLE_FAILURE.test(text);
 }
 
-export function failureRetryDelayMs(attempt: number, baseMs = DEFAULT_FAILURE_RETRY_DELAY_MS) {
+export function failureRetryDelayMs(
+  attempt: number,
+  baseMs = DEFAULT_FAILURE_RETRY_DELAY_MS,
+  maxMs = DEFAULT_FAILURE_RETRY_MAX_DELAY_MS
+) {
   if (!Number.isFinite(baseMs) || baseMs <= 0) return 0;
   const safeAttempt = Math.max(1, Math.trunc(attempt) || 1);
-  return Math.min(DEFAULT_FAILURE_RETRY_MAX_DELAY_MS, Math.trunc(baseMs) * 2 ** (safeAttempt - 1));
+  const cap = failureRetryMaxDelayMs(maxMs);
+  return Math.min(cap, Math.trunc(baseMs) * 2 ** (safeAttempt - 1));
 }
 
 export function failureRetryLimit(value: unknown) {
@@ -31,7 +37,13 @@ export function failureRetryLimit(value: unknown) {
 export function failureRetryBaseDelayMs(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_FAILURE_RETRY_DELAY_MS;
-  return Math.min(DEFAULT_FAILURE_RETRY_MAX_DELAY_MS, Math.max(0, Math.trunc(parsed)));
+  return Math.min(FAILURE_RETRY_HARD_MAX_DELAY_MS, Math.max(0, Math.trunc(parsed)));
+}
+
+export function failureRetryMaxDelayMs(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_FAILURE_RETRY_MAX_DELAY_MS;
+  return Math.min(FAILURE_RETRY_HARD_MAX_DELAY_MS, Math.max(0, Math.trunc(parsed)));
 }
 
 function shortFailureReason(reason: string) {
