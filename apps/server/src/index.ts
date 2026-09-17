@@ -44,6 +44,7 @@ import {
 import { parsePlanTasks, summarizeRuns } from "./workspace-loop.js";
 import { readAgentsMarkdown, writeAgentsMarkdown } from "./project-knowledge.js";
 import { listProjectSkills, listProviderSkills } from "./skills-mcp.js";
+import { DEFAULT_FAILURE_RETRY_MAX_DELAY_MS } from "./failure-retry.js";
 import {
   publicOperation,
   recordOperation,
@@ -590,7 +591,7 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       continuationDirective: z.string().trim().max(4000).optional(),
       failureRetryEnabled: z.boolean().optional(),
       failureRetryMaxAttempts: z.number().int().min(1).max(100).optional(),
-      failureRetryDelayMs: z.number().int().min(0).max(180_000).optional(),
+      failureRetryDelayMs: z.number().int().min(0).max(DEFAULT_FAILURE_RETRY_MAX_DELAY_MS).optional(),
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),

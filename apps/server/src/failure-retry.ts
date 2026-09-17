@@ -1,5 +1,6 @@
 export const DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS = 30;
 export const DEFAULT_FAILURE_RETRY_DELAY_MS = 15_000;
+export const DEFAULT_FAILURE_RETRY_MAX_DELAY_MS = 90_000;
 export const FAILURE_RETRY_USER_MESSAGE = "自动重试：继续执行";
 
 const RETRYABLE_FAILURE =
@@ -18,7 +19,7 @@ export function isRetryableTurnFailure(reason: unknown) {
 export function failureRetryDelayMs(attempt: number, baseMs = DEFAULT_FAILURE_RETRY_DELAY_MS) {
   if (!Number.isFinite(baseMs) || baseMs <= 0) return 0;
   const safeAttempt = Math.max(1, Math.trunc(attempt) || 1);
-  return Math.min(180_000, Math.trunc(baseMs) * 2 ** (safeAttempt - 1));
+  return Math.min(DEFAULT_FAILURE_RETRY_MAX_DELAY_MS, Math.trunc(baseMs) * 2 ** (safeAttempt - 1));
 }
 
 export function failureRetryLimit(value: unknown) {
@@ -30,7 +31,7 @@ export function failureRetryLimit(value: unknown) {
 export function failureRetryBaseDelayMs(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_FAILURE_RETRY_DELAY_MS;
-  return Math.min(180_000, Math.max(0, Math.trunc(parsed)));
+  return Math.min(DEFAULT_FAILURE_RETRY_MAX_DELAY_MS, Math.max(0, Math.trunc(parsed)));
 }
 
 function shortFailureReason(reason: string) {

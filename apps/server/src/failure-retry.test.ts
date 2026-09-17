@@ -33,7 +33,9 @@ describe("failure retry classification", () => {
   it("backs off retry delay and formats notices", () => {
     expect(failureRetryDelayMs(1, 15_000)).toBe(15_000);
     expect(failureRetryDelayMs(2, 15_000)).toBe(30_000);
-    expect(failureRetryDelayMs(8, 15_000)).toBe(180_000);
+    expect(failureRetryDelayMs(3, 15_000)).toBe(60_000);
+    expect(failureRetryDelayMs(4, 15_000)).toBe(90_000);
+    expect(failureRetryDelayMs(8, 15_000)).toBe(90_000);
     expect(failureRetryDelayMs(1, 0)).toBe(0);
     expect(failureRetryLimit(2)).toBe(2);
     expect(
