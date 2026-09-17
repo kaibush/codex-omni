@@ -40,6 +40,16 @@ import {
   type ContinuationRetryReason
 } from "./turn-completion.js";
 import {
+  DEFAULT_FAILURE_RETRY_DELAY_MS,
+  FAILURE_RETRY_USER_MESSAGE,
+  failureRetryBaseDelayMs,
+  failureRetryDelayMs,
+  failureRetryExhaustedNotice,
+  failureRetryLimit,
+  failureRetryingNotice,
+  isRetryableTurnFailure
+} from "./failure-retry.js";
+import {
   isThreadGoalLocked,
   readThreadGoal,
   threadGoalNotice,
@@ -69,7 +79,10 @@ const runtimeDefaults = {
   continuationEnabled: true,
   continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
   continuationDirective:
-    "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。"
+    "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
+  failureRetryEnabled: false,
+  failureRetryMaxAttempts: 30,
+  failureRetryDelayMs: DEFAULT_FAILURE_RETRY_DELAY_MS
 };
 
 function isContinuationRequest(message: string, triggers: unknown) {
@@ -106,6 +119,8 @@ type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }
   continuationRetry?: boolean;
   continuationRetryReason?: ContinuationRetryReason;
   displayMessage?: string;
+  failureRetry?: boolean;
+  failureRetryAttempt?: number;
 };
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
 type SteerCommand = Extract<RunCommand, { type: "turn.steer" }>;
@@ -186,6 +201,7 @@ export class RunManager {
   private cancelling = new Set<string>();
   private reconnecting = new Set<string>();
   private activeRuns = new Map<string, ActiveRun>();
+  private failureRetryAborters = new Map<string, () => void>();
   private runtimeMonitor: NodeJS.Timeout;
   readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
 
@@ -217,6 +233,8 @@ export class RunManager {
 
   shutdown() {
     clearInterval(this.runtimeMonitor);
+    for (const abort of this.failureRetryAborters.values()) abort();
+    this.failureRetryAborters.clear();
     for (const active of this.activeRuns.values()) {
       clearTimeout(active.timeout);
       this.finishRun(active.sessionId, "interrupted", { reason: "server-shutdown" });
@@ -225,6 +243,7 @@ export class RunManager {
   }
 
   cancel(sessionId: string) {
+    this.abortFailureRetryWait(sessionId);
     const active = this.activeRuns.get(sessionId);
     if (!active && !this.worker.isActive(sessionId)) return false;
     this.cancelling.add(sessionId);
@@ -514,6 +533,91 @@ export class RunManager {
       requestId,
       payload: { message, continuation: true, kind }
     });
+  }
+
+  private abortFailureRetryWait(sessionId: string) {
+    const abort = this.failureRetryAborters.get(sessionId);
+    if (!abort) return;
+    abort();
+  }
+
+  private waitForFailureRetry(sessionId: string, delayMs: number) {
+    if (delayMs <= 0) return Promise.resolve(true);
+    this.abortFailureRetryWait(sessionId);
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.failureRetryAborters.delete(sessionId);
+        resolve(true);
+      }, delayMs);
+      timer.unref();
+      this.failureRetryAborters.set(sessionId, () => {
+        clearTimeout(timer);
+        this.failureRetryAborters.delete(sessionId);
+        resolve(false);
+      });
+    });
+  }
+
+  private failureRetryCommand(command: TurnStartCommand, attempt: number): TurnStartCommand {
+    return {
+      type: "turn.start",
+      projectId: command.projectId,
+      sessionId: command.sessionId,
+      message: command.message,
+      ...(command.providerId ? { providerId: command.providerId } : {}),
+      ...(command.model ? { model: command.model } : {}),
+      ...(command.sandbox ? { sandbox: command.sandbox } : {}),
+      ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+      ...(typeof command.networkAccessEnabled === "boolean"
+        ? { networkAccessEnabled: command.networkAccessEnabled }
+        : {}),
+      ...(command.mode === "plan" || command.mode === "execute" ? { mode: command.mode } : {}),
+      failureRetry: true,
+      failureRetryAttempt: attempt
+    };
+  }
+
+  private async maybeRetryAfterFailure(input: {
+    sessionId: string;
+    requestId: string;
+    providerId: string;
+    command: TurnStartCommand;
+  }) {
+    if (this.cancelling.has(input.sessionId)) return;
+    const settings = this.store.getSettings(runtimeDefaults);
+    if (settings.failureRetryEnabled !== true) return;
+    const run = this.store.getRun(input.requestId);
+    if (run?.status !== "failed") return;
+    const reason =
+      run.reason ||
+      this.store.getMessageByItemId(input.sessionId, `${input.requestId}:run.failed`)?.content ||
+      "";
+    if (!isRetryableTurnFailure(reason)) return;
+    const attempt = (input.command.failureRetryAttempt ?? 0) + 1;
+    const maxAttempts = failureRetryLimit(settings.failureRetryMaxAttempts);
+    if (attempt > maxAttempts) {
+      this.broadcastContinuationNotice(
+        input.sessionId,
+        input.providerId,
+        input.requestId,
+        failureRetryExhaustedNotice({ reason, maxAttempts }),
+        "warning"
+      );
+      return;
+    }
+    if (this.activeRuns.has(input.sessionId) || this.worker.isActive(input.sessionId)) return;
+    const delayMs = failureRetryDelayMs(
+      attempt,
+      failureRetryBaseDelayMs(settings.failureRetryDelayMs)
+    );
+    this.broadcastContinuationNotice(
+      input.sessionId,
+      input.providerId,
+      input.requestId,
+      failureRetryingNotice({ reason, attempt, maxAttempts, delayMs }),
+      "retrying"
+    );
+    await this.startTurn(this.failureRetryCommand(input.command, attempt));
   }
 
   private persistThreadGoalNotice(
@@ -905,12 +1009,16 @@ export class RunManager {
             )
           : null));
     const continuationRetry = command.continuationRetry === true;
+    const failureRetry = command.failureRetry === true;
+    const failureRetryAttempt = command.failureRetryAttempt ?? 0;
     const planMode = !continuationRetry && command.mode === "plan";
     const userMessageText = continuationRetry
       ? "自动复核：继续执行上一轮未完成的工作"
-      : planMode
-        ? applyPlanMode(command.message)
-        : command.message;
+      : failureRetry
+        ? FAILURE_RETRY_USER_MESSAGE
+        : planMode
+          ? applyPlanMode(command.message)
+          : command.message;
     const settings = this.store.getSettings(runtimeDefaults);
     const projectRules = applyProjectRules(
       "",
@@ -918,14 +1026,19 @@ export class RunManager {
         .filter((note) => note.enabled)
         .map((note) => ({ title: note.title, content: note.content }))
     );
+    const configuredDirective =
+      typeof settings.continuationDirective === "string"
+        ? settings.continuationDirective.trim()
+        : "";
     const continuationDirective = continuationRetry
       ? `\n\n${continuationRetryDirective(command.continuationRetryReason ?? "continuation")}\n\n原始用户请求：\n${command.message}`
-      : settings.continuationEnabled === true &&
-          isContinuationRequest(userMessageText, settings.continuationTriggers) &&
-          typeof settings.continuationDirective === "string" &&
-          settings.continuationDirective.trim()
-        ? `\n\n${settings.continuationDirective.trim()}`
-        : "";
+      : failureRetry
+        ? `\n\n${configuredDirective || runtimeDefaults.continuationDirective}\n\n原始用户请求：\n${command.message}`
+        : settings.continuationEnabled === true &&
+            isContinuationRequest(userMessageText, settings.continuationTriggers) &&
+            configuredDirective
+          ? `\n\n${configuredDirective}`
+          : "";
     const continuationApplied = Boolean(continuationDirective);
     const runtimeBody = projectRules
       ? `${projectRules}\n\n${userMessageText}${continuationDirective}`
@@ -940,6 +1053,7 @@ export class RunManager {
     const timeout = setTimeout(() => {
       const current = this.activeRuns.get(session.id);
       if (current?.runId !== requestId) return;
+      this.abortFailureRetryWait(session.id);
       this.finishRun(session.id, "failed", { reason: "turn-timeout", startedAt });
       this.worker.cancel(session.id);
     }, this.turnTimeoutMs);
@@ -1000,7 +1114,8 @@ export class RunManager {
         ...(attachments.length ? { attachments } : {}),
         ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
         ...(continuationApplied ? { continuation: true } : {}),
-        ...(continuationRetry ? { continuationRetry: true } : {})
+        ...(continuationRetry ? { continuationRetry: true } : {}),
+        ...(failureRetry ? { failureRetry: true, failureRetryAttempt } : {})
       })
     });
     this.broadcast(session.id, {
@@ -1017,7 +1132,8 @@ export class RunManager {
         ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
         ...(continuationApplied
           ? { continuation: true, ...(continuationRetry ? { continuationRetry: true } : {}) }
-          : {})
+          : {}),
+        ...(failureRetry ? { failureRetry: true, failureRetryAttempt } : {})
       }
     });
     if (isFirstUserMessage && isPlaceholderSessionTitle(session.title)) {
@@ -1130,6 +1246,29 @@ export class RunManager {
     };
     let lockedGoal: ThreadGoal | null = null;
     try {
+      if (failureRetry && failureRetryAttempt > 0) {
+        const delayMs = failureRetryDelayMs(
+          failureRetryAttempt,
+          failureRetryBaseDelayMs(settings.failureRetryDelayMs)
+        );
+        if (delayMs > 0) {
+          const proceeded = await this.waitForFailureRetry(session.id, delayMs);
+          if (
+            !proceeded ||
+            this.cancelling.has(session.id) ||
+            this.store.getRun(requestId)?.status !== "running"
+          ) {
+            if (this.store.getRun(requestId)?.status === "running") {
+              this.finishRun(session.id, "cancelled", { reason: "failure-retry-aborted" });
+            }
+            return;
+          }
+        }
+        if (this.store.getSettings(runtimeDefaults).failureRetryEnabled !== true) {
+          this.finishRun(session.id, "cancelled", { reason: "failure-retry-disabled" });
+          return;
+        }
+      }
       if (process.env.CODEX_OMNI_FAKE_RUNTIME === "1") {
         await this.runFakeTurn({
           requestId,
@@ -1325,8 +1464,26 @@ export class RunManager {
       }
     } finally {
       clearTimeout(timeout);
+      const cancelled =
+        this.cancelling.has(session.id) || this.store.getRun(requestId)?.status === "cancelled";
       this.cancelling.delete(session.id);
       if (completed) void this.startNextQueued(session.id);
+      else if (!cancelled) {
+        try {
+          await this.maybeRetryAfterFailure({
+            sessionId: session.id,
+            requestId,
+            providerId: provider.id,
+            command
+          });
+        } catch (error) {
+          this.broadcast(session.id, {
+            type: "server.error",
+            sessionId: session.id,
+            payload: { message: error instanceof Error ? error.message : String(error) }
+          });
+        }
+      }
     }
   }
 

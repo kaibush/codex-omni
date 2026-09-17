@@ -1688,6 +1688,223 @@ describe("RunManager reconnect state", () => {
   });
 });
 
+describe("RunManager failure retry", () => {
+  const rateLimit =
+    "rate limit exceeded: Your requests to gpt-6-astra for gpt-6-astra-2026-09-03 in westus3 have exceeded rate limit.";
+
+  function enableFailureRetry(extra: Record<string, unknown> = {}) {
+    store!.updateSettings({
+      failureRetryEnabled: true,
+      failureRetryDelayMs: 0,
+      failureRetryMaxAttempts: 5,
+      ...extra
+    });
+  }
+
+  it("automatically continues after a rate limit until Codex succeeds", async () => {
+    const { project, provider, session, socket, sent } = fixture();
+    enableFailureRetry();
+    let calls = 0;
+    runtimeMocks.run.mockImplementation(
+      async (request: { message: string }, onEvent: (event: BridgeEvent) => void) => {
+        calls += 1;
+        if (calls < 3) {
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "run.failed",
+              payload: { status: "failed", message: rateLimit }
+            })
+          );
+          return;
+        }
+        expect(request.message).toContain("这是一个继续执行请求");
+        expect(request.message).toContain("实现自动重试");
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "tool.started",
+            payload: { itemId: "tool-1", tool: "command" }
+          })
+        );
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "turn.completed",
+            payload: { status: "completed", endedAt: Date.now(), usage: {} }
+          })
+        );
+      }
+    );
+
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        providerId: provider.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+
+    expect(calls).toBe(3);
+    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "retrying")
+    ).toBe(true);
+    expect(
+      store!
+        .listMessages(session.id)
+        .some((message) => message.role === "user" && message.content === "自动重试：继续执行")
+    ).toBe(true);
+  });
+
+  it("does not retry when the setting is off", async () => {
+    const { project, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: rateLimit }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("failed");
+  });
+
+  it("does not retry authentication failures", async () => {
+    const { project, session, socket } = fixture();
+    enableFailureRetry();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: "401 Unauthorized: invalid API key" }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("failed");
+  });
+
+  it("stops after the configured number of automatic retries", async () => {
+    const { project, session, socket, sent } = fixture();
+    enableFailureRetry({ failureRetryMaxAttempts: 2 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: rateLimit }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(3);
+    expect(store!.getLatestRun(session.id)?.status).toBe("failed");
+    expect(
+      sent.some(
+        (event) =>
+          event.type === "server.error" &&
+          event.payload?.kind === "warning" &&
+          String(event.payload?.message ?? "").includes("已自动重试 2 次仍未成功")
+      )
+    ).toBe(true);
+  });
+
+  it("cancels a delayed automatic retry", async () => {
+    const { project, session, socket } = fixture();
+    enableFailureRetry({ failureRetryDelayMs: 80 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: rateLimit }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    const pending = manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+    await vi.waitFor(() => expect(store!.listRuns({ sessionId: session.id }).length).toBe(2));
+    expect(manager.cancel(session.id)).toBe(true);
+    await pending;
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("cancelled");
+  });
+
+  it("stops a delayed retry if the setting is turned off during the wait", async () => {
+    const { project, session, socket } = fixture();
+    enableFailureRetry({ failureRetryDelayMs: 80 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: rateLimit }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    const pending = manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "实现自动重试"
+      },
+      socket
+    );
+    await vi.waitFor(() => expect(store!.listRuns({ sessionId: session.id }).length).toBe(2));
+    store!.updateSettings({ failureRetryEnabled: false });
+    await pending;
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("cancelled");
+  });
+});
+
 describe("RunManager steer inserts", () => {
   it("persists a steered user turn without replacing the current run cards", async () => {
     const { project, provider, session, socket, sent } = fixture();

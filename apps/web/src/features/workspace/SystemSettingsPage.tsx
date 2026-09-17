@@ -521,6 +521,14 @@ export function SystemSettingsPage() {
                       setDraft({ ...draft, continuationEnabled: checked })
                     }
                   />
+                  <SettingsSwitchField
+                    label="失败后自动重试"
+                    description="遇到限流、超时等可恢复错误时，自动发送继续执行请求，直到 Codex 成功响应或你手动停止。"
+                    checked={draft.failureRetryEnabled}
+                    onCheckedChange={(checked) =>
+                      setDraft({ ...draft, failureRetryEnabled: checked })
+                    }
+                  />
                   <SettingsField
                     label="继续执行触发词"
                     hint="每行一个短语。用户消息完整匹配时，会追加下方指令并要求模型立即继续实际工作。"

@@ -1038,7 +1038,8 @@ export function Workspace() {
                 : {}),
               ...(payload.turnOptions ? { turnOptions: payload.turnOptions } : {}),
               ...(payload.continuation === true ? { continuation: true } : {}),
-              ...(payload.continuationRetry === true ? { continuationRetry: true } : {})
+              ...(payload.continuationRetry === true ? { continuationRetry: true } : {}),
+              ...(payload.failureRetry === true ? { failureRetry: true } : {})
             },
             createdAt: payload.createdAt ?? Date.now()
           })

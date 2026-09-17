@@ -453,8 +453,17 @@ export function RuntimeOptionsPanel({
             }
           />
         </label>
+        <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
+          失败后自动重试
+          <Switch
+            checked={settings.failureRetryEnabled}
+            onCheckedChange={(checked) =>
+              void onChange({ ...settings, failureRetryEnabled: checked })
+            }
+          />
+        </label>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。
+          输入已配置的继续触发词时，自动追加提示词并要求模型继续实际工作。遇到限流、超时等可恢复错误时，可自动发送继续执行直到成功。
         </p>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           Plan 只做只读规划；平衡模式仅在需要提升权限时确认。运行中发送可选排队等待或直接插入当前对话。修改后立即保存，并用于下一次发送。

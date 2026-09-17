@@ -335,6 +335,9 @@ const defaultSettings = {
   continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
   continuationDirective:
     "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
+  failureRetryEnabled: false,
+  failureRetryMaxAttempts: 30,
+  failureRetryDelayMs: 15_000,
   showReasoning: false,
   expandToolCalls: true,
   timelineView: "folded" as const,
@@ -585,6 +588,9 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
         .transform((values) => [...new Set(values)])
         .optional(),
       continuationDirective: z.string().trim().max(4000).optional(),
+      failureRetryEnabled: z.boolean().optional(),
+      failureRetryMaxAttempts: z.number().int().min(1).max(100).optional(),
+      failureRetryDelayMs: z.number().int().min(0).max(180_000).optional(),
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),

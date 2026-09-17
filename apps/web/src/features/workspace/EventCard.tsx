@@ -784,6 +784,11 @@ function EventCardComponent({
               继续执行
             </span>
           ) : null}
+          {item.data?.failureRetry === true ? (
+            <span className="provider-pill" title="因限流或临时错误自动继续执行">
+              自动重试
+            </span>
+          ) : null}
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}

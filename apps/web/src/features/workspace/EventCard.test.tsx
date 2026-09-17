@@ -78,6 +78,21 @@ describe("EventCard copy controls", () => {
     expect(html).toContain('aria-label="从此处分叉"');
   });
 
+  it("marks automatic failure retries on user messages", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "user-retry",
+          kind: "user",
+          text: "自动重试：继续执行",
+          data: { continuation: true, failureRetry: true }
+        }}
+      />
+    );
+    expect(html).toContain("继续执行");
+    expect(html).toContain("自动重试");
+  });
+
   it("offers edit, retry, quote, copy-link and create-file actions", () => {
     const html = renderToStaticMarkup(
       <EventCard
