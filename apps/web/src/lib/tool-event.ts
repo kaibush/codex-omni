@@ -355,6 +355,18 @@ export function classifyRuntimeNotice(
     }
     return { level: "error", title: "运行失败", message };
   }
+  if (tool === "requestuserinput") {
+    if (parseUserInputQuestions(data).length) return null;
+    if (!message) return null;
+    if (/unavailable in default mode/i.test(message)) {
+      return {
+        level: "info",
+        title: "选择不可用",
+        message: "当前对话是 Default 模式，不能弹出选择题，模型已自动继续。"
+      };
+    }
+    return { level: "info", title: "选择未发出", message };
+  }
   return null;
 }
 

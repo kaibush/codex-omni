@@ -448,6 +448,27 @@ describe("EventCard copy controls", () => {
     expect(html).not.toContain("runtime_error");
   });
 
+  it("renders unavailable request_user_input as a notice instead of a choice card", () => {
+    const html = renderToStaticMarkup(
+      <EventCard
+        item={{
+          id: "ask-empty",
+          kind: "tool",
+          text: "request_user_input is unavailable in Default mode",
+          data: {
+            tool: "request_user_input",
+            input: {},
+            status: "completed",
+            output: "request_user_input is unavailable in Default mode"
+          }
+        }}
+      />
+    );
+    expect(html).toContain("选择不可用");
+    expect(html).toContain("Default 模式");
+    expect(html).not.toContain("需要你选择");
+  });
+
   it("renders view_image with the file name", () => {
     const html = renderToStaticMarkup(
       <EventCard

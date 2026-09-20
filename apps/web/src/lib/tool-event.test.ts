@@ -281,6 +281,19 @@ describe("runtime notices", () => {
         "error"
       )
     ).toBeNull();
+    expect(
+      classifyRuntimeNotice({
+        tool: "request_user_input",
+        input: {},
+        output: "request_user_input is unavailable in Default mode"
+      })
+    ).toMatchObject({ title: "选择不可用", level: "info" });
+    expect(
+      classifyRuntimeNotice({
+        tool: "request_user_input",
+        questions: [{ id: "scope", header: "范围", question: "选哪个？", options: [{ label: "A" }] }]
+      })
+    ).toBeNull();
   });
 });
 
