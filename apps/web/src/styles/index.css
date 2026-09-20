@@ -1634,8 +1634,12 @@ button.user-attachment-path {
     max-width: 100%;
     overflow-x: hidden;
   }
-  .chat-pane:has(.timeline-view-float) .chat-content-width {
-    padding-top: 0.25rem;
+  .chat-pane:has(.timeline-chrome) .chat-scroll {
+    top: 3rem;
+  }
+  .chat-pane:has(.timeline-chrome) .thread-goal-banner,
+  .chat-pane:has(.timeline-chrome) .message-hit-bar {
+    top: 3.4rem;
   }
   .event-title {
     flex-wrap: nowrap;
@@ -1945,13 +1949,20 @@ button.user-attachment-path {
   color: inherit;
   text-decoration-color: color-mix(in oklab, var(--primary-foreground) 72%, transparent);
 }
-.timeline-view-float {
-  position: sticky;
+.timeline-chrome {
+  position: absolute;
   top: 0.5rem;
-  z-index: 20;
+  right: 0.75rem;
+  z-index: 32;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  pointer-events: none;
+}
+.timeline-view-float {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: -2.5rem;
   pointer-events: none;
   opacity: 0;
   transform: translateY(-6px);
@@ -1965,8 +1976,17 @@ button.user-attachment-path {
   transform: none;
 }
 .timeline-view-float.is-visible .timeline-view-toggle,
-.timeline-view-float:focus-within .timeline-view-toggle {
+.timeline-view-float:focus-within .timeline-view-toggle,
+.timeline-chrome .timeline-outline-toggle {
   pointer-events: auto;
+}
+@media (min-width: 768px) {
+  .timeline-chrome:has(.timeline-outline-toggle) .timeline-view-float {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    margin-right: 0.35rem;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .timeline-view-float {
@@ -2002,9 +2022,7 @@ button.user-attachment-path {
 }
 .timeline-outline-toggle {
   display: inline-flex;
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  position: static;
   z-index: 32;
   border-radius: 0.5rem;
   background: var(--card);
@@ -2053,9 +2071,33 @@ button.user-attachment-path {
   display: none;
 }
 @media (max-width: 767px) {
-  .timeline-outline-toggle {
-    top: 0.5rem;
-    right: 0.5rem;
+  .timeline-chrome {
+    top: 0;
+    right: 0;
+    left: 0;
+    min-height: 3rem;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--background) 92%, transparent);
+    backdrop-filter: blur(16px);
+    pointer-events: auto;
+  }
+  .timeline-view-float,
+  .timeline-view-float.is-visible,
+  .timeline-view-float:focus-within {
+    opacity: 1;
+    transform: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .timeline-view-float .timeline-view-toggle {
+    pointer-events: auto;
+  }
+  .timeline-view-toggle {
+    max-width: 100%;
+  }
+  .timeline-view-toggle button {
+    padding: 0 0.5rem;
   }
   .timeline-outline-scrim {
     display: block;
@@ -2077,9 +2119,6 @@ button.user-attachment-path {
     padding: 0.15rem 0.4rem 0.35rem;
     border-bottom: 1px solid var(--border);
     font-size: 0.7rem;
-  }
-  .chat-pane:has(.timeline-outline-toggle) .chat-content-width {
-    padding-top: 2.75rem;
   }
 }
 

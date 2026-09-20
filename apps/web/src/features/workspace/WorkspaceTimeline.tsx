@@ -32,7 +32,7 @@ import { EventCard } from "./EventCard";
 import { ThreadGoalBanner } from "./ThreadGoalBanner";
 import { VirtualTimeline } from "./VirtualTimeline";
 import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
-import { TimelineOutline } from "./TimelineOutline";
+import { TimelineOutlinePanel, TimelineOutlineToggle, useTimelineOutline } from "./TimelineOutline";
 import { RunStatusBubble } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
 import type { ComposerAttachment } from "./composer-attachments";
@@ -213,6 +213,7 @@ export function WorkspaceTimeline({
   );
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
+  const outline = useTimelineOutline(outlineItems);
   const pointerScroll = useRef<{
     id: number;
     clientY: number;
@@ -319,10 +320,50 @@ export function WorkspaceTimeline({
           </button>
         </div>
       ) : null}
-      <TimelineOutline
+      {sessionId || outline.hasItems ? (
+        <div className="timeline-chrome">
+          {sessionId ? (
+            <div
+              className={`timeline-view-float${viewToggle.visible ? " is-visible" : ""}`}
+              onPointerEnter={viewToggle.pin}
+              onPointerLeave={viewToggle.unpin}
+            >
+              <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
+                {TIMELINE_VIEW_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={timelineView === option.value ? "is-active" : undefined}
+                    aria-pressed={timelineView === option.value}
+                    title={option.hint}
+                    onClick={() => {
+                      if (option.value === timelineView) return;
+                      void saveWorkspaceSettings({
+                        ...workspaceSettings,
+                        timelineView: option.value
+                      });
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {outline.hasItems ? (
+            <TimelineOutlineToggle
+              open={outline.open}
+              onToggle={() => outline.setOutlineOpen(!outline.open)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <TimelineOutlinePanel
+        open={outline.open}
         items={outlineItems}
         activeId={highlightMessageId}
-        onJump={onJumpOutline}
+        onJump={(id) => outline.jump(id, onJumpOutline)}
+        onClose={() => outline.setOutlineOpen(false)}
       />
       {isThreadGoalLocked(threadGoal) && threadGoal && onClearThreadGoal ? (
         <ThreadGoalBanner
@@ -480,34 +521,6 @@ export function WorkspaceTimeline({
         <div
           className={`chat-content-width mx-auto flex min-w-0 flex-col py-3 sm:py-4${sessionId ? " min-h-full" : ""}`}
         >
-          {sessionId ? (
-            <div
-              className={`timeline-view-float${viewToggle.visible ? " is-visible" : ""}`}
-              onPointerEnter={viewToggle.pin}
-              onPointerLeave={viewToggle.unpin}
-            >
-              <div className="timeline-view-toggle" role="group" aria-label="时间线显示">
-                {TIMELINE_VIEW_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={timelineView === option.value ? "is-active" : undefined}
-                    aria-pressed={timelineView === option.value}
-                    title={option.hint}
-                    onClick={() => {
-                      if (option.value === timelineView) return;
-                      void saveWorkspaceSettings({
-                        ...workspaceSettings,
-                        timelineView: option.value
-                      });
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
           <div
             className={`flex min-w-0 flex-col gap-2.5 sm:gap-3${
               sessionId && !sessionLoading && timelineItems.length ? " mt-auto" : ""
@@ -570,7 +583,9 @@ export function WorkspaceTimeline({
                       lite={meta.lite}
                       liteHeight={meta.height}
                       onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
-                      highlighted={highlightMessageId === item.id || highlightMessageId === item.messageId}
+                      highlighted={
+                        highlightMessageId === item.id || highlightMessageId === item.messageId
+                      }
                       defaultOpen={
                         timelineView === "expanded" ||
                         (item.kind !== "reasoning" &&
