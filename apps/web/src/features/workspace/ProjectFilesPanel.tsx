@@ -28,6 +28,7 @@ import {
   FilePlus,
   ChevronsDown,
   ChevronsUp,
+  Copy,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -43,6 +44,7 @@ import {
   Upload,
   X
 } from "lucide-react";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { api, apiDownload, apiUpload } from "@/lib/api";
 import type { Project } from "@/types";
@@ -585,14 +587,10 @@ function FilesWorkspace({
       for (const tab of tabsRef.current) {
         if (isMediaPreview(tab.previewKind) || isExternalEditorPath(tab.path)) continue;
         try {
-          const meta = await api<FileMeta>(
-            fileMetaUrl(project.id, tab.path)
-          );
+          const meta = await api<FileMeta>(fileMetaUrl(project.id, tab.path));
           if (!meta.revision || meta.revision === tab.revision) continue;
           if (tab.conflict?.revision === meta.revision) continue;
-          const latest = await api<FilePreview>(
-            fileTextUrl(project.id, tab.path)
-          );
+          const latest = await api<FilePreview>(fileTextUrl(project.id, tab.path));
           setTabs((current) =>
             current.map((item) => {
               if (item.path !== tab.path || item.revision === latest.revision) return item;
@@ -794,7 +792,9 @@ function FilesWorkspace({
         openingPathRef.current = null;
       }
       setOpeningPath((current) =>
-        current === editorPath || (fallbackPath !== null && current === fallbackPath) ? null : current
+        current === editorPath || (fallbackPath !== null && current === fallbackPath)
+          ? null
+          : current
       );
     }
   };
@@ -808,7 +808,11 @@ function FilesWorkspace({
   }, [openRequest?.line, openRequest?.nonce, openRequest?.path]);
 
   useEffect(() => {
-    if (!activeTab || isMediaPreview(activeTab.previewKind) || isExternalEditorPath(activeTab.path)) {
+    if (
+      !activeTab ||
+      isMediaPreview(activeTab.previewKind) ||
+      isExternalEditorPath(activeTab.path)
+    ) {
       setLanguage(null);
       return;
     }
@@ -846,7 +850,8 @@ function FilesWorkspace({
   }, []);
 
   const requestDefinition = async (line: number, column: number) => {
-    if (!activeTab || isMediaPreview(activeTab.previewKind) || isExternalEditorPath(activeTab.path)) return;
+    if (!activeTab || isMediaPreview(activeTab.previewKind) || isExternalEditorPath(activeTab.path))
+      return;
     try {
       const result = await api<LanguageAnalysis>(`/api/projects/${project.id}/language`, {
         method: "POST",
@@ -1092,6 +1097,41 @@ function FilesWorkspace({
     }
   };
 
+  const copyTextContent = async (text: string) => {
+    if (!text) {
+      toast.message("文件为空");
+      return;
+    }
+    const copied = await copyTextToClipboard(text);
+    if (copied) toast.success("已复制全部内容");
+    else toast.error("复制失败");
+  };
+
+  const copyPathContent = async (path: string) => {
+    const openTab = tabsRef.current.find((tab) => tab.path === path);
+    if (openTab) {
+      if (isMediaPreview(openTab.previewKind)) {
+        toast.error("该文件不是文本，无法复制内容");
+        return;
+      }
+      await copyTextContent(openTab.draft);
+      return;
+    }
+    try {
+      const meta = await api<FileMeta>(fileMetaUrl(project.id, path));
+      if (!meta.text) {
+        toast.error("该文件不是文本，无法复制内容");
+        return;
+      }
+      const preview = await api<FilePreview>(fileTextUrl(project.id, path));
+      await copyTextContent(preview.content);
+    } catch (reason) {
+      toast.error("复制失败", {
+        description: reason instanceof Error ? reason.message : String(reason)
+      });
+    }
+  };
+
   const downloadEntry = async (entry: FileEntry) => {
     if (entry.type === "directory") return;
     try {
@@ -1174,7 +1214,12 @@ function FilesWorkspace({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         {entry.type !== "directory" && (
-          <DropdownMenuItem onSelect={() => void openPath(entry.path)}>打开</DropdownMenuItem>
+          <>
+            <DropdownMenuItem onSelect={() => void openPath(entry.path)}>打开</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void copyPathContent(entry.path)}>
+              复制内容
+            </DropdownMenuItem>
+          </>
         )}
         {entry.type === "directory" ? (
           <>
@@ -1212,7 +1257,7 @@ function FilesWorkspace({
           重命名
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => setAction({ type: "copy", entry })}>
-          复制
+          复制文件
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => setAction({ type: "move", entry })}>
           移动
@@ -1795,6 +1840,19 @@ function FilesWorkspace({
               >
                 <Columns2 className="size-3.5" />
               </Button>
+              {!isMediaPreview(activeTab.previewKind) && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  title="复制全部内容"
+                  aria-label="复制全部内容"
+                  onClick={() => void copyTextContent(activeTab.draft)}
+                >
+                  <Copy className="size-3.5" />
+                </Button>
+              )}
               <Button
                 type="button"
                 size="icon"
