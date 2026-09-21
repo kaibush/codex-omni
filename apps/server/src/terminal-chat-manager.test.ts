@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ptyMocks = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -33,6 +33,7 @@ vi.mock("node-pty", () => ({
 
 import * as pty from "node-pty";
 import { Store, type TerminalSessionRow } from "@codex-omni/db";
+import { TERMINAL_SUBMIT_DELAY_MS } from "./terminal-input.js";
 import { TerminalChatManager, terminalSnapshotFromEvents } from "./terminal-chat-manager.js";
 
 const row = (overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow => ({
@@ -92,6 +93,8 @@ function makeStore() {
 }
 
 beforeEach(() => { ptyMocks.instances.length = 0; vi.clearAllMocks(); });
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe("TerminalChatManager", () => {
   it("persists output and replays it to a reconnecting subscriber", () => {
@@ -209,6 +212,27 @@ describe("TerminalChatManager", () => {
     manager.restart(terminal.id);
     const args = vi.mocked(pty.spawn).mock.calls.at(-1)?.[1];
     expect(args).toEqual(expect.arrayContaining(["-c", "claude"]));
+  });
+
+  it("writes composer text before a delayed enter so TUI apps submit", () => {
+    vi.useFakeTimers();
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    const process = ptyMocks.instances[0]!;
+    expect(manager.input(terminal.id, "ls\r")).toBe(true);
+    expect(process.writes).toEqual(["ls"]);
+    vi.advanceTimersByTime(TERMINAL_SUBMIT_DELAY_MS);
+    expect(process.writes).toEqual(["ls", "\r"]);
+    vi.useRealTimers();
+  });
+
+  it("sends a lone enter immediately", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp", profileId: "shell" });
+    expect(manager.input(terminal.id, "\r")).toBe(true);
+    expect(ptyMocks.instances[0]!.writes).toEqual(["\r"]);
   });
 
   it("updates restart policy without spawning another process", () => {

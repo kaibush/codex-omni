@@ -194,11 +194,20 @@ export function shouldSubmitTerminalKeyboard(event: {
   return true;
 }
 
+export const TERMINAL_COMPOSER_SUBMIT_DELAY_MS = 40;
+
 export function encodeTerminalComposerPayload(value: string, autoEnter = true): string {
   const normalized = value.replace(/\r\n/g, "\n").replace(/\n/g, "\r");
   if (!autoEnter) return normalized.replace(/\r+$/g, "");
   if (!normalized) return "\r";
   return normalized.endsWith("\r") ? normalized : `${normalized}\r`;
+}
+
+export function encodeTerminalComposerChunks(value: string, autoEnter = true): string[] {
+  const payload = encodeTerminalComposerPayload(value, autoEnter);
+  if (!payload) return [];
+  if (!autoEnter || payload === "\r" || !payload.endsWith("\r")) return [payload];
+  return [payload.slice(0, -1), "\r"];
 }
 
 export function encodeTerminalKeyboardSubmit(value: string): string {

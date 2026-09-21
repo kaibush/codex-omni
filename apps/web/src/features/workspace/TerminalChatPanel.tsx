@@ -85,8 +85,9 @@ import {
   canIncreaseTerminalFontSize,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
-  encodeTerminalComposerPayload,
+  encodeTerminalComposerChunks,
   encodeTerminalModifiedInput,
+  TERMINAL_COMPOSER_SUBMIT_DELAY_MS,
   filterCommandHistory,
   isCoarsePointer,
   loadTerminalFontSize,
@@ -272,14 +273,33 @@ function TerminalChatViewport({
   const uploadingRef = useRef(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const addAttachmentsRef = useRef<(files: FileLike[]) => Promise<void>>(async () => {});
+  const pendingSubmitTimer = useRef<number | null>(null);
 
   const sendRaw = useCallback((data: string) => {
     if (!data) return;
     const ws = socket.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "terminal.input", terminalId: session.id, data }));
   }, [session.id]);
+  const flushPendingComposerSubmit = useCallback(() => {
+    if (pendingSubmitTimer.current == null) return;
+    window.clearTimeout(pendingSubmitTimer.current);
+    pendingSubmitTimer.current = null;
+    sendRaw("\r");
+  }, [sendRaw]);
+  const sendComposerPayload = useCallback((value: string, autoEnter: boolean) => {
+    const chunks = encodeTerminalComposerChunks(value, autoEnter);
+    if (!chunks.length) return;
+    flushPendingComposerSubmit();
+    sendRaw(chunks[0]!);
+    if (chunks.length < 2) return;
+    pendingSubmitTimer.current = window.setTimeout(() => {
+      pendingSubmitTimer.current = null;
+      sendRaw(chunks[1]!);
+    }, TERMINAL_COMPOSER_SUBMIT_DELAY_MS);
+  }, [flushPendingComposerSubmit, sendRaw]);
 
   const sendInput = useCallback((rawData: string, applyLatchedModifiers = true) => {
+    flushPendingComposerSubmit();
     const data = applyLatchedModifiers
       ? encodeTerminalModifiedInput(rawData, { ctrl: ctrlRef.current, alt: altRef.current, shift: shiftRef.current })
       : rawData;
@@ -298,7 +318,7 @@ function TerminalChatViewport({
       }
     }
     sendRaw(data);
-  }, [sendRaw]);
+  }, [flushPendingComposerSubmit, sendRaw]);
   const sendInputRef = useRef(sendInput);
   sendInputRef.current = sendInput;
 
@@ -616,6 +636,10 @@ function TerminalChatViewport({
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pendingSubmitTimer.current != null) {
+        window.clearTimeout(pendingSubmitTimer.current);
+        pendingSubmitTimer.current = null;
+      }
       if (reconnect.current) window.clearTimeout(reconnect.current);
       observer.disconnect();
       element.removeEventListener("paste", onHostPaste, true);
@@ -880,8 +904,7 @@ function TerminalChatViewport({
         return;
       }
       rememberCommand(command);
-      const payload = encodeTerminalComposerPayload(command, autoEnter);
-      if (payload) sendRaw(payload);
+      sendComposerPayload(command, autoEnter);
       if (!autoEnter && shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
         window.setTimeout(() => terminal.current?.focus(), 0);
       }

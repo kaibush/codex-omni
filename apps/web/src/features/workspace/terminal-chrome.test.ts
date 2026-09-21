@@ -16,6 +16,7 @@ import {
   isCoarsePointer,
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
+  encodeTerminalComposerChunks,
   encodeTerminalComposerPayload,
   encodeTerminalKeyboardSubmit,
   encodeTerminalModifiedInput,
@@ -275,6 +276,16 @@ describe("terminal keyboard field", () => {
     expect(encodeTerminalComposerPayload("one\ntwo\n", false)).toBe("one\rtwo");
     expect(encodeTerminalComposerPayload("", false)).toBe("");
     expect(encodeTerminalComposerPayload("", true)).toBe("\r");
+  });
+
+  it("splits auto-enter into a delayed carriage return", () => {
+    expect(encodeTerminalComposerChunks("ls")).toEqual(["ls", "\r"]);
+    expect(encodeTerminalComposerChunks("ls", true)).toEqual(["ls", "\r"]);
+    expect(encodeTerminalComposerChunks("ls", false)).toEqual(["ls"]);
+    expect(encodeTerminalComposerChunks("one\ntwo", true)).toEqual(["one\rtwo", "\r"]);
+    expect(encodeTerminalComposerChunks("ls\n", true)).toEqual(["ls", "\r"]);
+    expect(encodeTerminalComposerChunks("", true)).toEqual(["\r"]);
+    expect(encodeTerminalComposerChunks("", false)).toEqual([]);
   });
 
   it("encodes latched Ctrl/Alt/Shift onto the next character", () => {

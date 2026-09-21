@@ -32,8 +32,9 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import type { Project, ProjectTerminal } from "@/types";
 import {
   chromePointerMovedTooFar,
-  encodeTerminalKeyboardSubmit,
+  encodeTerminalComposerChunks,
   isCoarsePointer,
+  TERMINAL_COMPOSER_SUBMIT_DELAY_MS,
   isDuplicateChromeClick,
   isTouchLikePointer,
   joinVisibleLines,
@@ -92,6 +93,7 @@ function TerminalViewport({
   const pasteAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const keyboardRef = useRef<HTMLInputElement | null>(null);
   const keyboardComposing = useRef(false);
+  const pendingSubmitTimer = useRef<number | null>(null);
 
   useEffect(() => {
     ctrlRef.current = ctrl;
@@ -119,6 +121,16 @@ function TerminalViewport({
 
   const sendInput = useCallback(
     (raw: string, applyLatchedModifiers = true) => {
+      if (pendingSubmitTimer.current != null) {
+        window.clearTimeout(pendingSubmitTimer.current);
+        pendingSubmitTimer.current = null;
+        const ws = socket.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "terminal.input", terminalId: terminal.id, data: "\r" }));
+        } else {
+          pendingInput.current = `${pendingInput.current}\r`.slice(-64 * 1024);
+        }
+      }
       let data = raw;
       if (applyLatchedModifiers && shiftRef.current) {
         const arrows: Record<string, string> = {
@@ -298,6 +310,10 @@ function TerminalViewport({
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pendingSubmitTimer.current != null) {
+        window.clearTimeout(pendingSubmitTimer.current);
+        pendingSubmitTimer.current = null;
+      }
       if (reconnectTimer.current !== null) window.clearTimeout(reconnectTimer.current);
       resizeObserver.disconnect();
       detachTouchScroll();
@@ -490,9 +506,15 @@ function TerminalViewport({
 
   const submitKeyboard = () => {
     if (keyboardComposing.current) return;
-    const data = encodeTerminalKeyboardSubmit(keyboardDraft);
+    const chunks = encodeTerminalComposerChunks(keyboardDraft, true);
     setKeyboardDraft("");
-    sendInput(data, false);
+    if (chunks[0]) sendInput(chunks[0], false);
+    if (chunks.length > 1) {
+      pendingSubmitTimer.current = window.setTimeout(() => {
+        pendingSubmitTimer.current = null;
+        sendInput(chunks[1]!, false);
+      }, TERMINAL_COMPOSER_SUBMIT_DELAY_MS);
+    }
     keyboardRef.current?.focus();
   };
 

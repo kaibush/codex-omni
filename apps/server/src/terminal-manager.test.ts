@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ptyMocks = vi.hoisted(() => ({
   spawnCalls: [] as Array<{ file: string; args: string[]; options: Record<string, any> }>,
@@ -51,11 +51,16 @@ vi.mock("node-pty", () => ({
   })
 }));
 
+import { TERMINAL_SUBMIT_DELAY_MS } from "./terminal-input.js";
 import { TerminalManager } from "./terminal-manager.js";
 
 beforeEach(() => {
   ptyMocks.instances.length = 0;
   ptyMocks.spawnCalls.length = 0;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("TerminalManager", () => {
@@ -104,8 +109,12 @@ describe("TerminalManager", () => {
       seq: 2,
       payload: { data: "two\r\n" }
     });
+    vi.useFakeTimers();
     expect(manager.input(terminal.id, "pwd\r")).toBe(true);
-    expect(process.writes).toEqual(["pwd\r"]);
+    expect(process.writes).toEqual(["pwd"]);
+    vi.advanceTimersByTime(TERMINAL_SUBMIT_DELAY_MS);
+    expect(process.writes).toEqual(["pwd", "\r"]);
+    vi.useRealTimers();
     expect(manager.resize(terminal.id, 120, 40)).toBe(true);
     expect(process.resizes).toEqual([[120, 40]]);
     expect(manager.close(terminal.id)).toBe(true);

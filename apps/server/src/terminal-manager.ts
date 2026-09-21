@@ -2,6 +2,7 @@ import os from "node:os";
 import type { IPty } from "node-pty";
 import * as pty from "node-pty";
 import { nanoid } from "nanoid";
+import { writeTerminalInput } from "./terminal-input.js";
 import { buildTerminalEnv, resolveTerminalRuntime } from "./terminal-shell.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
@@ -31,12 +32,13 @@ type ManagedTerminal = {
   exitedAt: number | null;
   exitCode: number | null;
   signal: number | null;
+  submitTimer: NodeJS.Timeout | null;
 };
 
 const MAX_BUFFERED_CHARACTERS = 1_000_000;
 const MAX_TERMINALS_PER_PROJECT = 12;
 
-export type PublicTerminal = Omit<ManagedTerminal, "process" | "chunks" | "bufferedCharacters"> & {
+export type PublicTerminal = Omit<ManagedTerminal, "process" | "chunks" | "bufferedCharacters" | "submitTimer"> & {
   subscriberCount: number;
 };
 
@@ -144,11 +146,13 @@ export class TerminalManager {
       updatedAt: now,
       exitedAt: null,
       exitCode: null,
-      signal: null
+      signal: null,
+      submitTimer: null
     };
     this.terminals.set(id, terminal);
     child.onData((data) => this.appendOutput(terminal, data));
     child.onExit(({ exitCode, signal }) => {
+      this.clearSubmitTimer(terminal);
       terminal.status = "exited";
       terminal.exitCode = exitCode;
       terminal.signal = signal ?? null;
@@ -190,10 +194,26 @@ export class TerminalManager {
     return this.publicTerminal(terminal);
   }
 
+  private clearSubmitTimer(terminal: ManagedTerminal) {
+    if (!terminal.submitTimer) return;
+    clearTimeout(terminal.submitTimer);
+    terminal.submitTimer = null;
+  }
   input(id: string, data: string) {
     const terminal = this.terminals.get(id);
     if (!terminal || terminal.status !== "running") return false;
-    terminal.process.write(data);
+    writeTerminalInput(
+      (chunk) => {
+        if (terminal.status !== "running") return;
+        try { terminal.process.write(chunk); } catch { /* already gone */ }
+      },
+      data,
+      {
+        getTimer: () => terminal.submitTimer,
+        setTimer: (timer) => { terminal.submitTimer = (timer as NodeJS.Timeout | null) ?? null; },
+        alive: () => terminal.status === "running"
+      }
+    );
     terminal.updatedAt = Date.now();
     return true;
   }
@@ -250,6 +270,7 @@ export class TerminalManager {
   close(id: string) {
     const terminal = this.terminals.get(id);
     if (!terminal) return false;
+    this.clearSubmitTimer(terminal);
     if (terminal.status === "running") {
       try {
         terminal.process.kill("SIGHUP");
@@ -271,6 +292,7 @@ export class TerminalManager {
 
   shutdown() {
     for (const terminal of this.terminals.values()) {
+      this.clearSubmitTimer(terminal);
       if (terminal.status !== "running") continue;
       try {
         terminal.process.kill("SIGHUP");

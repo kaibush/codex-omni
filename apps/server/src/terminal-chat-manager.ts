@@ -1,10 +1,11 @@
 import type { IPty } from "node-pty";
 import * as pty from "node-pty";
 import type { Store, TerminalSessionRow } from "@codex-omni/db";
+import { writeTerminalInput } from "./terminal-input.js";
 import { buildTerminalEnv, resolveTerminalLaunch, resolveTerminalRuntime } from "./terminal-shell.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
-type Managed = { row: TerminalSessionRow; process: IPty | null; subscribers: Set<WebSocket>; timer: NodeJS.Timeout | null; generation: number };
+type Managed = { row: TerminalSessionRow; process: IPty | null; subscribers: Set<WebSocket>; timer: NodeJS.Timeout | null; submitTimer: NodeJS.Timeout | null; generation: number };
 type TerminalPatch = Parameters<Store["updateTerminalSession"]>[1];
 
 const MAX_RESTARTS = 3;
@@ -39,7 +40,7 @@ export class TerminalChatManager {
 
   restore() {
     for (const row of this.store.listTerminalSessions()) {
-      const item = { row, process: null, subscribers: new Set<WebSocket>(), timer: null, generation: 0 };
+      const item = { row, process: null, subscribers: new Set<WebSocket>(), timer: null, submitTimer: null, generation: 0 };
       this.items.set(row.id, item);
       if (row.desiredState === "running" && row.lastSeq > 0) this.marker(item, "Server 已重启，正在恢复终端进程");
       if (row.desiredState === "running") this.start(row.id, true);
@@ -71,11 +72,33 @@ export class TerminalChatManager {
     item.row = next;
     return true;
   }
+  private clearSubmitTimer(item: Managed) {
+    if (!item.submitTimer) return;
+    clearTimeout(item.submitTimer);
+    item.submitTimer = null;
+  }
+  private writeInput(item: Managed, data: string) {
+    if (!item.process) return;
+    const generation = item.generation;
+    writeTerminalInput(
+      (chunk) => {
+        if (item.generation !== generation || !item.process) return;
+        try { item.process.write(chunk); } catch { /* already gone */ }
+      },
+      data,
+      {
+        getTimer: () => item.submitTimer,
+        setTimer: (timer) => { item.submitTimer = (timer as NodeJS.Timeout | null) ?? null; },
+        alive: () => item.generation === generation && Boolean(item.process)
+      }
+    );
+  }
   private dispose(id: string, signal: NodeJS.Signals = "SIGTERM") {
     const item = this.items.get(id);
     if (!item) return false;
     if (item.timer) clearTimeout(item.timer);
     item.timer = null;
+    this.clearSubmitTimer(item);
     item.generation += 1;
     if (item.process) {
       try { item.process.kill(signal); } catch { /* already gone */ }
@@ -91,7 +114,7 @@ export class TerminalChatManager {
     const running = [...this.items.values()].filter((item) => item.row?.projectId === input.projectId && item.row?.desiredState === "running").length;
     if (running >= 12) throw new Error("每个工程最多同时运行 12 个终端对话");
     const row = this.store.createTerminalSession({ ...input, command: profile.command });
-    const item: Managed = { row, process: null, subscribers: new Set(), timer: null, generation: 0 };
+    const item: Managed = { row, process: null, subscribers: new Set(), timer: null, submitTimer: null, generation: 0 };
     this.items.set(row.id, item);
     this.start(row.id, false);
     return this.publicRow(item);
@@ -170,6 +193,7 @@ export class TerminalChatManager {
     this.broadcast(item, { type: "terminal.marker", terminalId: item.row.id, seq, payload: { text } });
   }
   private exited(item: Managed, exitCode: number, signal: number | null) {
+    this.clearSubmitTimer(item);
     item.process = null;
     if (!item.row || !this.items.has(item.row.id)) return;
     const now = Date.now();
@@ -193,6 +217,7 @@ export class TerminalChatManager {
     }
   }
   private fail(item: Managed, message: string) {
+    this.clearSubmitTimer(item);
     item.process = null;
     if (!item.row || !this.items.has(item.row.id)) return;
     if (!this.persist(item, { state: "failed", pid: null, lastError: message })) return;
@@ -202,7 +227,7 @@ export class TerminalChatManager {
   input(id: string, data: string) {
     const item = this.items.get(id);
     if (!item?.process || !item.row || item.row.state !== "running") return false;
-    item.process.write(data);
+    this.writeInput(item, data);
     const seq = item.row.lastSeq + 1;
     if (!this.persist(item, { lastSeq: seq, lastOutputAt: Date.now() })) return false;
     this.store.addTerminalEvent({ terminalId: id, seq, kind: "input", data });
@@ -219,6 +244,7 @@ export class TerminalChatManager {
     if (!item?.row) return false;
     if (item.timer) clearTimeout(item.timer);
     item.timer = null;
+    this.clearSubmitTimer(item);
     item.generation += 1;
     if (!this.persist(item, { desiredState: "running", state: "provisioning", restartCount: 0, restartWindowStartedAt: null, nextRestartAt: null })) return false;
     if (item.process) { try { item.process.kill("SIGTERM"); } catch { /* exited */ } }
@@ -232,6 +258,7 @@ export class TerminalChatManager {
     if (!item?.row) return false;
     if (item.timer) clearTimeout(item.timer);
     item.timer = null;
+    this.clearSubmitTimer(item);
     item.generation += 1;
     if (!this.persist(item, { desiredState: "stopped", state: "stopped", nextRestartAt: null, stoppedAt: Date.now() })) return true;
     this.updateSessionStatus(item, "idle");
@@ -262,6 +289,7 @@ export class TerminalChatManager {
     this.shuttingDown = true;
     for (const item of this.items.values()) {
       if (item.timer) clearTimeout(item.timer);
+      this.clearSubmitTimer(item);
       item.generation += 1;
       if (item.process) { try { item.process.kill("SIGHUP"); } catch { /* exited */ } }
       item.process = null;
