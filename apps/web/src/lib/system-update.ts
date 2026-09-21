@@ -22,18 +22,11 @@ export const SYSTEM_UPDATE_NPM_COMMAND = "npm i -g @kaibush/codex-omni";
 export const SYSTEM_UPDATE_GITHUB_COMMAND =
   "npm i -g https://github.com/kaibush/codex-omni/releases/latest/download/codex-omni.tgz";
 
-export const SYSTEM_UPDATE_DOCKER_COMMANDS = ["docker compose pull", "docker compose up -d"].join(
-  "\n"
-);
-
 export const SYSTEM_UPDATE_COMMANDS = [
   SYSTEM_UPDATE_NPM_COMMAND,
   "",
   "# 或从 GitHub Release 安装",
-  SYSTEM_UPDATE_GITHUB_COMMAND,
-  "",
-  "# 或使用 Docker",
-  SYSTEM_UPDATE_DOCKER_COMMANDS
+  SYSTEM_UPDATE_GITHUB_COMMAND
 ].join("\n");
 
 export const SYSTEM_UPDATE_DISMISS_KEY = "codex-omni:dismissed-update-version";
@@ -104,7 +97,7 @@ export function buildSystemUpdatePreview(current: SystemVersionInfo): SystemVers
       "> 这是开发环境中的本地界面预览，不会修改后端检测结果。",
       "",
       "- 展示 GitHub Release 更新说明",
-      "- 提供 npm 全局安装与 Docker Compose 更新命令",
+      "- 提供 npm 全局安装与 GitHub Release 安装命令",
       "- 支持今日不再提醒"
     ].join("\n"),
     publishedAt: new Date().toISOString(),

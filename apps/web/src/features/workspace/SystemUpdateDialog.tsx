@@ -62,7 +62,7 @@ function dialogCopy(args: {
       title: "发现 Codex Omni 新版本",
       description: args.preview
         ? "本地模拟完整更新提醒；生产构建中不显示预览入口。"
-        : "GitHub Release 已发布，可以用 npm 安装最新包，或在部署目录拉取 Docker 镜像。",
+        : "GitHub Release 已发布，可以用 npm 安装最新包。",
       dismissLabel: args.preview ? "关闭预览" : "今日不再提醒"
     };
   }

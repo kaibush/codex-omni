@@ -203,7 +203,7 @@ export function SettingsUpdatesSection() {
 
       <SettingsCard
         title="更新命令"
-        description="推荐用 npm 安装最新发布包；如果用 Docker 部署，可在部署目录拉取并重建。"
+        description="推荐用 npm 安装最新发布包，也可以从 GitHub Release 安装 tgz。"
       >
         <div className="overflow-hidden rounded-lg border bg-muted/40">
           <div className="flex h-8 items-center justify-between border-b px-3">

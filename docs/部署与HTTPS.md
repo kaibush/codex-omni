@@ -18,20 +18,20 @@
 
 | 变量                 | 生产建议                                             |
 | -------------------- | ---------------------------------------------------- |
-| `CODEX_OMNI_HOST`     | 本机 Caddy 用 `127.0.0.1`；Docker 内 `0.0.0.0`        |
-| `CODEX_OMNI_PORT`     | 本机生产 API `8791`；Docker / 开发默认 `8790`         |
+| `CODEX_OMNI_HOST`     | 本机 Caddy 用 `127.0.0.1`；对外进程用 `0.0.0.0`        |
+| `CODEX_OMNI_PORT`     | 本机生产 API `8791`；开发默认 `8790`         |
 | `CODEX_OMNI_ORIGIN`   | 站点 Origin 白名单，例如 `https://codex.lvyrix.com` |
 | `CODEX_OMNI_INSTANCE` | 同库多进程时的实例名。本机生产 `prod`，`pnpm dev` 为 `dev` |
 | `COOKIE_SECURE`      | `true`                                               |
 | `CODEX_OMNI_DATABASE` | 持久卷路径，例如 `/app/data/codex-omni.db`            |
-| `CODEX_OMNI_VERSION`  | 可选，覆盖版本号；镜像 tag 构建时会注入               |
+| `CODEX_OMNI_VERSION`  | 可选，覆盖版本号；发布包默认用 `package.json`               |
 | `CODEX_OMNI_GITHUB_REPO` | GitHub Releases 仓库，默认 `kaibush/codex-omni`    |
 
 开发默认 `CODEX_OMNI_ORIGIN` 为空，会回显请求 Origin，方便局域网 IP 访问；生产必须改成明确白名单。本机 `codex.lvyrix.com` 与 `pnpm dev` 共用同一 SQLite，但启动时只回收本实例的运行中任务，避免热加载把生产对话打断。
 
 ## Docker Compose
 
-仓库提供：
+安装和生产发布走 npm，GitHub Actions 不会构建或推送镜像。仓库里仍保留本地 Docker 文件，需要时自行构建：
 
 - [`Dockerfile`](../Dockerfile)：构建协议包、Server 和 Web。
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml)

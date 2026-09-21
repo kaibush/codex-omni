@@ -5,7 +5,6 @@ import {
   parseDismissedUpdate,
   shouldSuppressUpdateDialog,
   SYSTEM_UPDATE_COMMANDS,
-  SYSTEM_UPDATE_DOCKER_COMMANDS,
   SYSTEM_UPDATE_GITHUB_COMMAND,
   SYSTEM_UPDATE_NPM_COMMAND,
   type SystemVersionInfo
@@ -84,12 +83,11 @@ describe("buildSystemUpdatePreview", () => {
 });
 
 describe("SYSTEM_UPDATE_COMMANDS", () => {
-  it("includes the npm package, GitHub tarball and Docker alternative", () => {
+  it("includes the npm package and GitHub tarball", () => {
     expect(SYSTEM_UPDATE_NPM_COMMAND).toBe("npm i -g @kaibush/codex-omni");
     expect(SYSTEM_UPDATE_GITHUB_COMMAND).toContain("codex-omni.tgz");
-    expect(SYSTEM_UPDATE_DOCKER_COMMANDS).toContain("docker compose pull");
     expect(SYSTEM_UPDATE_COMMANDS).toContain(SYSTEM_UPDATE_NPM_COMMAND);
     expect(SYSTEM_UPDATE_COMMANDS).toContain(SYSTEM_UPDATE_GITHUB_COMMAND);
-    expect(SYSTEM_UPDATE_COMMANDS).toContain("docker compose up -d");
+    expect(SYSTEM_UPDATE_COMMANDS).not.toContain("docker compose");
   });
 });

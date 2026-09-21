@@ -58,9 +58,7 @@ codex-omni start --host 0.0.0.0 --port 8790 --data ./data/codex-omni.db
 
 打包、本地 tgz 和 npm 发布见 [安装与发布](docs/安装与发布.md)。
 
-### Docker
-
-生产环境请走反向代理的 HTTPS / WSS，不要把 `8790` 或 `5173` 直接映射到公网。Docker Compose、Nginx 和证书见 [部署与 HTTPS](docs/部署与HTTPS.md)。
+生产环境请走反向代理的 HTTPS / WSS，不要把 `8790` 或 `5173` 直接映射到公网。见 [部署与 HTTPS](docs/部署与HTTPS.md)。
 
 ### 本地开发
 
