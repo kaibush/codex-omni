@@ -62,6 +62,56 @@ describe("Store", () => {
     store.updateProject(first.id, { pinnedAt: 30 });
     expect(store.listProjects()[0]?.id).toBe(first.id);
   });
+  it("changes a project path without deleting sessions", () => {
+    store = new Store(":memory:");
+    const db = store;
+    const project = db.createProject({
+      name: "grok-iq",
+      displayPath: "/tmp/grok-iq",
+      realPath: "/tmp/grok-iq"
+    });
+    const session = db.createSession({ projectId: project.id, title: "旧对话" });
+    db.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "keep me",
+      providerId: null,
+      eventType: "user.message"
+    });
+    const terminal = db.createTerminalSession({
+      projectId: project.id,
+      sessionId: session.id,
+      profileId: "shell",
+      title: "Shell",
+      cwd: "/tmp/grok-iq/apps"
+    });
+    const updated = db.updateProject(project.id, {
+      displayPath: "/tmp/grok-iq-plus",
+      realPath: "/tmp/grok-iq-plus"
+    });
+    expect(updated).toMatchObject({
+      id: project.id,
+      displayPath: "/tmp/grok-iq-plus",
+      realPath: "/tmp/grok-iq-plus"
+    });
+    expect(db.getProjectByRealPath("/tmp/grok-iq-plus")?.id).toBe(project.id);
+    expect(db.getSession(session.id)).toMatchObject({
+      id: session.id,
+      projectId: project.id,
+      title: "旧对话"
+    });
+    expect(db.listMessages(session.id).map((message) => message.content)).toEqual(["keep me"]);
+    expect(
+      db.updateTerminalSession(terminal.id, { cwd: "/tmp/grok-iq-plus/apps" })?.cwd
+    ).toBe("/tmp/grok-iq-plus/apps");
+    const other = db.createProject({
+      name: "other",
+      displayPath: "/tmp/other",
+      realPath: "/tmp/other"
+    });
+    expect(() => db.updateProject(other.id, { realPath: "/tmp/grok-iq-plus" })).toThrow();
+    expect(db.listSessions(project.id)).toHaveLength(1);
+  });
   it("looks up a message by item id", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "P", displayPath: "/tmp", realPath: "/tmp" });

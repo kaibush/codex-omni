@@ -14,6 +14,7 @@ import {
   Copy,
   Download,
   Folder,
+  FolderInput,
   FolderPlus,
   GitFork,
   KeyRound,
@@ -142,6 +143,7 @@ export function WorkspaceSidebar({
   setProjectRenameDraft,
   saveProjectName,
   beginRenameProject,
+  beginChangeProjectPath,
   updateProject,
   deleteProject,
   projectSessions,
@@ -209,8 +211,9 @@ export function WorkspaceSidebar({
   setProjectRenameDraft: Dispatch<SetStateAction<string>>;
   saveProjectName: (id: string) => void;
   beginRenameProject: (project: Project) => void;
+  beginChangeProjectPath: (project: Project) => void;
   updateProject: {
-    mutate: (input: { id: string; changes: { name?: string; pinned?: boolean } }) => void;
+    mutate: (input: { id: string; changes: { name?: string; path?: string; pinned?: boolean } }) => void;
   };
   deleteProject: { mutate: (id: string) => void };
   projectSessions: Session[];
@@ -628,6 +631,9 @@ export function WorkspaceSidebar({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onSelect={() => beginRenameProject(project)}>
                             <Pencil /> 重命名
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => beginChangeProjectPath(project)}>
+                            <FolderInput /> 切换路径
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onSelect={() =>

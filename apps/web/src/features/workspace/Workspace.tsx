@@ -93,6 +93,7 @@ import {
   findTimelineItemByMessageId,
   mergeSessionOutline
 } from "@/features/workspace/timeline-outline";
+import { ChangeProjectPathDialog } from "@/features/workspace/ChangeProjectPathDialog";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
@@ -198,6 +199,7 @@ export function Workspace() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [sidebar, setSidebar] = useState(() => window.innerWidth >= 768);
   const [newProject, setNewProject] = useState(false);
+  const [pathProject, setPathProject] = useState<Project | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [providerManager, setProviderManager] = useState(false);
   const [runningCenterOpen, setRunningCenterOpen] = useState(false);
@@ -1679,18 +1681,26 @@ export function Workspace() {
       changes
     }: {
       id: string;
-      changes: { name?: string; pinned?: boolean; opened?: boolean };
+      changes: { name?: string; path?: string; pinned?: boolean; opened?: boolean };
     }) =>
       api<Project>(`/api/projects/${id}`, {
         method: "PUT",
         body: JSON.stringify(changes)
       }),
-    onSuccess: (updated) => {
+    onSuccess: (updated, variables) => {
       if (!updated) return;
+      const previous = qc.getQueryData<Project[]>(["projects"])?.find((item) => item.id === updated.id);
       qc.setQueryData<Project[]>(["projects"], (current) =>
         current?.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
       );
       void qc.invalidateQueries({ queryKey: ["projects"] });
+      if (variables.changes.path && previous?.realPath !== updated.realPath) {
+        void qc.invalidateQueries({ queryKey: ["terminals", updated.id] });
+        void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", updated.id] });
+        void qc.invalidateQueries({ queryKey: ["sessions", updated.id] });
+        void qc.invalidateQueries({ queryKey: ["active-runs"] });
+        toast.success("工程路径已切换，对话记录已保留");
+      }
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : "工程更新失败";
@@ -2334,6 +2344,7 @@ export function Workspace() {
         setProjectRenameDraft={setProjectRenameDraft}
         saveProjectName={saveProjectName}
         beginRenameProject={beginRenameProject}
+        beginChangeProjectPath={setPathProject}
         updateProject={updateProject}
         deleteProject={deleteProject}
         projectSessions={projectSessions}
@@ -2534,7 +2545,7 @@ export function Workspace() {
                 {...(workspaceView === "files" || workspaceView === "git" ? {} : { inert: true })}
               >
                 <ProjectFilesPanel
-                  key={activeProject.id}
+                  key={`${activeProject.id}:${activeProject.realPath}`}
                   project={activeProject}
                   view={workspaceView === "git" ? "git" : "files"}
                   onViewChange={setWorkspaceView}
@@ -2559,7 +2570,10 @@ export function Workspace() {
                     </div>
                   }
                 >
-                  <TerminalPanel project={activeProject} />
+                  <TerminalPanel
+                    key={`${activeProject.id}:${activeProject.realPath}`}
+                    project={activeProject}
+                  />
                 </Suspense>
               </div>
             )}
@@ -2573,7 +2587,7 @@ export function Workspace() {
                   fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
                 >
                   <TerminalChatPanel
-                    key={activeProject.id}
+                    key={`${activeProject.id}:${activeProject.realPath}`}
                     project={activeProject}
                     sessionId={sessionId}
                     active={workspaceView === "terminal-chat"}
@@ -2664,6 +2678,17 @@ export function Workspace() {
         onOpenSession={(nextProjectId, nextSessionId) => {
           openWorkspace(nextProjectId, nextSessionId, false, "chat");
           if (isMobile) setSidebar(false);
+        }}
+      />
+      <ChangeProjectPathDialog
+        project={pathProject}
+        open={Boolean(pathProject)}
+        onOpenChange={(open) => {
+          if (!open) setPathProject(null);
+        }}
+        onSave={async (path) => {
+          if (!pathProject) return;
+          await updateProject.mutateAsync({ id: pathProject.id, changes: { path } });
         }}
       />
       <NewProjectDialog

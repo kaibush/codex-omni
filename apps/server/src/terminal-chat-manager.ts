@@ -2,6 +2,7 @@ import type { IPty } from "node-pty";
 import * as pty from "node-pty";
 import type { Store, TerminalSessionRow } from "@codex-omni/db";
 import { writeTerminalInput } from "./terminal-input.js";
+import { remapContainedPath } from "./project-path.js";
 import { buildTerminalEnv, resolveTerminalLaunch, resolveTerminalRuntime } from "./terminal-shell.js";
 
 type WebSocket = { readyState: number; OPEN: number; send(data: string): void };
@@ -283,6 +284,24 @@ export class TerminalChatManager {
   }
   closeProject(projectId: string) {
     for (const item of [...this.items.values()]) if (item.row?.projectId === projectId) this.remove(item.row.id);
+  }
+  relocateProject(projectId: string, fromRoot: string, toRoot: string) {
+    const updated: string[] = [];
+    for (const item of this.items.values()) {
+      if (!item.row || item.row.projectId !== projectId) continue;
+      const nextCwd = remapContainedPath(item.row.cwd, fromRoot, toRoot);
+      if (nextCwd === item.row.cwd) continue;
+      if (!this.persist(item, { cwd: nextCwd })) continue;
+      updated.push(item.row.id);
+      if (item.row.desiredState === "running") this.restart(item.row.id);
+    }
+    for (const row of this.store.listTerminalSessions(projectId)) {
+      if (this.items.has(row.id) || row.projectId !== projectId) continue;
+      const nextCwd = remapContainedPath(row.cwd, fromRoot, toRoot);
+      if (nextCwd === row.cwd) continue;
+      this.store.updateTerminalSession(row.id, { cwd: nextCwd });
+    }
+    return updated;
   }
   unsubscribeSocket(socket: WebSocket) { for (const item of this.items.values()) item.subscribers.delete(socket); }
   shutdown() {

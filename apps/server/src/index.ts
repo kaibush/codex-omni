@@ -1,4 +1,4 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -102,6 +102,7 @@ import {
   writeProjectTextFile
 } from "./project-file.js";
 import { analyzeProjectDocument } from "./project-language.js";
+import { resolveProjectDirectory } from "./project-path.js";
 const root = path.resolve(process.cwd());
 const execFileAsync = promisify(execFile);
 const dataPath = resolveDatabasePath(root);
@@ -959,12 +960,13 @@ app.post("/api/projects", { preHandler: auth }, async (req) => {
       providerId: z.string().nullable().optional()
     })
     .parse(req.body);
-  const resolved = await realpath(body.path);
-  if (!(await stat(resolved)).isDirectory()) throw new Error("Project path is not a directory");
+  const resolved = await resolveProjectDirectory(body.path);
+  const occupied = store.getProjectByRealPath(resolved.realPath);
+  if (occupied) throw httpError(409, `该路径已被工程「${occupied.name}」占用`);
   return store.createProject({
     name: body.name,
-    displayPath: body.path,
-    realPath: resolved,
+    displayPath: resolved.displayPath,
+    realPath: resolved.realPath,
     ...(body.providerId !== undefined ? { providerId: body.providerId } : {})
   });
 });
@@ -975,16 +977,51 @@ app.put("/api/projects/:id", { preHandler: auth }, async (req, reply) => {
   const input = z
     .object({
       name: z.string().trim().min(1).max(120).optional(),
+      path: z.string().trim().min(1).optional(),
       pinned: z.boolean().optional(),
       opened: z.boolean().optional()
     })
     .refine((value) => Object.keys(value).length > 0, "No changes provided")
     .parse(req.body ?? {});
-  return store.updateProject(id, {
-    ...(input.name !== undefined ? { name: input.name } : {}),
-    ...(input.pinned !== undefined ? { pinnedAt: input.pinned ? Date.now() : null } : {}),
-    ...(input.opened ? { lastOpenedAt: Date.now() } : {})
-  });
+  let displayPath: string | undefined;
+  let realPath: string | undefined;
+  if (input.path !== undefined) {
+    const resolved = await resolveProjectDirectory(input.path);
+    const occupied = store.getProjectByRealPath(resolved.realPath);
+    if (occupied && occupied.id !== id) {
+      throw httpError(
+        409,
+        `该路径已被工程「${occupied.name}」占用，无法切换。请先删除占用该路径的工程，再把原工程切过来以保留对话。`
+      );
+    }
+    displayPath = resolved.displayPath;
+    realPath = resolved.realPath;
+  }
+  const previousRealPath = current.realPath;
+  let updated;
+  try {
+    updated = store.updateProject(id, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(displayPath !== undefined ? { displayPath } : {}),
+      ...(realPath !== undefined ? { realPath } : {}),
+      ...(input.pinned !== undefined ? { pinnedAt: input.pinned ? Date.now() : null } : {}),
+      ...(input.opened ? { lastOpenedAt: Date.now() } : {})
+    });
+  } catch (error) {
+    const code = String((error as { code?: string }).code ?? "");
+    if (code.includes("CONSTRAINT")) {
+      throw httpError(409, "该路径已被其他工程占用");
+    }
+    throw error;
+  }
+  if (realPath && realPath !== previousRealPath) {
+    for (const session of store.listSessions(id, { includeArchived: true, status: "running" })) {
+      runs.cancel(session.id);
+    }
+    terminals.closeProject(id);
+    terminalChats.relocateProject(id, previousRealPath, realPath);
+  }
+  return updated;
 });
 app.delete("/api/projects/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);

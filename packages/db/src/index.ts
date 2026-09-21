@@ -839,6 +839,13 @@ export class Store {
       )
       .get(id) as ProjectRow | undefined;
   }
+  getProjectByRealPath(realPath: string) {
+    return this.db
+      .prepare(
+        "SELECT id,name,display_path as displayPath,real_path as realPath,provider_id as providerId,pinned_at as pinnedAt,last_opened_at as lastOpenedAt,created_at as createdAt,updated_at as updatedAt FROM projects WHERE real_path=?"
+      )
+      .get(realPath) as ProjectRow | undefined;
+  }
   createProject(input: {
     name: string;
     displayPath: string;
@@ -856,7 +863,7 @@ export class Store {
   }
   updateProject(
     id: string,
-    input: Partial<Pick<ProjectRow, "name" | "providerId" | "pinnedAt" | "lastOpenedAt">>
+    input: Partial<Pick<ProjectRow, "name" | "displayPath" | "realPath" | "providerId" | "pinnedAt" | "lastOpenedAt">>
   ) {
     const now = Date.now();
     const fields = Object.keys(input)
@@ -1140,7 +1147,7 @@ export class Store {
     const query = `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,command,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt FROM terminal_sessions ${projectId ? "WHERE project_id=?" : ""} ORDER BY updated_at DESC,id DESC`;
     return (projectId ? this.db.prepare(query).all(projectId) : this.db.prepare(query).all()) as TerminalSessionRow[];
   }
-  updateTerminalSession(id: string, input: Partial<Pick<TerminalSessionRow, "title" | "desiredState" | "state" | "restartPolicy" | "pid" | "lastSeq" | "lastOutputAt" | "lastExitCode" | "lastSignal" | "restartCount" | "restartWindowStartedAt" | "nextRestartAt" | "lastError" | "stoppedAt">>) {
+  updateTerminalSession(id: string, input: Partial<Pick<TerminalSessionRow, "title" | "cwd" | "desiredState" | "state" | "restartPolicy" | "pid" | "lastSeq" | "lastOutputAt" | "lastExitCode" | "lastSignal" | "restartCount" | "restartWindowStartedAt" | "nextRestartAt" | "lastError" | "stoppedAt">>) {
     const fields = Object.keys(input).map((key) => `${key.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}=@${key}`).join(",");
     if (!fields) return this.getTerminalSession(id);
     this.db.prepare(`UPDATE terminal_sessions SET ${fields},updated_at=@now WHERE id=@id`).run({ ...input, id, now: Date.now() });

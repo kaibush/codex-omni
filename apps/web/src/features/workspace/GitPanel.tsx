@@ -228,12 +228,12 @@ export function GitPanel({
   };
   useEffect(() => {
     void refresh();
-  }, [project.id]);
+  }, [project.id, project.realPath]);
   useEffect(() => {
     if (tab === "branches") void loadBranches();
     if (tab === "history") void loadHistory();
     if (tab === "timeline") void loadOperations();
-  }, [project.id, tab]);
+  }, [project.id, project.realPath, tab]);
   const focusedCommit = useRef<string | null>(null);
   useEffect(() => {
     if (!focusCommit || focusedCommit.current === focusCommit) return;

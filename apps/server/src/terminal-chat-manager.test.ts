@@ -55,7 +55,7 @@ function makeStore() {
   return {
     profiles,
     store: {
-      listTerminalSessions: () => [...rows.values()],
+      listTerminalSessions: (projectId?: string) => [...rows.values()].filter((item) => !projectId || item.projectId === projectId),
       getTerminalProfile: (id: string) => profiles[id as keyof typeof profiles],
       createTerminalSession: (input: { projectId: string; sessionId: string; title: string; cwd: string; profileId: string; command?: string }) => {
         const created = row({
@@ -257,6 +257,18 @@ describe("TerminalChatManager", () => {
     expect(second.sessionId).toBe("session-2");
     expect(manager.list("project-1")).toHaveLength(1);
     expect(manager.get(first.id)).toBeNull();
+  });
+
+  it("relocates a project cwd and restarts running terminals", () => {
+    const { store } = makeStore();
+    const manager = new TerminalChatManager(store);
+    const terminal = manager.create({ projectId: "project-1", sessionId: "session-1", title: "Shell", cwd: "/tmp/grok-iq", profileId: "shell" });
+    expect(ptyMocks.instances).toHaveLength(1);
+    const updated = manager.relocateProject("project-1", "/tmp/grok-iq", "/tmp/grok-iq-plus");
+    expect(updated).toEqual([terminal.id]);
+    expect(manager.get(terminal.id)?.cwd).toBe("/tmp/grok-iq-plus");
+    expect(ptyMocks.instances).toHaveLength(2);
+    expect(ptyMocks.instances[0]!.kills).toContain("SIGTERM");
   });
 
   it("drops cascaded terminals instead of crashing on the next create", () => {
