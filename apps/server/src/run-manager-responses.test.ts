@@ -140,9 +140,9 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
           projectId: project.id,
           sessionId,
           message,
-          sandbox: "read-only",
+          sandbox: "danger-full-access",
           approvalPolicy: "never",
-          networkAccessEnabled: false
+          networkAccessEnabled: true
         },
         socket
       );
