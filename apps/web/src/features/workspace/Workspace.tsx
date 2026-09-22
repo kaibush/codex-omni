@@ -289,7 +289,13 @@ export function Workspace() {
   }, []);
   const [editorCommand, setEditorCommand] = useState<"goto-line" | "toggle-outline" | null>(null);
   const [enhanceNonce, setEnhanceNonce] = useState(0);
-  const [focusCommit, setFocusCommit] = useState<string | null>(null);
+  const [focusCommit, setFocusCommit] = useState<{ hash: string; nonce: number } | null>(null);
+  const focusCommitNonce = useRef(0);
+  const openGitCommit = (hash: string) => {
+    focusCommitNonce.current += 1;
+    setFocusCommit({ hash, nonce: focusCommitNonce.current });
+    setWorkspaceView("git");
+  };
   const [showArchived, setShowArchived] = useState(false);
   const [renamingSessionId, setRenamingSessionId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
@@ -1609,7 +1615,7 @@ export function Workspace() {
     }
     if (action.type === "git-commit") {
       openWorkspace(action.projectId, sessionId || "", false, "git");
-      setFocusCommit(action.hash);
+      openGitCommit(action.hash);
       return;
     }
     if (action.type === "git-branch") {
@@ -1825,7 +1831,9 @@ export function Workspace() {
       shouldContinueWithProvider({
         sessionProviderId: activeSession.providerId,
         selectedProviderId: providerId,
-        hasConversation: timelineHasConversation(events)
+        hasConversation: timelineHasConversation(events),
+        continuationMode: activeSession.continuationMode,
+        threadId: activeSession.threadId
       })
     ) {
       setContinuation(selectedProvider);
@@ -2554,6 +2562,7 @@ export function Workspace() {
                   editorCommand={editorCommand}
                   onCommandHandled={() => setEditorCommand(null)}
                   focusCommit={focusCommit}
+                  onOpenCommit={openGitCommit}
                   onDirtyCount={setDirtyCount}
                   onGitCount={setGitCount}
                 />

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -39,6 +39,32 @@ export type GitCommitSummary = {
   date: string;
   subject: string;
 };
+
+export type GitLogPage = {
+  commits: GitCommitSummary[];
+  hasMore: boolean;
+};
+
+export type GitBlameLine = {
+  hash: string;
+  shortHash: string;
+  author: string;
+  time: number;
+  summary: string;
+  committed: boolean;
+};
+
+export type GitBlameResult = {
+  path: string;
+  available: boolean;
+  message: string;
+  lines: GitBlameLine[];
+};
+
+const MAX_GIT_LOG_LIMIT = 200;
+const MAX_GIT_LOG_SKIP = 200_000;
+const MAX_BLAME_STDOUT_CHARS = 32_000_000;
+const BLAME_TIMEOUT_MS = 20_000;
 
 async function runGit(
   cwd: string,
@@ -337,20 +363,7 @@ export async function deleteGitBranch(rootPath: string, name: string) {
   return { ok: true as const };
 }
 
-export async function listGitLog(rootPath: string, limit = 40): Promise<GitCommitSummary[]> {
-  let stdout = "";
-  try {
-    stdout = (
-      await runGit(rootPath, [
-        "log",
-        `--max-count=${Math.min(Math.max(limit, 1), 100)}`,
-        "--date=iso-strict",
-        "--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s"
-      ])
-    ).stdout;
-  } catch {
-    return [];
-  }
+function parseGitLog(stdout: string): GitCommitSummary[] {
   return stdout
     .split("\n")
     .filter(Boolean)
@@ -364,6 +377,154 @@ export async function listGitLog(rootPath: string, limit = 40): Promise<GitCommi
         subject: subject ?? ""
       };
     });
+}
+
+export async function listGitLogPage(
+  rootPath: string,
+  options: { limit?: number; skip?: number; all?: boolean } = {}
+): Promise<GitLogPage> {
+  const limit = Math.min(Math.max(options.limit ?? 40, 1), MAX_GIT_LOG_LIMIT);
+  const skip = Math.min(Math.max(options.skip ?? 0, 0), MAX_GIT_LOG_SKIP);
+  const args = [
+    "log",
+    `--max-count=${limit + 1}`,
+    `--skip=${skip}`,
+    "--date=iso-strict",
+    "--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s"
+  ];
+  if (options.all) args.splice(1, 0, "--all");
+  try {
+    const commits = parseGitLog((await runGit(rootPath, args)).stdout);
+    return { commits: commits.slice(0, limit), hasMore: commits.length > limit };
+  } catch {
+    return { commits: [], hasMore: false };
+  }
+}
+
+export async function listGitLog(rootPath: string, limit = 40): Promise<GitCommitSummary[]> {
+  return (await listGitLogPage(rootPath, { limit })).commits;
+}
+
+const BLAME_HEADER_RE = /^([0-9a-fA-F]{40}) (\d+) (\d+)(?: (\d+))?$/;
+
+export function parseGitBlame(stdout: string): GitBlameLine[] {
+  const rows = stdout.split("\n");
+  const commits = new Map<string, { author: string; time: number; summary: string }>();
+  const lines: GitBlameLine[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    const header = BLAME_HEADER_RE.exec(rows[index] ?? "");
+    if (!header) {
+      index += 1;
+      continue;
+    }
+    const hash = (header[1] ?? "").toLowerCase();
+    const finalLine = Number(header[3]);
+    if (finalLine < 1 || finalLine > 100_000) {
+      index += 1;
+      continue;
+    }
+    index += 1;
+    const known = commits.get(hash);
+    let author = known?.author ?? "";
+    let time = known?.time ?? 0;
+    let summary = known?.summary ?? "";
+    while (index < rows.length && !(rows[index] ?? "").startsWith("\t")) {
+      const row = rows[index] ?? "";
+      if (row.startsWith("author ")) author = row.slice("author ".length);
+      else if (row.startsWith("author-time ")) time = Number(row.slice("author-time ".length)) || 0;
+      else if (row.startsWith("summary ")) summary = row.slice("summary ".length);
+      index += 1;
+    }
+    commits.set(hash, { author, time, summary });
+    if ((rows[index] ?? "").startsWith("\t")) index += 1;
+    const committed = !/^0+$/.test(hash);
+    lines[finalLine - 1] = {
+      hash: committed ? hash : "",
+      shortHash: committed ? hash.slice(0, 7) : "",
+      author: committed ? author : "",
+      time,
+      summary: committed ? summary : "",
+      committed
+    };
+  }
+  for (let line = 0; line < lines.length; line += 1) {
+    if (!lines[line]) {
+      lines[line] = { hash: "", shortHash: "", author: "", time: 0, summary: "", committed: false };
+    }
+  }
+  return lines;
+}
+
+function blameUnavailable(relativePath: string, message: string): GitBlameResult {
+  return { path: relativePath, available: false, message, lines: [] };
+}
+
+function runGitBlame(cwd: string, args: string[], input?: string) {
+  return new Promise<{ stdout: string }>((resolve, reject) => {
+    const child = spawn("git", args, { cwd });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (error) reject(error);
+      else resolve({ stdout });
+    };
+    timer = setTimeout(() => {
+      child.kill();
+      finish(httpError(400, "Git blame 超时"));
+    }, BLAME_TIMEOUT_MS);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (stdout.length > MAX_BLAME_STDOUT_CHARS) {
+        child.kill();
+        finish(httpError(400, "文件太大，无法显示 Blame"));
+      }
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => finish(error));
+    child.on("close", (code) => {
+      if (code === 0) finish();
+      else finish(httpError(400, stderr.trim() || "Git blame 失败"));
+    });
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(input ?? "");
+  });
+}
+
+export async function gitBlame(
+  rootPath: string,
+  relativePath: string,
+  content?: string
+): Promise<GitBlameResult> {
+  const filePath = assertGitPath(rootPath, relativePath);
+  if (!(await isGitRepository(rootPath)))
+    return blameUnavailable(filePath, "当前目录不是 Git 仓库");
+  if (content !== undefined && Buffer.byteLength(content) > 2 * 1024 * 1024) {
+    throw httpError(400, "文件超过 2 MB，无法计算 Blame");
+  }
+  const args = ["blame", "--line-porcelain"];
+  if (content !== undefined) args.push("--contents", "-");
+  args.push("--", filePath);
+  try {
+    const { stdout } = await runGitBlame(rootPath, args, content);
+    return { path: filePath, available: true, message: "", lines: parseGitBlame(stdout) };
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    if (/no such path|no such file or directory|bad revision/i.test(message)) {
+      return blameUnavailable(filePath, "这个文件还没有 Git 记录");
+    }
+    if (/binary file/i.test(message)) return blameUnavailable(filePath, "二进制文件无法显示 Blame");
+    throw reason instanceof Error ? reason : httpError(400, message);
+  }
 }
 
 export async function gitCommitDetail(rootPath: string, hash: string) {

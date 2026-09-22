@@ -75,12 +75,13 @@ import {
   createGitBranch,
   deleteGitBranch,
   discardGitFiles,
+  gitBlame,
   gitCommitDetail,
   gitDiff,
   gitRemoteAction,
   gitStatus,
   listGitBranches,
-  listGitLog,
+  listGitLogPage,
   resolveGitConflict,
   restoreGitCheckpoint,
   suggestGitMessage
@@ -930,9 +931,33 @@ app.delete("/api/projects/:id/git/branches", { preHandler: auth }, async (req) =
 });
 app.get("/api/projects/:id/git/log", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));
-  const limit = z.coerce.number().int().min(1).max(100).optional().parse(queryValue(req, "limit"));
-  return { commits: await listGitLog(rootPath, limit ?? 40) };
+  const query = z
+    .object({
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      skip: z.coerce.number().int().min(0).max(200_000).optional(),
+      all: z.enum(["1", "0", "true", "false"]).optional()
+    })
+    .parse(req.query ?? {});
+  return listGitLogPage(rootPath, {
+    limit: query.limit ?? 40,
+    skip: query.skip ?? 0,
+    all: query.all === "1" || query.all === "true"
+  });
 });
+app.get("/api/projects/:id/git/blame", { preHandler: auth }, async (req) => {
+  const { rootPath } = await getProjectRoot(routeId(req));
+  const relativePath = z.string().min(1).parse(queryValue(req, "path"));
+  return gitBlame(rootPath, relativePath);
+});
+app.post(
+  "/api/projects/:id/git/blame",
+  { preHandler: auth, bodyLimit: MAX_EDITABLE_FILE_BYTES * 6 + 64 * 1024 },
+  async (req) => {
+    const { rootPath } = await getProjectRoot(routeId(req));
+    const body = z.object({ path: z.string().min(1), content: z.string() }).parse(req.body);
+    return gitBlame(rootPath, body.path, body.content);
+  }
+);
 app.get("/api/projects/:id/git/commit/:hash", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));
   return gitCommitDetail(rootPath, routeParam(req, "hash"));

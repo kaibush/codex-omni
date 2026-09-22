@@ -1348,6 +1348,83 @@ describe("RunManager reconnect state", () => {
     expect(store!.getSession(session.id)?.threadId).toBe("parent-thread");
   });
 
+  it("starts an unbound fork on another provider and model without a continuation session", async () => {
+    const { project, provider, session, socket } = fixture();
+    const other = store!.upsertProvider({ name: "Other", model: "other-model" });
+    store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "原来的问题",
+      providerId: provider.id,
+      eventType: "user.message"
+    });
+    const fork = store!.forkSession(session.id)!;
+    expect(fork.threadId).toBeNull();
+    expect(fork.providerId).toBe(provider.id);
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({ seq: 1, type: "thread.started", payload: { threadId: "switched-thread" } })
+      );
+      onEvent(bridgeEvent({ seq: 2, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: fork.id,
+        providerId: other.id,
+        model: "other-model",
+        message: "换个模型继续"
+      },
+      socket
+    );
+    const request = runtimeMocks.run.mock.calls[0]?.[0];
+    expect(request.model).toBe("other-model");
+    expect(request).not.toHaveProperty("threadId");
+    expect(request.message).toContain("fork-history");
+    expect(request.message).toContain("原来的问题");
+    expect(request.message).toContain("换个模型继续");
+    expect(store!.getSession(fork.id)).toMatchObject({
+      providerId: other.id,
+      threadId: "switched-thread"
+    });
+    expect(store!.getSession(session.id)?.providerId).toBe(provider.id);
+    expect(store!.getLatestRun(fork.id)).toMatchObject({
+      providerId: other.id,
+      model: "other-model"
+    });
+  });
+
+  it("still requires a continuation session after a fork has its own thread", async () => {
+    const { project, provider, session, socket } = fixture();
+    const other = store!.upsertProvider({ name: "Other" });
+    store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "原来的问题",
+      providerId: provider.id,
+      eventType: "user.message"
+    });
+    const fork = store!.forkSession(session.id)!;
+    store!.updateSession(fork.id, { threadId: "fork-thread" });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await expect(
+      manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: fork.id,
+          providerId: other.id,
+          message: "再换供应商"
+        },
+        socket
+      )
+    ).rejects.toThrow("provider-continuation-required");
+    expect(runtimeMocks.run).not.toHaveBeenCalled();
+    expect(store!.getSession(fork.id)?.providerId).toBe(provider.id);
+  });
+
   it("forwards queued image attachments to the runtime", async () => {
     const { project, provider, session, socket, imagePath } = attachmentFixture();
     runtimeMocks.run.mockImplementation(

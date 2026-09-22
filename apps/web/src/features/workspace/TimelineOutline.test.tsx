@@ -59,5 +59,8 @@ describe("timeline chrome layout", () => {
     expect(css).toContain(".chat-pane:has(.timeline-chrome) .chat-scroll");
     expect(css).toContain("top: 3rem;");
     expect(css).toContain(".timeline-chrome:has(.timeline-outline-toggle) .timeline-view-float");
+    expect(css).toContain("width: max-content;");
+    expect(css).toMatch(/\.timeline-view-toggle button \{[\s\S]*white-space: nowrap;/);
+    expect(css).toMatch(/\.timeline-outline-toggle \{[\s\S]*flex: none;/);
   });
 });

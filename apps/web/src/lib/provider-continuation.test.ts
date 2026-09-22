@@ -21,6 +21,30 @@ describe("shouldContinueWithProvider", () => {
       })
     ).toBe(true);
   });
+
+  it("lets an unbound fork switch provider without creating another session", () => {
+    expect(
+      shouldContinueWithProvider({
+        sessionProviderId: "provider-a",
+        selectedProviderId: "provider-b",
+        hasConversation: true,
+        continuationMode: "fork",
+        threadId: null
+      })
+    ).toBe(false);
+  });
+
+  it("still prompts after the fork has started its own thread", () => {
+    expect(
+      shouldContinueWithProvider({
+        sessionProviderId: "provider-a",
+        selectedProviderId: "provider-b",
+        hasConversation: true,
+        continuationMode: "fork",
+        threadId: "thread-1"
+      })
+    ).toBe(true);
+  });
 });
 
 describe("timelineHasConversation", () => {

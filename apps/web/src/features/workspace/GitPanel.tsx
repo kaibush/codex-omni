@@ -63,6 +63,7 @@ type GitTab = "changes" | "branches" | "history" | "timeline";
 
 const MAX_HISTORY_DIFF_CACHE_ENTRIES = 12;
 const MAX_HISTORY_DIFF_CACHE_CHARS = 4_000_000;
+const HISTORY_PAGE_SIZE = 100;
 
 function cacheDiff(cache: Record<string, string>, key: string, diff: string) {
   const entries = Object.entries(cache).filter(([entryKey]) => entryKey !== key);
@@ -114,7 +115,7 @@ export function GitPanel({
 }: {
   project: Project;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
-  focusCommit?: string | null | undefined;
+  focusCommit?: { hash: string; nonce: number } | null | undefined;
   onChangeCount?: ((count: number) => void) | undefined;
 }) {
   const [tab, setTab] = useState<GitTab>("changes");
@@ -129,6 +130,12 @@ export function GitPanel({
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [newBranch, setNewBranch] = useState("");
   const [commits, setCommits] = useState<GitCommitSummary[]>([]);
+  const [historyScope, setHistoryScope] = useState<"branch" | "all">("branch");
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyRequest = useRef(0);
+  const historyScopeRef = useRef(historyScope);
+  historyScopeRef.current = historyScope;
   const [detail, setDetail] = useState<GitCommitDetail | null>(null);
   const [historyFile, setHistoryFile] = useState<string | null>(null);
   const [historyDiff, setHistoryDiff] = useState("");
@@ -159,14 +166,32 @@ export function GitPanel({
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
-  const loadHistory = async () => {
+  const loadHistory = async (options?: { skip?: number; scope?: "branch" | "all" }) => {
+    const scope = options?.scope ?? historyScopeRef.current;
+    const skip = options?.skip ?? 0;
+    const requestId = ++historyRequest.current;
+    setHistoryLoading(true);
     try {
-      const result = await api<{ commits: GitCommitSummary[] }>(
-        `/api/projects/${project.id}/git/log`
+      const params = new URLSearchParams({
+        limit: String(HISTORY_PAGE_SIZE),
+        skip: String(skip)
+      });
+      if (scope === "all") params.set("all", "1");
+      const result = await api<{ commits: GitCommitSummary[]; hasMore: boolean }>(
+        `/api/projects/${project.id}/git/log?${params.toString()}`
       );
-      setCommits(result.commits);
+      if (historyRequest.current !== requestId) return;
+      setHistoryHasMore(result.hasMore);
+      setCommits((current) => {
+        if (skip === 0) return result.commits;
+        const seen = new Set(current.map((item) => item.hash));
+        return [...current, ...result.commits.filter((item) => !seen.has(item.hash))];
+      });
     } catch (reason) {
+      if (historyRequest.current !== requestId) return;
       setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (historyRequest.current === requestId) setHistoryLoading(false);
     }
   };
   const loadOperations = async () => {
@@ -231,15 +256,15 @@ export function GitPanel({
   }, [project.id, project.realPath]);
   useEffect(() => {
     if (tab === "branches") void loadBranches();
-    if (tab === "history") void loadHistory();
+    if (tab === "history") void loadHistory({ skip: 0, scope: historyScope });
     if (tab === "timeline") void loadOperations();
-  }, [project.id, project.realPath, tab]);
-  const focusedCommit = useRef<string | null>(null);
+  }, [project.id, project.realPath, tab, historyScope]);
+  const focusedCommit = useRef<number | null>(null);
   useEffect(() => {
-    if (!focusCommit || focusedCommit.current === focusCommit) return;
-    focusedCommit.current = focusCommit;
+    if (!focusCommit || focusedCommit.current === focusCommit.nonce) return;
+    focusedCommit.current = focusCommit.nonce;
     setTab("history");
-    void loadHistory().then(() => openCommit(focusCommit));
+    void loadHistory({ skip: 0 }).then(() => openCommit(focusCommit.hash));
   }, [focusCommit]);
 
   const staged = useMemo(() => status?.files.filter((file) => file.staged) ?? [], [status]);
@@ -746,12 +771,32 @@ export function GitPanel({
           className={`git-history-layout ${detail && mobileHistoryPane === "detail" ? "is-detail" : ""}`}
         >
           <div className="git-history-commits">
+            <div className="sticky top-0 z-[1] flex items-center gap-1 border-b border-border bg-background px-2 py-1.5">
+              <button
+                type="button"
+                className={`h-7 rounded-lg px-2 text-[11px] ${historyScope === "branch" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                onClick={() => setHistoryScope("branch")}
+              >
+                当前分支
+              </button>
+              <button
+                type="button"
+                className={`h-7 rounded-lg px-2 text-[11px] ${historyScope === "all" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                onClick={() => setHistoryScope("all")}
+              >
+                所有分支
+              </button>
+              <span className="ml-auto text-[10px] text-muted-foreground">
+                {historyLoading ? "加载中" : `${commits.length}${historyHasMore ? "+" : ""} 条`}
+              </span>
+            </div>
             {commits.map((commitItem) => (
               <button
                 key={commitItem.hash}
                 type="button"
                 className={`git-file-row w-full text-left ${detail?.hash === commitItem.hash ? "is-active" : ""}`}
                 onClick={() => void openCommit(commitItem.hash)}
+                title={`${commitItem.author} · ${commitItem.date}`}
               >
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {commitItem.shortHash}
@@ -759,7 +804,22 @@ export function GitPanel({
                 <span className="min-w-0 flex-1 truncate text-xs">{commitItem.subject}</span>
               </button>
             ))}
-            {commits.length === 0 ? <p className="git-empty">暂无提交记录</p> : null}
+            {historyHasMore ? (
+              <button
+                type="button"
+                className="w-full px-3 py-2 text-left text-[11px] text-primary hover:bg-muted"
+                disabled={historyLoading}
+                onClick={() => void loadHistory({ skip: commits.length })}
+              >
+                {historyLoading ? "正在加载更早的提交" : "加载更早的提交"}
+              </button>
+            ) : commits.length > 0 ? (
+              <p className="git-empty">已显示全部 {commits.length} 条提交</p>
+            ) : historyLoading ? (
+              <p className="git-empty">正在读取提交记录</p>
+            ) : (
+              <p className="git-empty">暂无提交记录</p>
+            )}
           </div>
           <div className="git-history-main">
             {detail ? (

@@ -17,6 +17,9 @@ import {
   listGitLog,
   parseDiffHunks,
   captureGitCheckpoint,
+  gitBlame,
+  listGitLogPage,
+  parseGitBlame,
   restoreGitCheckpoint
 } from "./project-git.js";
 
@@ -98,6 +101,55 @@ describe("project git helpers", () => {
     expect(log[0]?.subject).toBe("init");
   });
 
+  it("pages history and includes commits from other branches", async () => {
+    const root = await repo();
+    await writeFile(path.join(root, "src", "a.ts"), "one\nsecond\nthree\n");
+    await git(root, ["add", "."]);
+    await git(root, ["commit", "-m", "second"]);
+    await writeFile(path.join(root, "src", "a.ts"), "one\nsecond\nthird\n");
+    await git(root, ["add", "."]);
+    await git(root, ["commit", "-m", "third"]);
+    const branch = (await gitStatus(root)).branch ?? "master";
+    await git(root, ["checkout", "-b", "feature/history"]);
+    await writeFile(path.join(root, "src", "a.ts"), "side\n");
+    await git(root, ["add", "."]);
+    await git(root, ["commit", "-m", "side"]);
+    await git(root, ["checkout", branch]);
+
+    const page = await listGitLogPage(root, { limit: 1 });
+    expect(page.commits.map((commit) => commit.subject)).toEqual(["third"]);
+    expect(page.hasMore).toBe(true);
+    const oldest = await listGitLogPage(root, { limit: 1, skip: 2 });
+    expect(oldest.commits[0]?.subject).toBe("init");
+    expect(oldest.hasMore).toBe(false);
+    expect(
+      (await listGitLogPage(root, { limit: 20 })).commits.some(
+        (commit) => commit.subject === "side"
+      )
+    ).toBe(false);
+    expect(
+      (await listGitLogPage(root, { limit: 20, all: true })).commits.some(
+        (commit) => commit.subject === "side"
+      )
+    ).toBe(true);
+  });
+
+  it("blames committed lines and marks buffer edits as uncommitted", async () => {
+    const root = await repo();
+    const blame = await gitBlame(root, "src/a.ts");
+    expect(blame.available).toBe(true);
+    expect(blame.lines).toHaveLength(3);
+    expect(blame.lines.every((line) => line.committed && line.summary === "init")).toBe(true);
+
+    const edited = await gitBlame(root, "src/a.ts", "one\ncustom\nthree\n");
+    expect(edited.lines[1]?.committed).toBe(false);
+    expect(edited.lines[0]?.summary).toBe("init");
+    expect(await gitBlame(root, "src/missing.ts")).toMatchObject({
+      available: false,
+      lines: []
+    });
+  });
+
   it("returns a commit file patch instead of the working tree", async () => {
     const root = await repo();
     await writeFile(path.join(root, "src", "a.ts"), "one\nadded\ntwo\nthree\n");
@@ -118,6 +170,32 @@ describe("project git helpers", () => {
     await discardGitFiles(root, ["src/a.ts"]);
     const status = await gitStatus(root);
     expect(status.files).toEqual([]);
+  });
+});
+
+describe("git blame porcelain", () => {
+  it("keeps commit metadata for abbreviated follow-up lines", () => {
+    const hash = "a".repeat(40);
+    const stdout = [
+      `${hash} 1 1 2`,
+      "author Ada",
+      "author-time 1700000000",
+      "summary init",
+      "filename src/a.ts",
+      "\tone",
+      `${hash} 2 2`,
+      "\ttwo",
+      `${"0".repeat(40)} 3 3 1`,
+      "author Not Committed Yet",
+      "author-time 1700001000",
+      "summary local",
+      "filename src/a.ts",
+      "\tthree"
+    ].join("\n");
+    const lines = parseGitBlame(stdout);
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatchObject({ author: "Ada", summary: "init", committed: true });
+    expect(lines[2]?.committed).toBe(false);
   });
 });
 

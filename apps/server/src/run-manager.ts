@@ -1053,7 +1053,8 @@ export class RunManager {
     if (!requestedProvider) throw new Error("Select a provider first");
     if (session.providerId && session.providerId !== requestedProvider) {
       const hasStarted = Boolean(session.threadId) || this.store.hasMessageRole(session.id, "user");
-      if (hasStarted) throw new Error("provider-continuation-required");
+      const unboundFork = session.continuationMode === "fork" && !session.threadId;
+      if (hasStarted && !unboundFork) throw new Error("provider-continuation-required");
     }
     const provider = this.store.getProvider(requestedProvider);
     if (!provider) throw new Error("Provider not found");

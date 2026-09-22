@@ -32,6 +32,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  GitCommit,
   GitCompare,
   LoaderCircle,
   MoreHorizontal,
@@ -76,6 +77,12 @@ import {
 import { useTheme } from "@/context/theme-provider";
 import { GitDiffView } from "./GitDiffView";
 import { GitPanel } from "./GitPanel";
+import {
+  blameMatchesDocument,
+  readBlameEnabled,
+  writeBlameEnabled,
+  type GitBlameResult
+} from "./git-blame";
 import {
   ancestorPaths,
   compactSelectedPaths,
@@ -417,7 +424,8 @@ function FilesWorkspace({
   editorCommand,
   onOpened,
   onCommandHandled,
-  onDirtyCount
+  onDirtyCount,
+  onOpenCommit
 }: {
   project: Project;
   openRequest?: OpenFileRequest | null;
@@ -425,6 +433,7 @@ function FilesWorkspace({
   onOpened?: () => void;
   onCommandHandled?: (() => void) | undefined;
   onDirtyCount?: ((count: number) => void) | undefined;
+  onOpenCommit?: ((hash: string) => void) | undefined;
 }) {
   const { resolvedTheme } = useTheme();
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -463,6 +472,12 @@ function FilesWorkspace({
   const [goToLineOpen, setGoToLineOpen] = useState(false);
   const [goToLineValue, setGoToLineValue] = useState("");
   const [language, setLanguage] = useState<LanguageAnalysis | null>(null);
+  const [blameOn, setBlameOn] = useState(readBlameEnabled);
+  const [blameLoading, setBlameLoading] = useState(false);
+  const [blameError, setBlameError] = useState("");
+  const [blame, setBlame] = useState<GitBlameResult | null>(null);
+  const [blameBase, setBlameBase] = useState<string | null>(null);
+  const blameRequest = useRef(0);
 
   tabsRef.current = tabs;
   const filter = fileLookupMode === "tree" ? fileLookup : "";
@@ -826,6 +841,55 @@ function FilesWorkspace({
     }, 350);
     return () => window.clearTimeout(timer);
   }, [activeTab?.draft, activeTab?.path, activeTab?.previewKind, project.id]);
+
+  const refreshBlame = useCallback(
+    async (path: string, content: string, useBuffer: boolean) => {
+      const requestId = ++blameRequest.current;
+      setBlameLoading(true);
+      setBlameError("");
+      try {
+        const result = useBuffer
+          ? await api<GitBlameResult>(`/api/projects/${project.id}/git/blame`, {
+              method: "POST",
+              body: JSON.stringify({ path, content })
+            })
+          : await api<GitBlameResult>(
+              `/api/projects/${project.id}/git/blame?path=${encodeURIComponent(path)}`
+            );
+        if (blameRequest.current !== requestId) return;
+        setBlame(result);
+        setBlameBase(content);
+        setBlameError(result.available ? "" : result.message || "无法读取 Blame");
+      } catch (reason) {
+        if (blameRequest.current !== requestId) return;
+        setBlame(null);
+        setBlameBase(null);
+        setBlameError(reason instanceof Error ? reason.message : "无法读取 Blame");
+      } finally {
+        if (blameRequest.current === requestId) setBlameLoading(false);
+      }
+    },
+    [project.id]
+  );
+
+  useEffect(() => {
+    if (
+      !blameOn ||
+      !activeTab ||
+      isMediaPreview(activeTab.previewKind) ||
+      isExternalEditorPath(activeTab.path)
+    ) {
+      blameRequest.current += 1;
+      setBlame(null);
+      setBlameBase(null);
+      setBlameError("");
+      setBlameLoading(false);
+      return;
+    }
+    const path = activeTab.path;
+    const content = activeTab.draft;
+    void refreshBlame(path, content, content !== activeTab.content);
+  }, [activeTab?.content, activeTab?.path, activeTab?.previewKind, blameOn, refreshBlame]);
 
   useEffect(() => {
     if (!editorCommand) return;
@@ -1419,6 +1483,18 @@ function FilesWorkspace({
   const draftSize = activeTab ? new TextEncoder().encode(activeTab.draft).byteLength : 0;
   const tooLarge = draftSize > MAX_EDITABLE_FILE_BYTES;
   const dirty = Boolean(activeTab && activeTab.draft !== activeTab.content);
+  const blameLines =
+    blameOn &&
+    blame?.available &&
+    activeTab &&
+    blame.path === activeTab.path &&
+    blameMatchesDocument(activeTab.draft, blame.lines)
+      ? blame.lines
+      : null;
+  const blameStale = Boolean(
+    blameOn && blame?.available && activeTab && blame.path === activeTab.path && !blameLines
+  );
+  const blameDirty = Boolean(blameLines && blameBase !== null && activeTab?.draft !== blameBase);
 
   return (
     <div
@@ -1805,6 +1881,30 @@ function FilesWorkspace({
                   <GitCompare className="size-3.5" /> Diff
                 </Button>
               )}
+              {!isMediaPreview(activeTab.previewKind) && !isExternalEditorPath(activeTab.path) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={blameOn ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-[11px]"
+                  title="在行号左侧显示 Git blame"
+                  aria-pressed={blameOn}
+                  onClick={() =>
+                    setBlameOn((value) => {
+                      const next = !value;
+                      writeBlameEnabled(next);
+                      return next;
+                    })
+                  }
+                >
+                  {blameLoading ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : (
+                    <GitCommit className="size-3.5" />
+                  )}
+                  Blame
+                </Button>
+              )}
               <Button
                 type="button"
                 size="icon"
@@ -1929,6 +2029,23 @@ function FilesWorkspace({
         {error && (
           <p className="mx-3 mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-600">{error}</p>
         )}
+        {blameOn && activeTab && (blameError || blameStale || blameDirty) && (
+          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+            <span className="min-w-0 flex-1">
+              {blameError ||
+                (blameStale
+                  ? "增删了行，Blame 已先隐藏，避免和当前行错位。"
+                  : "有未保存修改，当前 Blame 还是打开时的版本。")}
+            </span>
+            <button
+              type="button"
+              className="text-primary"
+              onClick={() => void refreshBlame(activeTab.path, activeTab.draft, true)}
+            >
+              刷新
+            </button>
+          </div>
+        )}
         {activeTab ? (
           <div className="flex min-h-0 flex-1">
             <div
@@ -1953,6 +2070,8 @@ function FilesWorkspace({
                         editable={activeTab.writable && savingPath !== activeTab.path}
                         line={activeTab.line}
                         diagnostics={language?.diagnostics ?? []}
+                        blame={blameLines}
+                        onBlameCommit={onOpenCommit}
                         onDefinitionRequest={(line, column) => void requestDefinition(line, column)}
                         onChange={(value) =>
                           updateTab(activeTab.path, { draft: value, line: null })
@@ -2156,7 +2275,8 @@ export function ProjectFilesPanel({
   focusCommit,
   onDirtyCount,
   onGitCount,
-  onCommandHandled
+  onCommandHandled,
+  onOpenCommit
 }: {
   project: Project;
   view: ProjectResourceView;
@@ -2164,10 +2284,11 @@ export function ProjectFilesPanel({
   openFileRequest?: OpenFileRequest | null | undefined;
   onOpenFileHandled?: (() => void) | undefined;
   editorCommand?: "goto-line" | "toggle-outline" | null | undefined;
-  focusCommit?: string | null | undefined;
+  focusCommit?: { hash: string; nonce: number } | null | undefined;
   onDirtyCount?: ((count: number) => void) | undefined;
   onGitCount?: ((count: number) => void) | undefined;
   onCommandHandled?: (() => void) | undefined;
+  onOpenCommit?: ((hash: string) => void) | undefined;
 }) {
   const [openRequest, setOpenRequest] = useState<OpenFileRequest | null>(openFileRequest ?? null);
   const localOpenNonce = useRef(0);
@@ -2188,6 +2309,7 @@ export function ProjectFilesPanel({
           }}
           onCommandHandled={onCommandHandled}
           onDirtyCount={onDirtyCount}
+          onOpenCommit={onOpenCommit}
         />
       </div>
       <div className={view === "git" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>

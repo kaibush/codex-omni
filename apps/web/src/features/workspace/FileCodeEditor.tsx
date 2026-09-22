@@ -7,10 +7,71 @@ import { python } from "@codemirror/lang-python";
 import { sql } from "@codemirror/lang-sql";
 import { yaml } from "@codemirror/lang-yaml";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
-import { EditorView } from "@codemirror/view";
+import { EditorView, GutterMarker, gutter } from "@codemirror/view";
 import CodeMirror, { type Extension } from "@uiw/react-codemirror";
 import { useEffect, useMemo, useRef } from "react";
+import { blameHue, blameLabel, blameTooltip, type GitBlameLine } from "./git-blame";
 import type { LanguageDiagnostic } from "./file-workspace";
+
+class BlameMarker extends GutterMarker {
+  constructor(readonly entry: GitBlameLine) {
+    super();
+  }
+
+  eq(other: GutterMarker) {
+    return (
+      other instanceof BlameMarker &&
+      other.entry.hash === this.entry.hash &&
+      other.entry.time === this.entry.time &&
+      other.entry.summary === this.entry.summary &&
+      other.entry.committed === this.entry.committed
+    );
+  }
+
+  toDOM() {
+    const node = document.createElement("span");
+    node.className = this.entry.committed ? "cm-blame-text is-commit" : "cm-blame-text";
+    node.textContent = blameLabel(this.entry);
+    node.title = blameTooltip(this.entry);
+    node.style.borderLeftColor = this.entry.committed
+      ? `hsl(${blameHue(this.entry.hash)} 52% 46%)`
+      : "var(--muted-foreground)";
+    return node;
+  }
+}
+
+function blameGutter(
+  lines: readonly GitBlameLine[],
+  onOpenCommit: (hash: string) => void
+): Extension {
+  const markers = lines.map((line) => new BlameMarker(line));
+  return gutter({
+    class: "cm-blame-gutter",
+    lineMarker(view, line) {
+      const number = view.state.doc.lineAt(line.from).number;
+      return markers[number - 1] ?? null;
+    },
+    initialSpacer: () =>
+      new BlameMarker({
+        hash: "",
+        shortHash: "",
+        author: "作者名称",
+        time: 0,
+        summary: "提交说明",
+        committed: true
+      }),
+    domEventHandlers: {
+      click(view, line, event) {
+        const number = view.state.doc.lineAt(line.from).number;
+        const entry = lines[number - 1];
+        if (!entry?.committed || !entry.hash) return false;
+        onOpenCommit(entry.hash);
+        event.preventDefault();
+        return true;
+      }
+    }
+  });
+}
 
 type EditorViewLike = EditorView;
 
@@ -62,7 +123,9 @@ export default function FileCodeEditor({
   line = null,
   diagnostics = [],
   onDefinitionRequest,
-  autoFocus = true
+  autoFocus = true,
+  blame = null,
+  onBlameCommit
 }: {
   value: string;
   path: string;
@@ -73,13 +136,18 @@ export default function FileCodeEditor({
   diagnostics?: LanguageDiagnostic[];
   onDefinitionRequest?: (line: number, column: number) => void;
   autoFocus?: boolean;
+  blame?: readonly GitBlameLine[] | null;
+  onBlameCommit?: ((hash: string) => void) | undefined;
 }) {
   const definitionRef = useRef(onDefinitionRequest);
   definitionRef.current = onDefinitionRequest;
+  const blameCommitRef = useRef(onBlameCommit);
+  blameCommitRef.current = onBlameCommit;
   const extensions = useMemo(() => {
     const language = extensionsFor(path);
     return [
       ...language,
+      ...(blame?.length ? [blameGutter(blame, (hash) => blameCommitRef.current?.(hash))] : []),
       lintGutter(),
       EditorView.domEventHandlers({
         click(event, view) {
@@ -92,7 +160,7 @@ export default function FileCodeEditor({
         }
       })
     ];
-  }, [path]);
+  }, [blame, path]);
   const viewRef = useRef<EditorViewLike | null>(null);
 
   useEffect(() => {

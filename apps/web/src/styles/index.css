@@ -838,7 +838,7 @@ button.composer-chip:hover,
   flex-direction: column;
 }
 .git-history-commits {
-  max-height: 11rem;
+  max-height: min(42vh, 22rem);
   overflow: auto;
   border-bottom: 1px solid var(--border);
 }
@@ -887,6 +887,44 @@ button.composer-chip:hover,
   color: var(--muted-foreground);
   font-size: 0.7rem;
   font-style: italic;
+}
+.cm-blame-gutter.cm-gutter {
+  order: -1;
+  width: 15rem;
+  min-width: 15rem;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--muted) 42%, var(--background));
+  color: var(--muted-foreground);
+}
+.cm-blame-gutter .cm-gutterElement {
+  padding: 0 0.25rem 0 0;
+  overflow: hidden;
+}
+.cm-blame-text {
+  display: block;
+  max-width: 14.4rem;
+  overflow: hidden;
+  border-left: 3px solid var(--border);
+  padding-left: 0.35rem;
+  font-size: 11px;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cm-blame-text.is-commit {
+  cursor: pointer;
+}
+.cm-blame-text.is-commit:hover {
+  color: var(--foreground);
+}
+@media (max-width: 760px) {
+  .cm-blame-gutter.cm-gutter {
+    width: 9rem;
+    min-width: 9rem;
+  }
+  .cm-blame-text {
+    max-width: 8.4rem;
+  }
 }
 .panel-icon-button {
   display: grid;
@@ -1985,6 +2023,7 @@ button.user-attachment-path {
     position: absolute;
     top: 0;
     right: 100%;
+    width: max-content;
     margin-right: 0.35rem;
   }
 }
@@ -2006,11 +2045,13 @@ button.user-attachment-path {
   backdrop-filter: blur(16px);
 }
 .timeline-view-toggle button {
+  flex: none;
   height: 1.7rem;
   border-radius: 0.4rem;
   padding: 0 0.65rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 .timeline-view-toggle button:hover:not(.is-active) {
@@ -2024,6 +2065,9 @@ button.user-attachment-path {
   display: inline-flex;
   position: static;
   z-index: 32;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
   border-radius: 0.5rem;
   background: var(--card);
 }
