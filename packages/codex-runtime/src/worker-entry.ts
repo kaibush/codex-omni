@@ -101,7 +101,6 @@ try {
     ...(request.apiKey ? { apiKey: request.apiKey } : {}),
     env: workerEnvironment(request),
     config: {
-      model_supports_reasoning_summaries: true,
       features: { multi_agent: true },
       ...(modelRuntime.contextWindow ? { model_context_window: modelRuntime.contextWindow } : {}),
       ...(modelRuntime.autoCompactTokenLimit
