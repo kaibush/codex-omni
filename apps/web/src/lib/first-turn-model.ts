@@ -41,13 +41,13 @@ export function firstTurnPromptKind(input: {
   hasUserMessage: boolean;
   confirmed: boolean;
   hasPendingTurn: boolean;
-  hasStartedTurn?: boolean;
 }): FirstTurnKind | null {
   if (input.sessionKind === "terminal-chat") return null;
-  if (input.confirmed || input.hasPendingTurn || input.hasStartedTurn) return null;
-  if (input.threadId?.trim()) return null;
-  if (input.continuationMode === "fork") return "fork";
-  if (input.hasUserMessage) return null;
+  if (input.confirmed || input.hasPendingTurn) return null;
+  if (input.continuationMode === "fork") {
+    return input.threadId?.trim() ? null : "fork";
+  }
+  if (input.hasUserMessage || input.threadId?.trim()) return null;
   if (input.continuationMode === "portable-context") return "continue";
   if (input.continuationMode) return null;
   return "new";

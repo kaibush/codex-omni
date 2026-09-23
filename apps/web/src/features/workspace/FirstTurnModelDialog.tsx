@@ -58,12 +58,26 @@ export function FirstTurnModelDialog({
 }) {
   const [selectedProviderId, setSelectedProviderId] = useState(providerId);
   const [selectedModel, setSelectedModel] = useState(model);
+  const [confirmArmed, setConfirmArmed] = useState(false);
   const touched = useRef(false);
+  const openedAt = useRef(0);
+  const providerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const models = selectedProvider?.models ?? [];
   const providerReady = Boolean(selectedProvider);
   const modelReady = Boolean(selectedModel && models.includes(selectedModel));
   const text = (kind && copy[kind]) || copy.new;
+
+  useEffect(() => {
+    if (!open) {
+      touched.current = false;
+      setConfirmArmed(false);
+      return;
+    }
+    openedAt.current = Date.now();
+    const timer = window.setTimeout(() => setConfirmArmed(true), 120);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -86,9 +100,22 @@ export function FirstTurnModelDialog({
     setSelectedModel(modelForProvider(provider, ""));
   };
 
+  const ignoreOpeningGesture = (event: { preventDefault: () => void }) => {
+    if (Date.now() - openedAt.current < 250) event.preventDefault();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent
+        className="max-w-md"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          providerTriggerRef.current?.focus();
+        }}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+        onPointerDownOutside={ignoreOpeningGesture}
+        onInteractOutside={ignoreOpeningGesture}
+      >
         <DialogTitle>{text.title}</DialogTitle>
         <DialogDescription>{text.description}</DialogDescription>
         <div className="space-y-3">
@@ -96,7 +123,7 @@ export function FirstTurnModelDialog({
             <span className="text-muted-foreground">供应商</span>
             {providerReady ? (
               <Select value={selectedProviderId} onValueChange={chooseProvider} disabled={busy}>
-                <SelectTrigger className="h-8 w-full rounded-lg">
+                <SelectTrigger ref={providerTriggerRef} className="h-8 w-full rounded-lg">
                   <KeyRound className="size-3.5 text-muted-foreground" />
                   <SelectValue placeholder="选择供应商" />
                 </SelectTrigger>
@@ -159,7 +186,7 @@ export function FirstTurnModelDialog({
           <Button
             type="button"
             className="h-8 rounded-lg"
-            disabled={busy || !selectedProviderId}
+            disabled={busy || !confirmArmed || !selectedProviderId}
             onClick={() => onConfirm(selectedProviderId, selectedModel)}
           >
             使用该模型发送

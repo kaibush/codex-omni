@@ -1251,25 +1251,24 @@ export function Workspace() {
   }, [activeSession?.id, activeSession?.kind]);
   useEffect(() => {
     const pending = pendingContinuationSend.current;
-    if (!pending || pending.sessionId !== sessionId) {
-      if (pending) pendingContinuationSend.current = null;
-      setFirstTurnPrompt(null);
+    if (pending && pending.sessionId === sessionId) {
+      const message = pending.message.trim();
+      if (!message) {
+        pendingContinuationSend.current = null;
+        return;
+      }
+      setFirstTurnPrompt({
+        sessionId,
+        kind: "continue",
+        overrideText: message,
+        retryAttachments: [],
+        providerId: pending.providerId,
+        model: ""
+      });
       return;
     }
-    const message = pending.message.trim();
-    if (!message) {
-      pendingContinuationSend.current = null;
-      setFirstTurnPrompt(null);
-      return;
-    }
-    setFirstTurnPrompt({
-      sessionId,
-      kind: "continue",
-      overrideText: message,
-      retryAttachments: [],
-      providerId: pending.providerId,
-      model: ""
-    });
+    if (pending) pendingContinuationSend.current = null;
+    setFirstTurnPrompt((current) => (current?.sessionId === sessionId ? current : null));
   }, [projectId, sessionId]);
   useEffect(() => {
     setTerminalChatVisited(workspaceViewRef.current === "terminal-chat");
@@ -1846,8 +1845,7 @@ export function Workspace() {
           hasPendingTurn:
             runState?.status === "running" ||
             queuedTurns.some((item) => item.sessionId === sessionId) ||
-            queuedCommands.current.some((item) => item.sessionId === sessionId && item.message),
-          hasStartedTurn: Boolean(activeSession.lastMessageAt)
+            queuedCommands.current.some((item) => item.sessionId === sessionId && item.message)
         });
     if (promptKind) {
       setFirstTurnPrompt({

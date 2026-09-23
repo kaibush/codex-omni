@@ -92,14 +92,34 @@ describe("firstTurnPromptKind", () => {
     ).toBeNull();
     expect(
       firstTurnPromptKind({
+        threadId: "fork-thread",
+        continuationMode: "fork",
+        hasUserMessage: true,
+        confirmed: false,
+        hasPendingTurn: false
+      })
+    ).toBeNull();
+  });
+
+  it("still prompts on a brand-new or unbound fork session before the first user turn", () => {
+    expect(
+      firstTurnPromptKind({
+        threadId: null,
+        continuationMode: null,
+        hasUserMessage: false,
+        confirmed: false,
+        hasPendingTurn: false
+      })
+    ).toBe("new");
+    expect(
+      firstTurnPromptKind({
         threadId: null,
         continuationMode: "fork",
         hasUserMessage: true,
         confirmed: false,
-        hasPendingTurn: false,
-        hasStartedTurn: true
+        hasPendingTurn: false
       })
-    ).toBeNull();
+    ).toBe("fork");
   });
 
   it("ignores terminal chats and unknown continuation modes that already started", () => {
