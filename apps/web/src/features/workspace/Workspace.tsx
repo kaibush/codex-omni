@@ -30,6 +30,14 @@ import { api, apiText, apiUpload, wsUrl } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { useDocumentTitle, workspaceDocumentTitle } from "@/lib/document-title";
 import { defaultWorkspaceView, settingsPath, workspacePath } from "@/lib/routes";
+import { FirstTurnModelDialog } from "@/features/workspace/FirstTurnModelDialog";
+import {
+  firstTurnPromptKind,
+  loadConfirmedFirstTurns,
+  rememberConfirmedFirstTurn,
+  sessionHasUserMessage,
+  type FirstTurnKind
+} from "@/lib/first-turn-model";
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
 import { isThreadGoalLocked } from "@/lib/thread-goal";
 import {
@@ -209,6 +217,15 @@ export function Workspace() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [continuation, setContinuation] = useState<Provider | null>(null);
+  const [firstTurnPrompt, setFirstTurnPrompt] = useState<{
+    sessionId: string;
+    kind: FirstTurnKind;
+    overrideText: string | null;
+    retryAttachments: TurnAttachment[];
+    providerId: string;
+    model: string;
+  } | null>(null);
+  const confirmedFirstTurns = useRef(loadConfirmedFirstTurns());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState === "visible");
   const [runState, setRunState] = useState<RunState | null>(null);
@@ -795,59 +812,6 @@ export function Workspace() {
       const pendingCommands = queuedCommands.current;
       for (const pending of pendingCommands) ws.send(pending.data);
       if (pendingCommands.length) setSendNotice("正在确认待发送消息");
-
-      const pending = pendingContinuationSend.current;
-      if (pending && pending.sessionId === sessionId) {
-        const clientId = createId();
-        ws.send(
-          JSON.stringify({
-            type: "turn.enqueue",
-            clientId,
-            projectId,
-            sessionId,
-            message: pending.message,
-            providerId: pending.providerId,
-            sandbox: workspaceSettingsRef.current.sandbox,
-            approvalPolicy: workspaceSettingsRef.current.approvalPolicy,
-            networkAccessEnabled: workspaceSettingsRef.current.networkAccessEnabled
-          })
-        );
-        queuedCommands.current = boundOutboundCommands([
-          ...queuedCommands.current.filter((item) => item.id !== clientId),
-          {
-            id: clientId,
-            sessionId,
-            data: JSON.stringify({
-              type: "turn.enqueue",
-              clientId,
-              projectId,
-              sessionId,
-              message: pending.message,
-              providerId: pending.providerId,
-              sandbox: workspaceSettingsRef.current.sandbox,
-              approvalPolicy: workspaceSettingsRef.current.approvalPolicy,
-              networkAccessEnabled: workspaceSettingsRef.current.networkAccessEnabled
-            }),
-            message: pending.message
-          }
-        ]);
-        persistOutboundCommands(queuedCommands.current);
-        setQueuedTurns((current) => [
-          ...current,
-          {
-            id: clientId,
-            sessionId,
-            projectId,
-            providerId: pending.providerId,
-            message: pending.message,
-            options: {},
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        ]);
-        pendingContinuationSend.current = null;
-        setInput("");
-      }
     };
     ws.onerror = () => {
       if (!disposed) setConnection("reconnecting");
@@ -1285,6 +1249,28 @@ export function Workspace() {
       setTerminalChatVisited(true);
     }
   }, [activeSession?.id, activeSession?.kind]);
+  useEffect(() => {
+    const pending = pendingContinuationSend.current;
+    if (!pending || pending.sessionId !== sessionId) {
+      if (pending) pendingContinuationSend.current = null;
+      setFirstTurnPrompt(null);
+      return;
+    }
+    const message = pending.message.trim();
+    if (!message) {
+      pendingContinuationSend.current = null;
+      setFirstTurnPrompt(null);
+      return;
+    }
+    setFirstTurnPrompt({
+      sessionId,
+      kind: "continue",
+      overrideText: message,
+      retryAttachments: [],
+      providerId: pending.providerId,
+      model: ""
+    });
+  }, [projectId, sessionId]);
   useEffect(() => {
     setTerminalChatVisited(workspaceViewRef.current === "terminal-chat");
     setFilesVisited(workspaceViewRef.current === "files" || workspaceViewRef.current === "git");
@@ -1811,32 +1797,67 @@ export function Workspace() {
   const send = () => {
     void submitMessage();
   };
-  const submitMessage = async (overrideText?: string, retryAttachments: TurnAttachment[] = []) => {
+  const submitMessage = async (
+    overrideText?: string | null,
+    retryAttachments: TurnAttachment[] = [],
+    options?: { skipPrompt?: boolean; providerId?: string; model?: string }
+  ) => {
     const usingOverride = overrideText != null;
     const raw = (usingOverride ? overrideText : input).trim();
     const files = usingOverride ? [] : attachments;
+    const chosenProviderId = options?.providerId || providerId;
+    const chosenModel = options?.model ?? model;
     const reason = sendBlockReason({
       hasSession: Boolean(activeSession),
-      hasProvider: Boolean(providerId),
+      hasProvider: Boolean(chosenProviderId),
       hasContent: Boolean(raw || files.length),
       sending
     });
     if (reason) {
       setSendNotice(reason);
-      if (!providerId) setProviderManager(true);
+      if (!chosenProviderId) setProviderManager(true);
       return;
     }
     if (!activeSession) return;
     if (
+      !options?.skipPrompt &&
       shouldContinueWithProvider({
         sessionProviderId: activeSession.providerId,
-        selectedProviderId: providerId,
+        selectedProviderId: chosenProviderId,
         hasConversation: timelineHasConversation(events),
         continuationMode: activeSession.continuationMode,
         threadId: activeSession.threadId
       })
     ) {
       setContinuation(selectedProvider);
+      return;
+    }
+    const promptKind = options?.skipPrompt
+      ? null
+      : firstTurnPromptKind({
+          sessionKind: activeSession.kind,
+          threadId: activeSession.threadId,
+          continuationMode: activeSession.continuationMode,
+          hasUserMessage: sessionHasUserMessage(
+            events,
+            detail.data?.session?.id === sessionId ? detail.data.messages : null
+          ),
+          confirmed: confirmedFirstTurns.current.has(sessionId),
+          hasPendingTurn:
+            runState?.status === "running" ||
+            queuedTurns.some((item) => item.sessionId === sessionId) ||
+            queuedCommands.current.some((item) => item.sessionId === sessionId && item.message),
+          hasStartedTurn: Boolean(activeSession.lastMessageAt)
+        });
+    if (promptKind) {
+      setFirstTurnPrompt({
+        sessionId,
+        kind: promptKind,
+        overrideText: usingOverride ? raw : null,
+        retryAttachments,
+        providerId: chosenProviderId,
+        model: chosenModel
+      });
       return;
     }
     setSending(true);
@@ -1874,8 +1895,8 @@ export function Workspace() {
         message: composed.message,
         displayMessage: composed.displayMessage,
         ...(composed.attachments.length ? { attachments: composed.attachments } : {}),
-        providerId,
-        ...(model ? { model } : {}),
+        providerId: chosenProviderId,
+        ...(chosenModel ? { model: chosenModel } : {}),
         sandbox: workspaceSettings.sandbox,
         approvalPolicy: workspaceSettings.approvalPolicy,
         networkAccessEnabled: workspaceSettings.networkAccessEnabled,
@@ -1893,10 +1914,10 @@ export function Workspace() {
             id: clientId,
             sessionId,
             projectId,
-            providerId,
+            providerId: chosenProviderId,
             message: composed.message,
             options: {
-              ...(model ? { model } : {}),
+              ...(chosenModel ? { model: chosenModel } : {}),
               sandbox: workspaceSettings.sandbox,
               approvalPolicy: workspaceSettings.approvalPolicy,
               networkAccessEnabled: workspaceSettings.networkAccessEnabled,
@@ -2828,6 +2849,34 @@ export function Workspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <FirstTurnModelDialog
+        open={firstTurnPrompt?.sessionId === sessionId}
+        kind={firstTurnPrompt?.kind ?? null}
+        providers={providers.data ?? []}
+        providerId={firstTurnPrompt?.providerId || providerId}
+        model={firstTurnPrompt?.model || model}
+        busy={sending}
+        onOpenChange={(open) => {
+          if (open) return;
+          pendingContinuationSend.current = null;
+          if (firstTurnPrompt?.overrideText && !input.trim()) setInput(firstTurnPrompt.overrideText);
+          setFirstTurnPrompt(null);
+        }}
+        onConfirm={(nextProviderId, nextModel) => {
+          const request = firstTurnPrompt;
+          if (!request || request.sessionId !== sessionId) return;
+          pendingContinuationSend.current = null;
+          rememberConfirmedFirstTurn(request.sessionId, confirmedFirstTurns.current);
+          setProviderId(nextProviderId);
+          if (nextModel) setModel(nextModel);
+          setFirstTurnPrompt(null);
+          void submitMessage(request.overrideText, request.retryAttachments, {
+            skipPrompt: true,
+            providerId: nextProviderId,
+            model: nextModel
+          });
+        }}
+      />
       <ProviderContinuationDialog
         open={Boolean(continuation)}
         onOpenChange={(v) => !v && setContinuation(null)}
