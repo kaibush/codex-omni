@@ -179,13 +179,6 @@ export function WorkspaceComposer({
   const [enhanceText, setEnhanceText] = useState("");
   const [enhanceError, setEnhanceError] = useState("");
   const [enhanceModel, setEnhanceModel] = useState("");
-  const [modelFilter, setModelFilter] = useState("");
-  const filteredModels = modelFilter.trim()
-    ? availableModels.filter((item) => item.toLowerCase().includes(modelFilter.trim().toLowerCase()))
-    : availableModels;
-  const visibleModels = model && !filteredModels.includes(model)
-    ? [model, ...filteredModels]
-    : filteredModels;
   const openEnhance = (source = input) => {
     const text = source.trim();
     if (!text) {
@@ -229,7 +222,6 @@ export function WorkspaceComposer({
     if (!enhanceNonce) return;
     openEnhance();
   }, [enhanceNonce]);
-  useEffect(() => setModelFilter(""), [providerId]);
   const sandbox = sandboxMeta(workspaceSettings.sandbox);
   const SandboxIcon = sandbox.icon;
   const runtimeButtonRef = useRef<HTMLButtonElement>(null);
@@ -436,15 +428,6 @@ export function WorkspaceComposer({
                     ))}
                   </SelectContent>
                 </Select>
-                {availableModels.length ? (
-                  <input
-                    className="h-8 w-24 rounded-lg border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring sm:w-32"
-                    value={modelFilter}
-                    onChange={(event) => setModelFilter(event.target.value)}
-                    placeholder="筛选模型"
-                    aria-label="筛选模型"
-                  />
-                ) : null}
                 <Select value={model} onValueChange={setModel} disabled={!availableModels.length}>
                   <SelectTrigger
                     className="composer-select w-auto min-w-0 max-w-[8.5rem] overflow-hidden sm:max-w-[13rem]"
@@ -454,7 +437,7 @@ export function WorkspaceComposer({
                     <SelectValue placeholder={selectedProvider?.model || "模型"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {visibleModels.map((item) => (
+                    {(model && !availableModels.includes(model) ? [model, ...availableModels] : availableModels).map((item) => (
                       <SelectItem key={item} value={item}>
                         {item}
                       </SelectItem>
