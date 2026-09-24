@@ -1361,7 +1361,9 @@ export class RunManager {
               ? { autoCompactTokenLimit: provider.autoCompactTokenLimit }
               : {}),
             ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
-            ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
+            ...(provider.homeMode === "api-key" && provider.apiKey
+              ? { apiKey: provider.apiKey }
+              : {}),
             ...(provider.configToml ? { configToml: provider.configToml } : {}),
             ...(provider.authJson ? { authJson: provider.authJson } : {}),
             ...(provider.envJson ? { messageEnvVars: JSON.parse(provider.envJson) } : {}),

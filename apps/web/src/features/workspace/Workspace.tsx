@@ -2751,11 +2751,12 @@ export function Workspace() {
           await qc.invalidateQueries({ queryKey: ["projects"] });
         }}
         onSave={async (body) => {
-          await api(body.id ? `/api/providers/${body.id}` : "/api/providers", {
+          const result = await api<Provider>(body.id ? `/api/providers/${body.id}` : "/api/providers", {
             method: body.id ? "PUT" : "POST",
             body: JSON.stringify(body)
           });
           await qc.invalidateQueries({ queryKey: ["providers"] });
+          return result;
         }}
         onRefresh={async () => {
           await qc.invalidateQueries({ queryKey: ["providers"] });

@@ -84,6 +84,19 @@ export function firstUsefulFailureMessage(...values: unknown[]) {
 export const providerHomeModeSchema = z.enum(["managed", "api-key", "external"]);
 export type ProviderHomeMode = z.infer<typeof providerHomeModeSchema>;
 
+export const DEFAULT_PROVIDER_CONFIG_TEMPLATE = `model = "{{model}}"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "{{name}}"
+base_url = "{{baseUrl}}"
+wire_api = "responses"
+stream_idle_timeout_ms = 600000
+`;
+export const DEFAULT_PROVIDER_AUTH_TEMPLATE = `{
+  "OPENAI_API_KEY": "{{apiKey}}"
+}`;
+
 export function normalizeProviderHomeMode(value: string | null | undefined): ProviderHomeMode {
   return value === "api-key" || value === "external" ? value : "managed";
 }

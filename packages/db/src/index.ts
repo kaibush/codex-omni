@@ -174,6 +174,11 @@ export type RunRow = {
   createdAt: number;
   updatedAt: number;
 };
+export type RecentRunSessionRow = Pick<RunRow, "id" | "sessionId" | "projectId" | "providerId" | "threadId" | "status" | "model" | "cwd" | "startedAt" | "endedAt" | "reason"> & {
+  sessionTitle: string;
+  projectName: string;
+  providerName: string | null;
+};
 export type ApprovalRow = {
   id: string;
   runId: string;
@@ -2076,6 +2081,27 @@ export class Store {
          FROM runs ORDER BY started_at DESC,id DESC LIMIT ?`
       )
       .all(limit) as RunRow[];
+  }
+  listRecentRunSessions(limit = 50): RecentRunSessionRow[] {
+    const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+    return this.db
+      .prepare(
+        `WITH latest AS (
+           SELECT r.id,r.session_id,r.project_id,r.provider_id,r.thread_id,r.status,r.model,r.cwd,r.started_at,r.ended_at,r.reason,
+                  ROW_NUMBER() OVER (PARTITION BY r.session_id ORDER BY r.started_at DESC,r.id DESC) AS rank
+           FROM runs r
+         )
+         SELECT l.id,l.session_id as sessionId,l.project_id as projectId,l.provider_id as providerId,l.thread_id as threadId,
+                l.status,l.model,l.cwd,l.started_at as startedAt,l.ended_at as endedAt,l.reason,
+                s.title as sessionTitle,p.name as projectName,pr.name as providerName
+         FROM latest l
+         JOIN sessions s ON s.id=l.session_id
+         JOIN projects p ON p.id=l.project_id
+         LEFT JOIN providers pr ON pr.id=l.provider_id
+         WHERE l.rank=1
+         ORDER BY l.started_at DESC,l.id DESC LIMIT ?`
+      )
+      .all(safeLimit) as RecentRunSessionRow[];
   }
   listProjectNotes(projectId: string): ProjectNoteRow[] {
     return this.db

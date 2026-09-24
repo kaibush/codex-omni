@@ -195,7 +195,7 @@ export function SystemSettingsPage() {
     await queryClient.invalidateQueries({ queryKey: ["providers"] });
   };
 
-  const showSave = active.id === "runtime" || active.id === "appearance";
+  const showSave = active.id === "runtime" || active.id === "appearance" || active.id === "providers";
   const providers = providersQuery.data ?? [];
   const defaultProvider = providers.find((item) => item.isDefault) ?? providers[0];
 
@@ -536,6 +536,7 @@ export function SystemSettingsPage() {
             {active.id === "updates" ? <SettingsUpdatesSection /> : null}
 
             {active.id === "providers" ? (
+              <>
               <SettingsCard
                 title="供应商与模型"
                 description="在此选择默认模型，或打开供应商管理进行新增、编辑和测试连接。"
@@ -596,6 +597,30 @@ export function SystemSettingsPage() {
                   </p>
                 )}
               </SettingsCard>
+              <SettingsCard
+                title="供应商配置模板"
+                description="新增托管供应商时使用。支持 {{name}}、{{model}}、{{baseUrl}}、{{apiKey}} 占位符，不要把真实密钥写进模板。"
+              >
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-medium">
+                    config.toml 模板
+                    <Textarea
+                      className="min-h-48 font-mono text-xs"
+                      value={draft.providerConfigTemplate}
+                      onChange={(event) => setDraft({ ...draft, providerConfigTemplate: event.target.value })}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm font-medium">
+                    auth.json 模板
+                    <Textarea
+                      className="min-h-48 font-mono text-xs"
+                      value={draft.providerAuthTemplate}
+                      onChange={(event) => setDraft({ ...draft, providerAuthTemplate: event.target.value })}
+                    />
+                  </label>
+                </div>
+              </SettingsCard>
+              </>
             ) : null}
 
             {active.id === "templates" ? (
@@ -774,11 +799,12 @@ export function SystemSettingsPage() {
           await queryClient.invalidateQueries({ queryKey: ["providers"] });
         }}
         onSave={async (body) => {
-          await api(body.id ? `/api/providers/${body.id}` : "/api/providers", {
+          const result = await api<Provider>(body.id ? `/api/providers/${body.id}` : "/api/providers", {
             method: body.id ? "PUT" : "POST",
             body: JSON.stringify(body)
           });
           await queryClient.invalidateQueries({ queryKey: ["providers"] });
+          return result;
         }}
         onRefresh={async () => {
           await queryClient.invalidateQueries({ queryKey: ["providers"] });

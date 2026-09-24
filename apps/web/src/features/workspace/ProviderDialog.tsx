@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { modelRuntimeSettingsSchema } from "@codex-omni/protocol";
 import {
@@ -20,22 +21,30 @@ import { api } from "@/lib/api";
 import type { Provider, ProviderHomeMode } from "@/types";
 import { ServerFolderPicker } from "./ServerFolderPicker";
 import { ProviderRuntimeFields } from "./ProviderRuntimeFields";
+import {
+  defaultProviderTemplates,
+  providerAuthKey,
+  providerConfigValue,
+  renderProviderTemplates,
+  setProviderAuthKey,
+  setProviderConfigValue
+} from "./provider-templates";
 
 type ProviderInput = Omit<Provider, "id" | "isDefault"> & { id?: string; isDefault?: boolean };
 
 const empty: ProviderInput = {
-  name: "",
+  name: "新供应商",
   kind: "codex",
-  model: null,
+  model: "gpt-5",
   contextWindow: null,
   autoCompactTokenLimit: null,
   models: [],
-  baseUrl: null,
+  baseUrl: "https://api.openai.com/v1",
   apiKey: null,
   configToml: "",
   authJson: "",
   messageEnvVars: {},
-  homeMode: "api-key",
+  homeMode: "managed",
   codexHomePath: null
 };
 
@@ -62,7 +71,7 @@ export function ProviderDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   providers: Provider[];
-  onSave: (v: ProviderInput) => Promise<void>;
+  onSave: (v: ProviderInput) => Promise<Provider | void>;
   onDelete: (id: string) => Promise<void>;
   onSelect: (id: string) => void;
   onRefresh?: () => Promise<void>;
@@ -76,7 +85,19 @@ export function ProviderDialog({
   const [showSecrets, setShowSecrets] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const [testNotice, setTestNotice] = useState("");
+  const [testIsError, setTestIsError] = useState(false);
+  const [manualModel, setManualModel] = useState("");
   const [folderOpen, setFolderOpen] = useState(false);
+  const [secretLoading, setSecretLoading] = useState(false);
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api<{ providerConfigTemplate?: string; providerAuthTemplate?: string }>("/api/settings"),
+    enabled: open
+  });
+  const templates = {
+    configToml: settingsQuery.data?.providerConfigTemplate || defaultProviderTemplates.configToml,
+    authJson: settingsQuery.data?.providerAuthTemplate || defaultProviderTemplates.authJson
+  };
   const importRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!open) {
@@ -88,14 +109,39 @@ export function ProviderDialog({
   const begin = (provider?: Provider) => {
     const next = provider
       ? { ...provider, homeMode: provider.homeMode ?? "managed" }
-      : { ...empty };
+      : {
+          ...empty,
+          ...renderProviderTemplates(templates, {
+            name: empty.name,
+            model: empty.model ?? "",
+            baseUrl: empty.baseUrl ?? "",
+            apiKey: ""
+          })
+        };
     setEditing(next);
     setEnvDraft(envText(next.messageEnvVars));
     setError("");
     setShowSecrets(false);
     setModelQuery("");
     setTestNotice("");
+    setTestIsError(false);
+    setManualModel("");
     setFormOpen(true);
+    if (provider && provider.homeMode !== "external") {
+      setSecretLoading(true);
+      void api<{ apiKey: string | null; authJson: string | null; configToml: string | null }>(
+        `/api/providers/${provider.id}/export`
+      ).then((exported) => {
+        setEditing((current) => current.id === provider.id ? {
+          ...current,
+          apiKey: provider.homeMode === "api-key" ? exported.apiKey : null,
+          authJson: exported.authJson,
+          configToml: exported.configToml ?? current.configToml
+        } : current);
+      }).catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "读取供应商配置失败");
+      }).finally(() => setSecretLoading(false));
+    } else setSecretLoading(false);
   };
   const exportProvider = async (id: string, name: string) => {
     const data = await api<Record<string, unknown>>(`/api/providers/${id}/export`);
@@ -119,18 +165,44 @@ export function ProviderDialog({
       toast.error(error instanceof Error ? error.message : "导入失败");
     }
   };
-  const submit = async () => {
+  const fetchModels = async (saved: ProviderInput) => {
+    const result = await api<{
+      ok: boolean;
+      durationMs: number;
+      models: string[];
+      error?: string;
+    }>(`/api/providers/${saved.id}/test`, { method: "POST" });
+    const models = result.models ?? [];
+    setTestIsError(!result.ok);
+    setTestNotice(
+      result.ok
+        ? `连接成功 · ${result.durationMs} ms · 同步 ${models.length} 个模型`
+        : `连接失败 · ${result.error || "上游没有返回模型"}。手动模型目录已保留。`
+    );
+    if (models.length) {
+      const merged = [...new Set([...(saved.models ?? []), ...models])];
+      await onSave({ ...saved, models: merged });
+      await onRefresh?.();
+      setEditing((value) => ({ ...value, models: merged }));
+    }
+    toast[result.ok ? "success" : "error"](result.ok
+      ? `连接成功，获取 ${models.length} 个模型`
+      : `连接失败：${result.error || "上游没有返回模型"}`);
+    return result;
+  };
+  const submit = async (fetchAfterSave = false) => {
     const name = editing.name?.trim();
     if (!name) return setError("供应商名称为必填项");
     const runtimeSettings = modelRuntimeSettingsSchema.safeParse(editing);
     if (!runtimeSettings.success) return setError(runtimeSettings.error.issues[0]?.message ?? "模型运行参数无效");
-    const homeMode: ProviderHomeMode = editing.homeMode ?? (editing.id ? "managed" : "api-key");
+    const homeMode: ProviderHomeMode = editing.homeMode ?? "managed";
     if (homeMode === "api-key") {
       const key = editing.apiKey?.trim();
       if (!key || (key === "••••••••" && !editing.id)) return setError("API Key 为必填项");
     } else if (homeMode === "external") {
       if (!editing.codexHomePath?.trim()) return setError("请填写已有 CODEX_HOME 路径");
     } else {
+      if (secretLoading) return setError("正在读取 auth.json，请稍候");
       if (!editing.configToml?.trim()) return setError("config.toml 为必填项");
       if (!editing.authJson?.trim()) return setError("auth.json 为必填项");
       if (editing.authJson && editing.authJson !== "configured") {
@@ -153,14 +225,31 @@ export function ProviderDialog({
     }
     setBusy(true);
     try {
-      await onSave({
+      const saved = await onSave({
         ...editing,
         name,
+        models: editing.models ?? [],
         homeMode,
         messageEnvVars,
         codexHomePath: homeMode === "external" ? (editing.codexHomePath ?? null) : null
       });
-      setFormOpen(false);
+      if (fetchAfterSave) {
+        if (!saved?.id) throw new Error("供应商已保存，但无法获取供应商 ID");
+        // publicProvider intentionally masks auth.json; keep the editable
+        // values from the form when persisting the fetched model catalog.
+        const latest = { ...editing, id: saved.id, homeMode };
+        setEditing(latest);
+        await fetchModels(latest);
+      } else {
+        toast.success(editing.id ? "供应商已更新" : "供应商已保存");
+        setFormOpen(false);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "保存供应商失败");
+      if (fetchAfterSave) {
+        setTestIsError(true);
+        setTestNotice(error instanceof Error ? `同步失败 · ${error.message}` : "同步失败");
+      }
     } finally {
       setBusy(false);
     }
@@ -303,8 +392,8 @@ export function ProviderDialog({
                             }>(`/api/providers/${provider.id}/test`, { method: "POST" });
                             toast[result.ok ? "success" : "error"](
                               result.ok
-                                ? `可用 · ${result.durationMs}ms · ${result.models.length} 个模型`
-                                : result.error || "不可用"
+                                ? `连接成功 · ${result.durationMs}ms · 获取 ${result.models.length} 个模型`
+                                : `连接失败 · ${result.error || "上游没有返回模型"}`
                             );
                             if (result.models.length) await onRefresh?.();
                           } catch (error) {
@@ -362,8 +451,8 @@ export function ProviderDialog({
         <DialogContent className="sm:w-[min(94vw,720px)]">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            新增供应商默认只需填写 API Key。也可以复用已有 CODEX_HOME，或继续手动托管 config.toml /
-            auth.json。
+            新增供应商会填入 config.toml 和 auth.json 模板。修改模型、Base URL、密钥等必要值后即可保存，
+            也可以保存并同步上游模型，或手动维护模型目录。
           </DialogDescription>
           <form
             className="mt-4 grid gap-3 sm:grid-cols-2"
@@ -384,9 +473,9 @@ export function ProviderDialog({
                   })
                 }
               >
-                <option value="api-key">API Key（推荐）</option>
+                <option value="managed">编辑 config.toml / auth.json（推荐）</option>
+                <option value="api-key">快速 API Key 模式</option>
                 <option value="external">复用已有 CODEX_HOME</option>
-                <option value="managed">手动填写 config.toml / auth.json</option>
               </select>
             </label>
             <label className="field-label sm:col-span-2">
@@ -402,8 +491,14 @@ export function ProviderDialog({
               模型
               <input
                 className="field"
-                value={editing.model ?? ""}
-                onChange={(e) => setEditing({ ...editing, model: e.target.value || null })}
+                value={editing.homeMode === "managed" ? providerConfigValue(editing.configToml, "model") : editing.model ?? ""}
+                onChange={(e) => setEditing({
+                  ...editing,
+                  model: e.target.value || null,
+                  configToml: editing.homeMode === "managed"
+                    ? setProviderConfigValue(editing.configToml ?? "", "model", e.target.value)
+                    : editing.configToml
+                })}
                 placeholder="留空使用 config.toml"
               />
             </label>
@@ -411,14 +506,20 @@ export function ProviderDialog({
               Base URL
               <input
                 className="field"
-                value={editing.baseUrl ?? ""}
-                onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value || null })}
+                value={editing.homeMode === "managed" ? providerConfigValue(editing.configToml, "base_url") : editing.baseUrl ?? ""}
+                onChange={(e) => setEditing({
+                  ...editing,
+                  baseUrl: e.target.value || null,
+                  configToml: editing.homeMode === "managed"
+                    ? setProviderConfigValue(editing.configToml ?? "", "base_url", e.target.value)
+                    : editing.configToml
+                })}
                 placeholder="留空使用 config.toml"
               />
             </label>
             <label className="field-label">
               API Key{" "}
-              {(editing.homeMode ?? "api-key") === "api-key" ? (
+              {editing.homeMode === "api-key" || editing.homeMode === "managed" ? (
                 <span className="text-red-500">*</span>
               ) : null}
               <input
@@ -426,16 +527,20 @@ export function ProviderDialog({
                 type={showSecrets ? "text" : "password"}
                 name="apiKey"
                 autoComplete="off"
-                value={editing.apiKey ?? ""}
-                onChange={(e) => setEditing({ ...editing, apiKey: e.target.value || null })}
+                value={editing.homeMode === "managed" ? providerAuthKey(editing.authJson) : editing.apiKey ?? ""}
+                onChange={(e) => setEditing({
+                  ...editing,
+                  apiKey: editing.homeMode === "managed" ? null : e.target.value || null,
+                  authJson: editing.homeMode === "managed"
+                    ? setProviderAuthKey(editing.authJson ?? "", e.target.value)
+                    : editing.authJson
+                })}
                 placeholder={
-                  (editing.homeMode ?? "api-key") === "api-key"
+                  editing.homeMode === "api-key"
                     ? editing.id
                       ? "•••••••• 表示保持原 Key"
                       : "填写 API Key"
-                    : editing.id
-                      ? "留空保持原 Key"
-                      : "可留空，优先使用 auth.json"
+                    : secretLoading ? "正在读取 auth.json" : "填写后同步到 auth.json"
                 }
               />
             </label>
@@ -501,61 +606,86 @@ export function ProviderDialog({
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={async () => {
-                    try {
-                      const result = await api<{
-                        ok: boolean;
-                        durationMs: number;
-                        models: string[];
-                        error?: string;
-                      }>(`/api/providers/${editing.id}/test`, { method: "POST" });
-                      const models = result.models ?? [];
-                      setEditing((current) => ({ ...current, models }));
-                      if (models.length) await onRefresh?.();
-                      setTestNotice(
-                        result.ok
-                          ? `可用 · ${result.durationMs}ms · ${models.length} 个模型`
-                          : result.error || "不可用"
-                      );
-                    } catch (error) {
-                      setTestNotice(error instanceof Error ? error.message : "测试失败");
-                    }
-                  }}
+                  onClick={() => void submit(true)}
                 >
                   <RefreshCw className="size-4" /> 测试连接 / 拉取模型
                 </Button>
               ) : null}
               {testNotice ? (
-                <span className="text-xs text-muted-foreground">{testNotice}</span>
+                <span className={`text-xs ${testIsError ? "text-red-600" : "text-muted-foreground"}`}>{testNotice}</span>
               ) : null}
             </div>
-            {editing.models?.length ? (
-              <label className="field-label sm:col-span-2">
-                模型目录
+            <div className="field-label sm:col-span-2">
+              模型目录（可手动添加）
+              <div className="flex gap-2">
                 <input
-                  className="field"
-                  value={modelQuery}
-                  onChange={(event) => setModelQuery(event.target.value)}
-                  placeholder="搜索模型"
+                  className="field mt-0"
+                  value={manualModel}
+                  onChange={(event) => setManualModel(event.target.value)}
+                  placeholder="例如：gpt-5-codex"
                 />
-                <select
-                  className="field mt-2"
-                  value={editing.model ?? ""}
-                  onChange={(event) =>
-                    setEditing({ ...editing, model: event.target.value || null })
-                  }
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const model = manualModel.trim();
+                    if (!model || editing.models?.includes(model)) return;
+                    setEditing((value) => ({
+                      ...value,
+                      models: [...(value.models ?? []), model],
+                      model: value.model || model,
+                      configToml: value.homeMode === "managed" && !providerConfigValue(value.configToml, "model")
+                        ? setProviderConfigValue(value.configToml ?? "", "model", model)
+                        : value.configToml
+                    }));
+                    setManualModel("");
+                  }}
                 >
-                  <option value="">使用 config.toml 默认</option>
-                  {editing.models
-                    .filter((item) => item.toLowerCase().includes(modelQuery.trim().toLowerCase()))
-                    .map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            ) : null}
+                  添加
+                </Button>
+              </div>
+              <input
+                className="field mt-2"
+                value={modelQuery}
+                onChange={(event) => setModelQuery(event.target.value)}
+                placeholder="筛选已添加的模型"
+              />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(editing.models ?? [])
+                  .filter((item) => item.toLowerCase().includes(modelQuery.trim().toLowerCase()))
+                  .map((item) => (
+                    <span key={item} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
+                      <button type="button" onClick={() => setEditing((value) => ({
+                        ...value,
+                        model: item,
+                        configToml: value.homeMode === "managed"
+                          ? setProviderConfigValue(value.configToml ?? "", "model", item)
+                          : value.configToml
+                      }))}>
+                        {item}{editing.model === item ? " · 默认" : ""}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setEditing((value) => {
+                          const models = (value.models ?? []).filter((model) => model !== item);
+                          const nextModel = value.model === item ? (models[0] ?? "") : value.model ?? "";
+                          return {
+                            ...value,
+                            models,
+                            model: nextModel || null,
+                            configToml: value.model === item && value.homeMode === "managed"
+                              ? setProviderConfigValue(value.configToml ?? "", "model", nextModel)
+                              : value.configToml
+                          };
+                        })}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+              </div>
+            </div>
             <ProviderRuntimeFields value={editing} onChange={(patch) => setEditing((current) => ({ ...current, ...patch }))} />
             {(editing.homeMode ?? "api-key") === "managed" ? (
               <>
@@ -565,7 +695,7 @@ export function ProviderDialog({
                     className="field min-h-36 font-mono text-xs"
                     value={editing.configToml ?? ""}
                     onChange={(e) => setEditing({ ...editing, configToml: e.target.value })}
-                    placeholder="填写 Codex 配置内容"
+                    placeholder="模板加载中，或填写 Codex 配置内容"
                   />
                 </label>
                 <label className="field-label sm:col-span-2">
@@ -574,7 +704,7 @@ export function ProviderDialog({
                     className="field min-h-36 font-mono text-xs"
                     value={editing.authJson ?? ""}
                     onChange={(e) => setEditing({ ...editing, authJson: e.target.value })}
-                    placeholder='例如：{"OPENAI_API_KEY":"..."}'
+                    placeholder='例如：{"OPENAI_API_KEY":"sk-..."}'
                   />
                 </label>
               </>
@@ -593,12 +723,15 @@ export function ProviderDialog({
                 {error}
               </p>
             )}
-            <div className="mt-1 flex justify-end gap-2 sm:col-span-2">
+            <div className="mt-1 flex flex-wrap justify-end gap-2 sm:col-span-2">
               <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
                 取消
               </Button>
               <Button type="submit" disabled={busy}>
                 {busy ? "保存中..." : "保存供应商"}
+              </Button>
+              <Button type="button" variant="secondary" disabled={busy} onClick={() => void submit(true)}>
+                {busy ? "处理中..." : "保存并获取模型"}
               </Button>
             </div>
           </form>

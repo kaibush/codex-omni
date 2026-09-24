@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { TimelineView } from "@/lib/timeline";
 import type { PromptTemplate, Provider } from "@/types";
 import { normalizeTemplateCommand } from "./prompt-templates";
+import { defaultProviderTemplates } from "./provider-templates";
 
 export type WorkspaceSettings = {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
@@ -28,6 +29,8 @@ export type WorkspaceSettings = {
   showProviderLabels: boolean;
   executionMode: "plan" | "execute";
   uiFontSize: 13 | 14 | 15 | 16 | 18;
+  providerConfigTemplate: string;
+  providerAuthTemplate: string;
 };
 
 export const defaultWorkspaceSettings: WorkspaceSettings = {
@@ -49,7 +52,9 @@ export const defaultWorkspaceSettings: WorkspaceSettings = {
   sendMode: "queue",
   showProviderLabels: true,
   executionMode: "execute",
-  uiFontSize: 14
+  uiFontSize: 14,
+  providerConfigTemplate: defaultProviderTemplates.configToml,
+  providerAuthTemplate: defaultProviderTemplates.authJson
 };
 
 export function SettingsDialog({

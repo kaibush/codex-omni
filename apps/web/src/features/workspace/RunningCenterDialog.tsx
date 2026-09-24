@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Activity,
   Clock3,
@@ -13,9 +14,18 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-import type { ActiveRun, RunStats } from "@/types";
+import type { ActiveRun, RecentRun, RunStats } from "@/types";
+
+const recentRunStatusLabel: Record<RecentRun["status"], string> = {
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  interrupted: "已中断"
+};
 
 const duration = (startedAt: number) => {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -41,7 +51,14 @@ export function RunningCenterDialog({
   onOpenChange: (open: boolean) => void;
   onOpenSession: (projectId: string, sessionId: string) => void;
 }) {
+  const [tab, setTab] = useState("active");
   const query = useActiveRuns(open);
+  const recent = useQuery({
+    queryKey: ["recent-run-sessions"],
+    queryFn: () => api<RecentRun[]>("/api/runs/recent-sessions"),
+    enabled: open && tab === "recent",
+    refetchInterval: open && tab === "recent" ? 10_000 : false
+  });
   const stats = useQuery({
     queryKey: ["run-stats"],
     queryFn: () => api<RunStats>("/api/stats"),
@@ -67,7 +84,7 @@ export function RunningCenterDialog({
             <Activity className="size-4 text-primary" /> 运行中心
           </DialogTitle>
           <DialogDescription className="mt-1">
-            显示由当前 Server 实例实际管理的 Codex Worker，以及最近运行统计。
+            查看当前任务、最近运行过的会话，以及运行统计。
           </DialogDescription>
         </div>
         <div className="min-h-0 overflow-y-auto p-3 sm:p-5">
@@ -97,6 +114,12 @@ export function RunningCenterDialog({
               </div>
             </div>
           ) : null}
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="mb-3">
+              <TabsTrigger value="active">当前任务</TabsTrigger>
+              <TabsTrigger value="recent">最近会话</TabsTrigger>
+            </TabsList>
+            <TabsContent value="active">
           {query.isPending ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" /> 正在读取运行状态
@@ -197,6 +220,29 @@ export function RunningCenterDialog({
               </p>
             </div>
           )}
+            </TabsContent>
+            <TabsContent value="recent">
+              {recent.isPending ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> 正在读取最近会话</div>
+              ) : recent.isError ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">{recent.error instanceof Error ? recent.error.message : "最近会话加载失败"}</div>
+              ) : recent.data?.length ? (
+                <div className="space-y-2">
+                  {recent.data.map((run) => (
+                    <article key={run.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2"><b className="truncate text-sm">{run.sessionTitle}</b><span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{recentRunStatusLabel[run.status]}</span></div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground" title={run.cwd}>{run.projectName} · {run.providerName ?? "未命名 Provider"}{run.model ? ` · ${run.model}` : ""} · {formatDateTime(run.startedAt)}</p>
+                      </div>
+                      <Button size="sm" variant="outline" className="h-8" onClick={() => { onOpenSession(run.projectId, run.sessionId); onOpenChange(false); }}><ExternalLink className="size-3.5" /> 打开</Button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid place-items-center py-16 text-center"><span className="grid size-12 place-items-center rounded-lg bg-muted text-muted-foreground"><Clock3 className="size-5" /></span><b className="mt-3 text-sm">暂无运行记录</b><p className="mt-1 text-xs text-muted-foreground">最近运行过的会话会显示在这里。</p></div>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </DialogContent>
     </Dialog>

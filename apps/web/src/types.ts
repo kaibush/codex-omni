@@ -252,6 +252,22 @@ export type ActiveRun = {
   runtimeAlive: boolean;
   reconnecting: Record<string, unknown> | null;
 };
+export type RecentRun = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  projectId: string;
+  projectName: string;
+  providerId: string | null;
+  providerName: string | null;
+  threadId: string | null;
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  model: string | null;
+  cwd: string;
+  startedAt: number;
+  endedAt: number | null;
+  reason: string | null;
+};
 
 export type PendingApproval = {
   id: string;

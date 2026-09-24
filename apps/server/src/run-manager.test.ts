@@ -141,6 +141,26 @@ function bridgeEvent(input: Pick<BridgeEvent, "type" | "payload"> & { seq: numbe
 }
 
 describe("RunManager terminal state", () => {
+  it("uses managed auth.json without passing a stale API key override", async () => {
+    const { provider, project, session, socket } = fixture();
+    store!.upsertProvider({
+      ...provider,
+      homeMode: "managed",
+      apiKey: "old-key",
+      authJson: '{"OPENAI_API_KEY":"new-key"}',
+      configToml: 'model = "fixture"\n'
+    });
+    runtimeMocks.run.mockImplementation(async () => undefined);
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "check" },
+      socket
+    );
+    const request = runtimeMocks.run.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request.apiKey).toBeUndefined();
+    expect(request.authJson).toBe('{"OPENAI_API_KEY":"new-key"}');
+  });
+
   it.each([false, true])(
     "fails EOF with execution output=%s instead of completing",
     async (withTool) => {

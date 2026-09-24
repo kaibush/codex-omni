@@ -11,6 +11,8 @@ import websocket from "@fastify/websocket";
 import { z } from "zod";
 import { Store, setProviderStreamIdleTimeout, type ProviderRow } from "@codex-omni/db";
 import {
+  DEFAULT_PROVIDER_AUTH_TEMPLATE,
+  DEFAULT_PROVIDER_CONFIG_TEMPLATE,
   nextNumberedTitle,
   normalizeProviderHomeMode,
   providerInputSchema,
@@ -28,6 +30,7 @@ import {
   buildApiKeyProviderFiles,
   parseMcpServers,
   parseModelsFromConfigToml,
+  parseTomlStringValue,
   removeMcpServer,
   setMcpServerEnabled,
   upsertMcpServer
@@ -266,10 +269,13 @@ const providerFilesFromInput = async (
       : input.configToml?.trim() && input.authJson?.trim()
         ? "managed"
         : "api-key");
-  const apiKey =
-    input.apiKey === "••••••••"
+  // The masked value means "keep the existing secret". An explicitly empty
+  // field means clear it; do not silently fall back to the old value.
+  const requestedApiKey =
+    input.apiKey === undefined || input.apiKey === "••••••••"
       ? (current?.apiKey ?? null)
-      : (input.apiKey ?? current?.apiKey ?? null);
+      : input.apiKey;
+  const apiKey = requestedApiKey?.trim() || null;
   const authJson =
     input.authJson === "configured"
       ? (current?.authJson ?? null)
@@ -296,7 +302,9 @@ const providerFilesFromInput = async (
       codexHomePath: null as string | null,
       configToml: files.configToml,
       authJson: files.authJson,
-      apiKey: key
+      apiKey: key,
+      model: input.model ?? current?.model ?? null,
+      baseUrl: input.baseUrl ?? current?.baseUrl ?? null
     };
   }
   if (homeMode === "external") {
@@ -308,7 +316,11 @@ const providerFilesFromInput = async (
         codexHomePath: home,
         configToml: input.configToml ?? current?.configToml ?? null,
         authJson,
-        apiKey
+        model: input.model ?? current?.model ?? null,
+        baseUrl: input.baseUrl ?? current?.baseUrl ?? null,
+        // An external CODEX_HOME owns its auth file. A stale form value must
+        // never override that file through the SDK constructor.
+        apiKey: null
       };
     } catch (error) {
       throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
@@ -332,7 +344,15 @@ const providerFilesFromInput = async (
     codexHomePath: null as string | null,
     configToml: setProviderStreamIdleTimeout(configToml),
     authJson,
-    apiKey
+    model: /^\s*model\s*=/.test(configToml)
+      ? parseTomlStringValue(configToml, ["model"]) || null
+      : input.model ?? current?.model ?? null,
+    baseUrl: /^\s*base_url\s*=/.test(configToml)
+      ? parseTomlStringValue(configToml, ["base_url"]) || null
+      : input.baseUrl ?? current?.baseUrl ?? null,
+    // Managed auth.json is the source of truth. Passing a separately stored
+    // API key to the SDK would override a key edited in auth.json.
+    apiKey: null
   };
 };
 const defaultSettings = {
@@ -354,7 +374,9 @@ const defaultSettings = {
   sendMode: "queue" as const,
   showProviderLabels: true,
   executionMode: "execute" as const,
-  uiFontSize: 14
+  uiFontSize: 14,
+  providerConfigTemplate: DEFAULT_PROVIDER_CONFIG_TEMPLATE,
+  providerAuthTemplate: DEFAULT_PROVIDER_AUTH_TEMPLATE
 };
 const sessionCookie = {
   httpOnly: true,
@@ -414,11 +436,11 @@ app.post("/api/providers", { preHandler: auth }, async (req) => {
     store.upsertProvider({
       name: input.name,
       kind: input.kind ?? "codex",
-      model: input.model ?? null,
+      model: files.model ?? input.model ?? null,
       contextWindow: files.contextWindow ?? null,
       autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
       modelsJson: JSON.stringify(input.models ?? []),
-      baseUrl: input.baseUrl ?? null,
+      baseUrl: files.baseUrl ?? input.baseUrl ?? null,
       apiKey: files.apiKey,
       configToml: files.configToml,
       authJson: files.authJson,
@@ -440,11 +462,11 @@ app.put("/api/providers/:id", { preHandler: auth }, async (req) => {
       id,
       name: input.name,
       kind: input.kind ?? current.kind,
-      model: input.model ?? null,
+      model: files.model ?? input.model ?? current.model ?? null,
       contextWindow: files.contextWindow ?? null,
       autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
       modelsJson: JSON.stringify(input.models ?? []),
-      baseUrl: input.baseUrl ?? null,
+      baseUrl: files.baseUrl ?? input.baseUrl ?? current.baseUrl ?? null,
       apiKey: files.apiKey,
       configToml: files.configToml,
       authJson: files.authJson,
@@ -472,7 +494,7 @@ app.get("/api/providers/:id/export", { preHandler: auth }, async (req, reply) =>
     autoCompactTokenLimit: provider.autoCompactTokenLimit,
     models: published?.models ?? [],
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
     authJson: provider.authJson,
     messageEnvVars: published?.messageEnvVars ?? {},
@@ -513,7 +535,7 @@ app.post("/api/providers/:id/clone", { preHandler: auth }, async (req, reply) =>
       autoCompactTokenLimit: provider.autoCompactTokenLimit,
       modelsJson: provider.modelsJson,
       baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey,
+      apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
       configToml: provider.configToml,
       authJson: provider.authJson,
       envJson: provider.envJson,
@@ -528,7 +550,7 @@ app.post("/api/providers/:id/test", { preHandler: auth }, async (req, reply) => 
   if (!provider) return reply.code(404).send({ error: "Provider not found" });
   const result = await testProviderConnection({
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
     authJson: provider.authJson
   });
@@ -551,7 +573,7 @@ app.post("/api/providers/:id/enhance", { preHandler: auth }, async (req, reply) 
     .parse(req.body);
   return enhancePrompt({
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
     authJson: provider.authJson,
     model: body.model ?? provider.model ?? null,
@@ -565,7 +587,7 @@ app.get("/api/providers/:id/models", { preHandler: auth }, async (req, reply) =>
   const published = publicProvider(provider);
   const result = await testProviderConnection({
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
     authJson: provider.authJson
   });
@@ -610,7 +632,9 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       executionMode: z.enum(["plan", "execute"]).optional(),
       uiFontSize: z
         .union([z.literal(13), z.literal(14), z.literal(15), z.literal(16), z.literal(18)])
-        .optional()
+        .optional(),
+      providerConfigTemplate: z.string().min(1).max(20_000).optional(),
+      providerAuthTemplate: z.string().min(1).max(20_000).optional()
     })
     .parse(req.body);
   store.updateSettings(settings);
@@ -1387,6 +1411,10 @@ app.get("/api/approvals/stats", { preHandler: auth }, async (req) => {
   });
 });
 app.get("/api/runs/active", { preHandler: auth }, async () => runs.listActiveRuns());
+app.get("/api/runs/recent-sessions", { preHandler: auth }, async (req) => {
+  const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query ?? {});
+  return store.listRecentRunSessions(query.limit);
+});
 app.get("/api/stats", { preHandler: auth }, async (req) => {
   const query = z
     .object({

@@ -128,6 +128,27 @@ describe("provider runtime settings HTTP contract", () => {
     const imported = await call("/api/providers/import", "POST", exported.body);
     expect(imported.response.status).toBe(200);
     expect(imported.body).toMatchObject(limits);
+    const managed = await call("/api/providers", "POST", {
+      name: "Managed auth",
+      homeMode: "managed",
+      configToml: '[model_providers.custom]\nbase_url = "http://127.0.0.1:1/v1"\n',
+      authJson: JSON.stringify({ OPENAI_API_KEY: "old-key" }),
+      apiKey: "old-key"
+    });
+    expect(managed.response.status).toBe(200);
+    expect(managed.body.apiKey).toBeNull();
+    const managedId = String(managed.body.id);
+    const managedUpdated = await call(`/api/providers/${managedId}`, "PUT", {
+      name: "Managed auth",
+      homeMode: "managed",
+      configToml: managed.body.configToml,
+      authJson: JSON.stringify({ OPENAI_API_KEY: "new-key" }),
+      apiKey: null
+    });
+    expect(managedUpdated.response.status).toBe(200);
+    const managedExport = await call(`/api/providers/${managedId}/export`);
+    expect(managedExport.body.apiKey).toBeNull();
+    expect(managedExport.body.authJson).toContain("new-key");
     expect(
       (await call("/api/providers", "POST", { ...exported.body, contextWindow: 0 })).response.status
     ).toBe(400);

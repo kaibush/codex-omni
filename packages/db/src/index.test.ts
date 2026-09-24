@@ -3,6 +3,23 @@ import { Store } from "./index.js";
 let store: Store | undefined;
 afterEach(() => store?.db.close());
 describe("Store", () => {
+  it("lists recent run sessions by default, keeping only the latest run per session", () => {
+    store = new Store(":memory:");
+    const provider = store.upsertProvider({ name: "Provider" });
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp", providerId: provider.id });
+    const sessions = Array.from({ length: 51 }, (_, index) => {
+      const session = store!.createSession({ projectId: project.id, providerId: provider.id, title: `Session ${index}` });
+      store!.createRun({ id: `run-${index}`, sessionId: session.id, projectId: project.id, providerId: provider.id, serviceInstanceId: "test", cwd: "/tmp", startedAt: index + 1 });
+      return session;
+    });
+    store.createRun({ id: "run-latest", sessionId: sessions[0]!.id, projectId: project.id, providerId: provider.id, serviceInstanceId: "test", cwd: "/tmp", startedAt: 100 });
+    const recent = store.listRecentRunSessions();
+    expect(recent).toHaveLength(50);
+    expect(recent[0]).toMatchObject({ id: "run-latest", sessionTitle: "Session 0", projectName: "Project", providerName: "Provider" });
+    expect(recent.filter((item) => item.sessionId === sessions[0]!.id)).toHaveLength(1);
+    expect(recent.at(-1)?.sessionTitle).toBe("Session 2");
+    expect(store.listRecentRunSessions(200)).toHaveLength(51);
+  });
   it("persists, preserves on partial updates, and clears provider model limits", () => {
     store = new Store(":memory:");
     const provider = store.upsertProvider({
