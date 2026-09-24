@@ -9,7 +9,7 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import { z } from "zod";
-import { Store, type ProviderRow } from "@codex-omni/db";
+import { Store, setProviderStreamIdleTimeout, type ProviderRow } from "@codex-omni/db";
 import {
   nextNumberedTitle,
   normalizeProviderHomeMode,
@@ -330,7 +330,7 @@ const providerFilesFromInput = async (
     homeMode,
     ...runtimeSettings,
     codexHomePath: null as string | null,
-    configToml,
+    configToml: setProviderStreamIdleTimeout(configToml),
     authJson,
     apiKey
   };

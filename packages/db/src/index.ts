@@ -1,7 +1,14 @@
 import Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 import { DEFAULT_SESSION_TITLE, resolveSessionTitle } from "./session-title.js";
-import { migrateLegacyGeneratedProviderConfig } from "./provider-context-migration.js";
+import {
+  migrateLegacyGeneratedProviderConfig,
+  setProviderStreamIdleTimeout
+} from "./provider-context-migration.js";
+export {
+  PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  setProviderStreamIdleTimeout
+} from "./provider-context-migration.js";
 export {
   DEFAULT_SESSION_TITLE,
   isPlaceholderSessionTitle,
@@ -463,6 +470,18 @@ export class Store {
           const next = migrateLegacyGeneratedProviderConfig(row.configToml);
           if (next !== row.configToml) update.run(next, row.id);
         }
+      }
+    })();
+    this.db.transaction(() => {
+      const providers = this.db
+        .prepare(
+          "SELECT id,config_toml as configToml FROM providers WHERE COALESCE(home_mode,'managed') != 'external' AND config_toml IS NOT NULL"
+        )
+        .all() as Array<{ id: string; configToml: string }>;
+      const update = this.db.prepare("UPDATE providers SET config_toml=? WHERE id=?");
+      for (const provider of providers) {
+        const next = setProviderStreamIdleTimeout(provider.configToml);
+        if (next !== provider.configToml) update.run(next, provider.id);
       }
     })();
     this.db.exec(`

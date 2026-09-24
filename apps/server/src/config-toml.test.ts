@@ -56,6 +56,7 @@ describe("buildApiKeyProviderFiles", () => {
     expect(files.configToml).toContain('name = "Proxy"');
     expect(files.configToml).toContain('base_url = "https://api.example.com/v1"');
     expect(files.configToml).toContain('wire_api = "responses"');
+    expect(files.configToml).toContain('stream_idle_timeout_ms = 600000');
   });
 
   it("does not guess a context window for unknown custom models", () => {

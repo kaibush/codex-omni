@@ -36,3 +36,48 @@ export function migrateLegacyGeneratedProviderConfig(content: string) {
     })
     .join("\n");
 }
+
+export const PROVIDER_STREAM_IDLE_TIMEOUT_MS = 600_000;
+
+// Codex reads this setting from a named provider table, not from the root config.
+export function setProviderStreamIdleTimeout(content: string) {
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
+  const isProviderTable = (line: string) => {
+    const match = line.match(/^\s*\[\s*([^\]]+?)\s*\]\s*(?:#.*)?$/);
+    return Boolean(
+      match &&
+        /^model_providers\.(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|'[^']+')$/.test(
+          match[1]!.trim()
+        )
+    );
+  };
+  const isTable = (line: string) => /^\s*\[[^\]]+\]\s*(?:#.*)?$/.test(line);
+  let providerStart = -1;
+  let settingFound = false;
+  let changed = false;
+  const finishProvider = (end: number) => {
+    if (providerStart < 0 || settingFound) return end;
+    lines.splice(providerStart + 1, 0, `stream_idle_timeout_ms = ${PROVIDER_STREAM_IDLE_TIMEOUT_MS}`);
+    changed = true;
+    return end + 1;
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (isTable(line)) {
+      index = finishProvider(index);
+      providerStart = isProviderTable(line) ? index : -1;
+      settingFound = false;
+      continue;
+    }
+    if (providerStart < 0 || !/^\s*stream_idle_timeout_ms\s*=/.test(line)) continue;
+    settingFound = true;
+    const next = `stream_idle_timeout_ms = ${PROVIDER_STREAM_IDLE_TIMEOUT_MS}`;
+    if (line !== next) {
+      lines[index] = next;
+      changed = true;
+    }
+  }
+  finishProvider(lines.length);
+  return changed ? lines.join(newline) : content;
+}

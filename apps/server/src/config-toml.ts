@@ -1,3 +1,5 @@
+import { PROVIDER_STREAM_IDLE_TIMEOUT_MS } from "@codex-omni/db";
+
 function stripTomlComment(line: string) {
   let inString = false;
   let quote = "";
@@ -309,7 +311,8 @@ export function buildApiKeyProviderFiles(input: {
       "[model_providers.custom]",
       `name = ${tomlString(input.name.trim() || "custom")}`,
       `base_url = ${tomlString(baseUrl)}`,
-      `wire_api = "responses"`
+      `wire_api = "responses"`,
+      `stream_idle_timeout_ms = ${PROVIDER_STREAM_IDLE_TIMEOUT_MS}`
     );
   }
   return {
