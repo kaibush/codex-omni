@@ -1,5 +1,8 @@
 /** @vitest-environment jsdom */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { RecentRun } from "@/types";
@@ -90,5 +93,14 @@ describe("RecentSessionsSwitcher", () => {
         />
       )
     ).toContain("最近对话加载失败");
+  });
+
+  it("stacks title and meta so mobile rows cannot overlap", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../styles/index.css"), "utf8");
+    expect(css).toMatch(/\.timeline-recent\.timeline-outline\.is-open \{\s*display: block;/);
+    expect(css).toMatch(/\.timeline-recent-copy \{[\s\S]*display: block;/);
+    expect(css).toMatch(/\.timeline-recent-row \{[\s\S]*display: grid;/);
+    expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*min-height: 4\.5rem;/);
+    expect(css).not.toMatch(/\.timeline-recent-item \{[^}]*min-height: 0/);
   });
 });

@@ -2119,24 +2119,32 @@ button.user-attachment-path {
   flex-direction: column;
   gap: 0.15rem;
 }
+
 .timeline-recent.timeline-outline {
   width: min(26rem, calc(100vw - 2rem));
-  padding: 0.7rem 0.65rem 0.6rem;
+  max-height: min(32rem, calc(100% - 4.25rem));
+  padding: 0;
+  overflow: auto;
 }
 .timeline-recent.timeline-outline.is-open {
-  gap: 0.4rem;
+  display: block;
 }
 .timeline-recent .timeline-outline-heading {
-  margin: 0 0.2rem 0.15rem;
-  padding: 0.15rem 0.25rem 0.55rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0.8rem 1rem 0.65rem;
   border-bottom: 1px solid var(--border);
+  background: var(--card);
   font-size: 0.8rem;
 }
 .timeline-recent-status {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin: 0.45rem 0.35rem 0.55rem;
+  margin: 0;
+  padding: 0.9rem 1rem 1rem;
   color: var(--muted-foreground);
   font-size: 0.8rem;
   line-height: 1.45;
@@ -2145,22 +2153,29 @@ button.user-attachment-path {
   display: block;
   flex: none;
   width: 100%;
-  min-width: 0;
+  height: auto;
+  min-height: 4.5rem;
+  margin: 0;
   border: 0;
-  border-radius: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: transparent;
-  padding: 0.65rem 0.75rem;
+  padding: 0;
   color: var(--foreground);
-  font-size: 0.875rem;
-  line-height: 1.45;
   text-align: left;
   white-space: normal;
   cursor: pointer;
+}
+.timeline-recent-item:last-child {
+  border-bottom: 0;
 }
 .timeline-recent-copy {
   display: block;
   width: 100%;
   min-width: 0;
+  min-height: 4.5rem;
+  box-sizing: border-box;
+  padding: 0.8rem 1rem 0.75rem;
 }
 .timeline-recent-item:hover,
 .timeline-recent-item.is-active {
@@ -2176,23 +2191,27 @@ button.user-attachment-path {
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.92rem;
   font-weight: 600;
-  line-height: 1.45;
+  letter-spacing: normal;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .timeline-recent-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.28rem;
+  column-gap: 0.55rem;
+  margin-top: 0.4rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
   font-weight: 400;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 .timeline-recent-project {
   min-width: 0;
@@ -2201,12 +2220,13 @@ button.user-attachment-path {
   white-space: nowrap;
 }
 .timeline-recent-badge {
-  flex: none;
+  justify-self: end;
   border-radius: 0.4rem;
   background: color-mix(in oklab, var(--muted-foreground) 12%, transparent);
-  padding: 0.05rem 0.38rem;
+  padding: 0.08rem 0.4rem;
   font-size: 0.68rem;
-  line-height: 1.45;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 .timeline-recent-badge.is-running {
   background: color-mix(in oklab, #22c55e 18%, transparent);
@@ -2220,8 +2240,7 @@ button.user-attachment-path {
   color: var(--destructive);
 }
 .timeline-recent-time {
-  flex: none;
-  margin-left: auto;
+  justify-self: end;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -2281,20 +2300,28 @@ button.user-attachment-path {
   }
   .timeline-recent.timeline-outline {
     width: auto;
-    padding: 0.75rem 0.7rem 0.8rem;
+    max-height: min(68dvh, calc(100% - 4.5rem));
+    padding: 0;
   }
   .timeline-recent .timeline-outline-heading {
-    margin-bottom: 0.2rem;
+    margin: 0;
+    padding: 0.85rem 1rem 0.7rem;
     font-size: 0.85rem;
   }
-  .timeline-recent-item {
-    padding: 0.7rem 0.75rem;
-    font-size: 0.95rem;
+  .timeline-outline .timeline-recent-item,
+  .timeline-recent-item,
+  .timeline-recent-copy {
+    min-height: 4.85rem;
   }
-  .timeline-recent.timeline-outline {
-    max-height: min(62dvh, calc(100% - 4.5rem));
+  .timeline-recent-copy {
+    padding: 0.95rem 1rem 0.85rem;
+  }
+  .timeline-recent-title {
+    font-size: 1rem;
   }
   .timeline-recent-row {
+    margin-top: 0.45rem;
+    column-gap: 0.6rem;
     font-size: 0.8rem;
   }
   .timeline-outline-heading {
@@ -2328,6 +2355,18 @@ button.user-attachment-path {
     font-size: 0.82rem;
   }
 }
+.timeline-outline .timeline-recent-item,
+.timeline-outline button.timeline-recent-item {
+  display: block;
+  height: auto;
+  min-height: 4.5rem;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0;
+  white-space: normal;
+}
+
 .timeline-outline-index {
   display: grid;
   width: 1.2rem;
