@@ -2247,6 +2247,11 @@ button.user-attachment-path {
     backdrop-filter: blur(16px);
     pointer-events: auto;
   }
+  .workspace-shell.is-sidebar-open .timeline-chrome,
+  .workspace-shell.is-sidebar-open .timeline-outline,
+  .workspace-shell.is-sidebar-open .timeline-outline-scrim {
+    display: none;
+  }
   .timeline-view-float,
   .timeline-view-float.is-visible,
   .timeline-view-float:focus-within {

@@ -73,5 +73,8 @@ describe("timeline chrome layout", () => {
     expect(css).toContain(".timeline-chrome .timeline-recent-toggle");
     expect(css).toContain("width: min(26rem, calc(100vw - 2rem));");
     expect(css).toMatch(/\.timeline-recent\.timeline-outline \{[\s\S]*width: auto;/);
+    expect(css).toContain(".workspace-shell.is-sidebar-open .timeline-chrome");
+    const workspace = readFileSync(join(dir, "Workspace.tsx"), "utf8");
+    expect(workspace).toContain("is-sidebar-open");
   });
 });

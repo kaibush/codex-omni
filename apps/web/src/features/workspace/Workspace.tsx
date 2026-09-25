@@ -2342,7 +2342,7 @@ export function Workspace() {
   };
   return (
     <div
-      className="workspace-shell flex min-h-0 flex-1 overflow-hidden bg-background text-foreground"
+      className={`workspace-shell flex min-h-0 flex-1 overflow-hidden bg-background text-foreground${isMobile && sidebar ? " is-sidebar-open" : ""}`}
       style={{ ["--ui-font-size" as string]: `${workspaceSettings.uiFontSize}px` }}
     >
       <WorkspaceSidebar
