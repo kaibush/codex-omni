@@ -1226,6 +1226,9 @@ export class Store {
   deleteSession(id: string) {
     return this.db.prepare("DELETE FROM sessions WHERE id=?").run(id).changes > 0;
   }
+  hasSessionWithThread(threadId: string) {
+    return Boolean(this.db.prepare("SELECT 1 FROM sessions WHERE thread_id=? LIMIT 1").get(threadId));
+  }
   addMessage(
     input: Omit<MessageRow, "id" | "createdAt" | "updatedAt" | "itemId" | "dataJson"> & {
       itemId?: string | null;

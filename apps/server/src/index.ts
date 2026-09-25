@@ -66,6 +66,7 @@ import { TerminalChatManager } from "./terminal-chat-manager.js";
 import { compactMessageForClient } from "./session-history.js";
 import { backfillSessionRolloutTools } from "./session-rollout.js";
 import { clearThreadGoal, readThreadGoal } from "./thread-goal.js";
+import { isCodexThreadId, purgeProviderThreads } from "./provider-thread-cleanup.js";
 import { searchWorkspace } from "./workspace-search.js";
 import { collectHostInfo } from "./host-info.js";
 import { collectCodexRuntimeInfo } from "./codex-runtime-info.js";
@@ -1288,6 +1289,56 @@ app.get("/api/sessions/:id/export", { preHandler: auth }, async (req, reply) => 
     `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}.md`
   );
   return markdown;
+});
+app.post("/api/sessions/bulk-delete", { preHandler: auth }, async (req) => {
+  const body = z
+    .object({
+      ids: z.array(z.string().min(1)).min(1).max(200),
+      purgeSource: z.boolean().optional()
+    })
+    .parse(req.body ?? {});
+  const deleted: string[] = [];
+  const threads = new Map<string, Set<string>>();
+  for (const id of [...new Set(body.ids)]) {
+    const session = store.getSession(id);
+    if (!session) continue;
+    runs.cancel(id);
+    const terminalSession = store.getTerminalSessionBySession(id);
+    if (terminalSession) terminalChats.remove(terminalSession.id);
+    const providerId = session.providerId ?? store.getProject(session.projectId)?.providerId ?? "";
+    store.deleteSession(id);
+    deleted.push(id);
+    if (body.purgeSource && session.threadId && isCodexThreadId(session.threadId) && providerId) {
+      const bucket = threads.get(providerId) ?? new Set<string>();
+      bucket.add(session.threadId);
+      threads.set(providerId, bucket);
+    }
+  }
+  let purgedFiles = 0;
+  let purgedBytes = 0;
+  let skippedSharedThreads = 0;
+  for (const [providerId, threadIds] of threads) {
+    const removable: string[] = [];
+    for (const threadId of threadIds) {
+      if (store.hasSessionWithThread(threadId)) {
+        skippedSharedThreads += 1;
+        continue;
+      }
+      removable.push(threadId);
+    }
+    if (!removable.length) continue;
+    const provider = store.getProvider(providerId);
+    if (!provider) continue;
+    try {
+      const home = await providerHome(provider);
+      const purged = await purgeProviderThreads(home, removable);
+      purgedFiles += purged.files;
+      purgedBytes += purged.bytes;
+    } catch {
+      // Keep the session deletion even when the provider home cannot be cleaned.
+    }
+  }
+  return { ok: true, deleted, purgedFiles, purgedBytes, skippedSharedThreads };
 });
 app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);

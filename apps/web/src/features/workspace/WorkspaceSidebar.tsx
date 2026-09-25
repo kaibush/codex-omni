@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   Activity,
   Archive,
@@ -167,6 +167,7 @@ export function WorkspaceSidebar({
   exportSession,
   copySession,
   deleteSession,
+  bulkDeleteSessions,
   activeRunsCount,
   pendingApprovalCount,
   connection,
@@ -249,6 +250,13 @@ export function WorkspaceSidebar({
   exportSession: (id: string, format: "markdown" | "json") => void;
   copySession: (id: string) => void;
   deleteSession: { mutate: (id: string) => void };
+  bulkDeleteSessions: {
+    isPending: boolean;
+    mutate: (
+      input: { ids: string[]; purgeSource: boolean },
+      options?: { onSuccess?: () => void }
+    ) => void;
+  };
   activeRunsCount: number;
   pendingApprovalCount: number;
   connection: ConnectionState;
@@ -264,6 +272,32 @@ export function WorkspaceSidebar({
   host?: HostInfo | undefined;
 }) {
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() => loadExpandedProjectIds());
+  const [selectingSessions, setSelectingSessions] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [purgeSource, setPurgeSource] = useState(false);
+  const currentProjectExpanded = Boolean(projectId) && expandedProjectIds.includes(projectId);
+  useEffect(() => {
+    setSelectingSessions(false);
+    setSelectedSessionIds([]);
+    setPurgeSource(false);
+  }, [projectId]);
+  useEffect(() => {
+    if (currentProjectExpanded) return;
+    setSelectingSessions(false);
+    setSelectedSessionIds([]);
+  }, [currentProjectExpanded]);
+  const visibleSessionIds = sessionGroups.flatMap((group) => group.items.map((session) => session.id));
+  const allVisibleSelected =
+    visibleSessionIds.length > 0 && visibleSessionIds.every((id) => selectedSessionIds.includes(id));
+  const toggleSessionSelected = (id: string) => {
+    setSelectedSessionIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+  const stopSelectingSessions = () => {
+    setSelectingSessions(false);
+    setSelectedSessionIds([]);
+  };
   const toggleProjectExpanded = (id: string) => {
     setExpandedProjectIds((current) => {
       const next = toggleExpandedProjectId(current, id);
@@ -672,6 +706,23 @@ export function WorkspaceSidebar({
                     </div>
                     {project.id === projectId && expandedProjectIds.includes(project.id) && (
                       <div className="ml-4 mt-0.5 border-l border-border pl-1.5">
+                        <div className="mb-0.5 flex justify-end px-1">
+                          <button
+                            type="button"
+                            className={`h-8 rounded-lg px-2.5 text-xs ${
+                              selectingSessions
+                                ? "bg-muted text-foreground"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                            aria-pressed={selectingSessions}
+                            onClick={() => {
+                              if (selectingSessions) stopSelectingSessions();
+                              else setSelectingSessions(true);
+                            }}
+                          >
+                            {selectingSessions ? "完成" : "多选"}
+                          </button>
+                        </div>
                         {sessionGroups.map((group) => (
                           <section key={group.key} className="mb-1">
                             <div className="flex h-5 items-center px-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
@@ -693,6 +744,16 @@ export function WorkspaceSidebar({
                                     : undefined
                                 }
                               >
+                                {selectingSessions ? (
+                                  <input
+                                    type="checkbox"
+                                    className="ml-1 size-4 shrink-0 accent-primary"
+                                    checked={selectedSessionIds.includes(s.id)}
+                                    aria-label={`选择 ${displayTitle}`}
+                                    onChange={() => toggleSessionSelected(s.id)}
+                                    onClick={(event) => event.stopPropagation()}
+                                  />
+                                ) : null}
                                 {(() => {
                                   const Icon = sessionIcon(s.icon);
                                   return Icon ? (
@@ -745,15 +806,23 @@ export function WorkspaceSidebar({
                                     type="button"
                                     title={displayTitle}
                                     onClick={() => {
+                                      if (selectingSessions) {
+                                        toggleSessionSelected(s.id);
+                                        return;
+                                      }
                                       openWorkspace(projectId, s.id, false, s.kind === "terminal-chat" ? "terminal-chat" : "chat");
                                       if (isMobile) setSidebar(false);
                                     }}
-                                    onDoubleClick={() => beginRenameSession(s)}
+                                    onDoubleClick={() => {
+                                      if (!selectingSessions) beginRenameSession(s);
+                                    }}
                                     onContextMenu={(event) => {
                                       event.preventDefault();
-                                      beginRenameSession(s);
+                                      if (!selectingSessions) beginRenameSession(s);
                                     }}
-                                    onTouchStart={() => startSessionLongPress(s)}
+                                    onTouchStart={() => {
+                                      if (!selectingSessions) startSessionLongPress(s);
+                                    }}
                                     onTouchEnd={cancelSessionLongPress}
                                     onTouchMove={cancelSessionLongPress}
                                     onTouchCancel={cancelSessionLongPress}
@@ -785,7 +854,7 @@ export function WorkspaceSidebar({
                                     </span>
                                   </button>
                                 )}
-                                <DropdownMenu>
+                                {!selectingSessions ? <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
                                     <button
                                       type="button"
@@ -922,7 +991,7 @@ export function WorkspaceSidebar({
                                       <Trash2 /> 删除
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
-                                </DropdownMenu>
+                                </DropdownMenu> : null}
                               </div>
                             );
                             })}
@@ -944,6 +1013,62 @@ export function WorkspaceSidebar({
                   </div>
                 ))}
               </div>
+              {selectingSessions ? (
+                <div className="shrink-0 border-t border-border bg-background px-2 py-2">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="h-8 shrink-0 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={stopSelectingSessions}
+                    >
+                      完成
+                    </button>
+                    <button
+                      type="button"
+                      className="h-8 shrink-0 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                      disabled={!visibleSessionIds.length || bulkDeleteSessions.isPending}
+                      onClick={() => setSelectedSessionIds(allVisibleSelected ? [] : visibleSessionIds)}
+                    >
+                      {allVisibleSelected ? "取消全选" : "全选"}
+                    </button>
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      已选 {selectedSessionIds.length}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="h-8 shrink-0 rounded-lg px-3"
+                      disabled={!selectedSessionIds.length || bulkDeleteSessions.isPending}
+                      onClick={() => {
+                        const count = selectedSessionIds.length;
+                        const message = purgeSource
+                          ? `删除 ${count} 个对话，并同步删除供应商里的原始对话数据？此操作不可恢复。`
+                          : `删除 ${count} 个对话？供应商里的原始数据会保留。`;
+                        if (!window.confirm(message)) return;
+                        bulkDeleteSessions.mutate(
+                          { ids: selectedSessionIds, purgeSource },
+                          { onSuccess: () => stopSelectingSessions() }
+                        );
+                      }}
+                    >
+                      {bulkDeleteSessions.isPending ? "删除中" : "删除"}
+                    </Button>
+                  </div>
+                  <label
+                    className="mt-1 flex h-8 items-center gap-2 rounded-lg px-1 text-xs text-muted-foreground"
+                    title="同时删除供应商目录里的 rollout、快照和历史记录，用来腾出磁盘空间。仍被其他会话使用的原始数据会保留。"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 shrink-0 accent-primary"
+                      checked={purgeSource}
+                      disabled={bulkDeleteSessions.isPending}
+                      onChange={(event) => setPurgeSource(event.target.checked)}
+                    />
+                    <span className="min-w-0 truncate">同步删除原数据</span>
+                  </label>
+                </div>
+              ) : null}
               <div className="border-t border-border bg-background/60 p-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">
                 {host ? (
                   <button

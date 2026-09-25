@@ -76,7 +76,7 @@ import {
 } from "@/lib/timeline";
 import { existingPlanTimelineId, isPlanTool, mergeToolEventData } from "@/lib/tool-event";
 import { timelineEventMetadata } from "@/lib/timeline-order";
-import { createId } from "@/lib/utils";
+import { createId, formatDataSize } from "@/lib/utils";
 import type {
   Message,
   MessageCursor,
@@ -1632,6 +1632,54 @@ export function Workspace() {
       void qc.removeQueries({ queryKey: ["session", id] });
     }
   });
+  const bulkDeleteSessions = useMutation({
+    mutationFn: (input: { ids: string[]; purgeSource: boolean }) =>
+      api<{
+        ok: boolean;
+        deleted: string[];
+        purgedFiles: number;
+        purgedBytes: number;
+        skippedSharedThreads: number;
+      }>("/api/sessions/bulk-delete", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: (result, input) => {
+      const removed = new Set(result.deleted);
+      const remaining = (sessions.data ?? []).filter((session) => !removed.has(session.id));
+      qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
+        (current ?? []).filter((session) => !removed.has(session.id))
+      );
+      qc.setQueryData<{ items: TerminalChatSession[] }>(["terminal-chat-sessions", projectId], (current) =>
+        current ? { items: current.items.filter((item) => !removed.has(item.sessionId)) } : current
+      );
+      if (removed.has(sessionId)) {
+        const next = remaining[0];
+        openWorkspace(
+          projectId,
+          next?.id ?? "",
+          true,
+          next?.kind === "terminal-chat" || workspaceView === "terminal-chat" ? "terminal-chat" : "chat"
+        );
+      }
+      for (const id of result.deleted) void qc.removeQueries({ queryKey: ["session", id] });
+      void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+      void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", projectId] });
+      if (input.purgeSource && result.skippedSharedThreads) {
+        toast.success(
+          `已删除 ${result.deleted.length} 个对话。有 ${result.skippedSharedThreads} 条原始数据仍被其他会话使用，已保留。`
+        );
+      } else if (input.purgeSource) {
+        toast.success(
+          result.purgedBytes
+            ? `已删除 ${result.deleted.length} 个对话，释放 ${formatDataSize(result.purgedBytes)}`
+            : `已删除 ${result.deleted.length} 个对话，未找到可清理的原始数据`
+        );
+      } else {
+        toast.success(`已删除 ${result.deleted.length} 个对话`);
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "删除对话失败");
+    }
+  });
   const updateSession = useMutation({
     mutationFn: ({
       id,
@@ -2395,6 +2443,7 @@ export function Workspace() {
         exportSession={exportSession}
         copySession={(id) => void copySession(id)}
         deleteSession={deleteSession}
+        bulkDeleteSessions={bulkDeleteSessions}
         activeRunsCount={activeRuns.data?.length ?? 0}
         pendingApprovalCount={pendingApprovalQuery.data?.length ?? pendingApprovals.length}
         connection={connection}
