@@ -50,6 +50,7 @@ describe("RecentSessionsSwitcher", () => {
     expect(html).toContain("运行中");
     expect(html).toContain("已完成");
     expect(html).toContain("timeline-recent-item is-active");
+    expect(html).toContain("timeline-recent-copy");
     expect(html).toContain("timeline-recent-row");
     expect(renderToStaticMarkup(
       <RecentSessionsPanel

@@ -2142,16 +2142,23 @@ button.user-attachment-path {
   line-height: 1.45;
 }
 .timeline-recent.timeline-outline button.timeline-recent-item {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0.28rem;
+  display: block;
+  width: 100%;
+  min-width: 0;
   border-radius: 0.65rem;
   padding: 0.65rem 0.75rem;
   color: var(--foreground);
   font-size: 0.875rem;
-  line-height: 1.35;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
   cursor: pointer;
+  appearance: none;
+}
+.timeline-recent-copy {
+  display: block;
+  width: 100%;
+  min-width: 0;
 }
 .timeline-recent.timeline-outline button.timeline-recent-item:hover,
 .timeline-recent.timeline-outline button.timeline-recent-item.is-active {
@@ -2162,19 +2169,28 @@ button.user-attachment-path {
   background: color-mix(in oklab, var(--primary) 12%, var(--card));
 }
 .timeline-recent-title {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   font-weight: 600;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .timeline-recent-row {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   align-items: center;
   gap: 0.45rem;
+  margin-top: 0.28rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
   font-weight: 400;
+  line-height: 1.4;
 }
 .timeline-recent-project {
   min-width: 0;
@@ -2270,9 +2286,12 @@ button.user-attachment-path {
     font-size: 0.85rem;
   }
   .timeline-recent.timeline-outline button.timeline-recent-item {
-    min-height: 3.4rem;
-    padding: 0.75rem 0.8rem;
+    min-height: 0;
+    padding: 0.7rem 0.75rem;
     font-size: 0.95rem;
+  }
+  .timeline-recent.timeline-outline {
+    max-height: min(62dvh, calc(100% - 4.5rem));
   }
   .timeline-recent-row {
     font-size: 0.8rem;

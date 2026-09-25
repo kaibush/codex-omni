@@ -72,13 +72,15 @@ export function RecentSessionsPanel({
               title={`${item.sessionTitle} · ${item.projectName}`}
               onClick={() => onOpen(item.projectId, item.sessionId)}
             >
-              <span className="timeline-recent-title">{item.sessionTitle}</span>
-              <span className="timeline-recent-row">
-                <span className="timeline-recent-project">{item.projectName}</span>
-                <span className={`timeline-recent-badge is-${item.status}`}>
-                  {recentRunStatusLabel[item.status]}
+              <span className="timeline-recent-copy">
+                <span className="timeline-recent-title">{item.sessionTitle}</span>
+                <span className="timeline-recent-row">
+                  <span className="timeline-recent-project">{item.projectName}</span>
+                  <span className={`timeline-recent-badge is-${item.status}`}>
+                    {recentRunStatusLabel[item.status]}
+                  </span>
+                  <span className="timeline-recent-time">{formatCompactDateTime(item.startedAt)}</span>
                 </span>
-                <span className="timeline-recent-time">{formatCompactDateTime(item.startedAt)}</span>
               </span>
             </button>
           ))
