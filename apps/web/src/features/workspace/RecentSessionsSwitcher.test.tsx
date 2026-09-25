@@ -102,6 +102,8 @@ describe("RecentSessionsSwitcher", () => {
     expect(css).toMatch(/\.timeline-recent-row \{[\s\S]*display: grid;/);
     expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*border-radius: 0\.55rem;/);
     expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*min-height: 2\.6rem;/);
+    expect(css).toMatch(/\.timeline-recent-title \{[\s\S]*font-weight: 400;/);
+    expect(css).toMatch(/\.timeline-recent-title \{[\s\S]*color: inherit;/);
     expect(css).not.toMatch(/\.timeline-recent-item \{[^}]*min-height: 0/);
   });
 });
