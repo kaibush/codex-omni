@@ -65,12 +65,18 @@ export function RecentSessionsPanel({
           <p className="timeline-recent-status">{error || "暂无最近对话"}</p>
         ) : (
           items.map((item) => (
-            <button
+            <div
               key={item.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               className={`timeline-recent-item${item.sessionId === activeSessionId ? " is-active" : ""}`}
               title={`${item.sessionTitle} · ${item.projectName}`}
               onClick={() => onOpen(item.projectId, item.sessionId)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onOpen(item.projectId, item.sessionId);
+              }}
             >
               <span className="timeline-recent-copy">
                 <span className="timeline-recent-title">{item.sessionTitle}</span>
@@ -82,7 +88,7 @@ export function RecentSessionsPanel({
                   <span className="timeline-recent-time">{formatCompactDateTime(item.startedAt)}</span>
                 </span>
               </span>
-            </button>
+            </div>
           ))
         )}
       </nav>

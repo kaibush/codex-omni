@@ -2141,11 +2141,14 @@ button.user-attachment-path {
   font-size: 0.8rem;
   line-height: 1.45;
 }
-.timeline-recent.timeline-outline button.timeline-recent-item {
+.timeline-recent-item {
   display: block;
+  flex: none;
   width: 100%;
   min-width: 0;
+  border: 0;
   border-radius: 0.65rem;
+  background: transparent;
   padding: 0.65rem 0.75rem;
   color: var(--foreground);
   font-size: 0.875rem;
@@ -2153,19 +2156,18 @@ button.user-attachment-path {
   text-align: left;
   white-space: normal;
   cursor: pointer;
-  appearance: none;
 }
 .timeline-recent-copy {
   display: block;
   width: 100%;
   min-width: 0;
 }
-.timeline-recent.timeline-outline button.timeline-recent-item:hover,
-.timeline-recent.timeline-outline button.timeline-recent-item.is-active {
+.timeline-recent-item:hover,
+.timeline-recent-item.is-active {
   background: var(--muted);
   color: var(--foreground);
 }
-.timeline-recent.timeline-outline button.timeline-recent-item.is-active {
+.timeline-recent-item.is-active {
   background: color-mix(in oklab, var(--primary) 12%, var(--card));
 }
 .timeline-recent-title {
@@ -2285,8 +2287,7 @@ button.user-attachment-path {
     margin-bottom: 0.2rem;
     font-size: 0.85rem;
   }
-  .timeline-recent.timeline-outline button.timeline-recent-item {
-    min-height: 0;
+  .timeline-recent-item {
     padding: 0.7rem 0.75rem;
     font-size: 0.95rem;
   }
