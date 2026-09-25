@@ -2499,6 +2499,10 @@ export function Workspace() {
               recentSessions={projectSessions.filter((session) => !session.archivedAt).slice(0, 12)}
               sessionsPending={sessions.isPending}
               onOpenSession={(id) => openWorkspace(projectId, id, false, projectSessions.find((session) => session.id === id)?.kind === "terminal-chat" ? "terminal-chat" : "chat")}
+              onOpenRecentSession={(nextProjectId, nextSessionId) => {
+                openWorkspace(nextProjectId, nextSessionId, false, "chat");
+                if (isMobile) setSidebar(false);
+              }}
               runState={runState}
               connection={connection}
               sendNotice={sendNotice}

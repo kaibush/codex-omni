@@ -2015,11 +2015,12 @@ button.user-attachment-path {
 }
 .timeline-view-float.is-visible .timeline-view-toggle,
 .timeline-view-float:focus-within .timeline-view-toggle,
-.timeline-chrome .timeline-outline-toggle {
+.timeline-chrome .timeline-outline-toggle,
+.timeline-chrome .timeline-recent-toggle {
   pointer-events: auto;
 }
 @media (min-width: 768px) {
-  .timeline-chrome:has(.timeline-outline-toggle) .timeline-view-float {
+  .timeline-chrome:has(.timeline-outline-toggle, .timeline-recent-toggle) .timeline-view-float {
     position: absolute;
     top: 0;
     right: 100%;
@@ -2074,6 +2075,20 @@ button.user-attachment-path {
 .timeline-outline-toggle.is-open {
   background: var(--muted);
 }
+.timeline-recent-toggle {
+  display: inline-flex;
+  position: static;
+  z-index: 32;
+  flex: none;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  background: var(--card);
+}
+.timeline-recent-toggle.is-open {
+  background: var(--muted);
+}
 .timeline-outline-scrim {
   display: none;
   margin: 0;
@@ -2103,6 +2118,25 @@ button.user-attachment-path {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+.timeline-recent.timeline-outline {
+  width: min(20rem, calc(100vw - 1.5rem));
+}
+.timeline-recent-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.15rem 0.4rem 0.35rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.timeline-recent-meta {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .timeline-outline-heading {
   margin: 0 0 0.15rem;
@@ -2157,6 +2191,12 @@ button.user-attachment-path {
     left: 0.5rem;
     width: auto;
     max-height: min(70dvh, calc(100% - 3.75rem));
+  }
+  .timeline-recent.timeline-outline {
+    width: auto;
+  }
+  .timeline-recent-meta {
+    font-size: 0.72rem;
   }
   .timeline-outline-heading {
     margin: 0 0 0.2rem;

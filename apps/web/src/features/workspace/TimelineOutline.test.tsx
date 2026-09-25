@@ -54,13 +54,24 @@ describe("timeline chrome layout", () => {
     const css = readFileSync(join(dir, "../../styles/index.css"), "utf8");
     expect(timeline).toContain("timeline-chrome");
     expect(timeline).toContain("TimelineOutlineToggle");
+    expect(timeline).toContain("RecentSessionsToggle");
+    expect(timeline.indexOf("<TimelineOutlineToggle")).toBeLessThan(
+      timeline.indexOf("<RecentSessionsToggle")
+    );
     expect(timeline).toContain("timeline-view-toggle");
     expect(timeline).not.toMatch(/chat-content-width[\s\S]*timeline-view-float/);
     expect(css).toContain(".chat-pane:has(.timeline-chrome) .chat-scroll");
     expect(css).toContain("top: 3rem;");
-    expect(css).toContain(".timeline-chrome:has(.timeline-outline-toggle) .timeline-view-float");
+    expect(css).toContain(
+      ".timeline-chrome:has(.timeline-outline-toggle, .timeline-recent-toggle) .timeline-view-float"
+    );
     expect(css).toContain("width: max-content;");
     expect(css).toMatch(/\.timeline-view-toggle button \{[\s\S]*white-space: nowrap;/);
     expect(css).toMatch(/\.timeline-outline-toggle \{[\s\S]*flex: none;/);
+    expect(css).toMatch(/\.timeline-recent-toggle \{[\s\S]*flex: none;/);
+    expect(css).toMatch(/\.timeline-recent-toggle \{[\s\S]*min-width: 2rem;/);
+    expect(css).toContain(".timeline-chrome .timeline-recent-toggle");
+    expect(css).toContain("width: min(20rem, calc(100vw - 1.5rem));");
+    expect(css).toMatch(/\.timeline-recent\.timeline-outline \{[\s\S]*width: auto;/);
   });
 });

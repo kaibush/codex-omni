@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -25,13 +26,15 @@ import {
   shouldPauseLiveFollowFromPointer,
   shouldPauseLiveFollowFromWheel
 } from "@/lib/live-follow";
+import { api } from "@/lib/api";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import { isThreadGoalLocked, type ThreadGoal } from "@/lib/thread-goal";
-import type { Session, SessionOutlineItem, TimelineItem } from "@/types";
+import type { RecentRun, Session, SessionOutlineItem, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
 import { ThreadGoalBanner } from "./ThreadGoalBanner";
 import { VirtualTimeline } from "./VirtualTimeline";
 import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
+import { RecentSessionsPanel, RecentSessionsToggle } from "./RecentSessionsSwitcher";
 import { TimelineOutlinePanel, TimelineOutlineToggle, useTimelineOutline } from "./TimelineOutline";
 import { RunStatusBubble } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
@@ -123,6 +126,7 @@ export function WorkspaceTimeline({
   recentSessions,
   sessionsPending,
   onOpenSession,
+  onOpenRecentSession,
   runState,
   connection,
   sendNotice,
@@ -184,6 +188,7 @@ export function WorkspaceTimeline({
   recentSessions: Session[];
   sessionsPending: boolean;
   onOpenSession: (sessionId: string) => void;
+  onOpenRecentSession: (projectId: string, sessionId: string) => void;
   runState: RunState | null;
   connection: ConnectionState;
   sendNotice: string;
@@ -214,6 +219,13 @@ export function WorkspaceTimeline({
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
   const outline = useTimelineOutline(outlineItems);
+  const [recentOpen, setRecentOpen] = useState(false);
+  const recentSessionsQuery = useQuery({
+    queryKey: ["recent-run-sessions", 20],
+    queryFn: () => api<RecentRun[]>("/api/runs/recent-sessions?limit=20"),
+    enabled: recentOpen,
+    refetchInterval: recentOpen ? 10_000 : false
+  });
   const pointerScroll = useRef<{
     id: number;
     clientY: number;
@@ -353,9 +365,21 @@ export function WorkspaceTimeline({
           {outline.hasItems ? (
             <TimelineOutlineToggle
               open={outline.open}
-              onToggle={() => outline.setOutlineOpen(!outline.open)}
+              onToggle={() => {
+                const next = !outline.open;
+                outline.setOutlineOpen(next);
+                if (next) setRecentOpen(false);
+              }}
             />
           ) : null}
+          <RecentSessionsToggle
+            open={recentOpen}
+            onToggle={() => {
+              const next = !recentOpen;
+              setRecentOpen(next);
+              if (next) outline.setOutlineOpen(false);
+            }}
+          />
         </div>
       ) : null}
       <TimelineOutlinePanel
@@ -364,6 +388,24 @@ export function WorkspaceTimeline({
         activeId={highlightMessageId}
         onJump={(id) => outline.jump(id, onJumpOutline)}
         onClose={() => outline.setOutlineOpen(false)}
+      />
+      <RecentSessionsPanel
+        open={recentOpen}
+        items={recentSessionsQuery.data ?? []}
+        pending={recentSessionsQuery.isLoading}
+        error={
+          recentSessionsQuery.isError
+            ? recentSessionsQuery.error instanceof Error
+              ? recentSessionsQuery.error.message
+              : "最近对话加载失败"
+            : ""
+        }
+        activeSessionId={sessionId}
+        onOpen={(nextProjectId, nextSessionId) => {
+          setRecentOpen(false);
+          onOpenRecentSession(nextProjectId, nextSessionId);
+        }}
+        onClose={() => setRecentOpen(false)}
       />
       {isThreadGoalLocked(threadGoal) && threadGoal && onClearThreadGoal ? (
         <ThreadGoalBanner
