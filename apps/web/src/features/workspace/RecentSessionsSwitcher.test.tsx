@@ -100,7 +100,8 @@ describe("RecentSessionsSwitcher", () => {
     expect(css).toMatch(/\.timeline-recent\.timeline-outline\.is-open \{\s*display: block;/);
     expect(css).toMatch(/\.timeline-recent-copy \{[\s\S]*display: block;/);
     expect(css).toMatch(/\.timeline-recent-row \{[\s\S]*display: grid;/);
-    expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*min-height: 4\.5rem;/);
+    expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*border-radius: 0\.55rem;/);
+    expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*min-height: 2\.6rem;/);
     expect(css).not.toMatch(/\.timeline-recent-item \{[^}]*min-height: 0/);
   });
 });
