@@ -11,12 +11,6 @@ const recentRunStatusLabel: Record<RecentRun["status"], string> = {
   interrupted: "已中断"
 };
 
-export function recentSessionMeta(run: RecentRun) {
-  return [run.projectName, recentRunStatusLabel[run.status], formatCompactDateTime(run.startedAt)]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function RecentSessionsToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
     <Button
@@ -74,13 +68,17 @@ export function RecentSessionsPanel({
             <button
               key={item.id}
               type="button"
-              className={item.sessionId === activeSessionId ? "is-active" : undefined}
+              className={`timeline-recent-item${item.sessionId === activeSessionId ? " is-active" : ""}`}
               title={`${item.sessionTitle} · ${item.projectName}`}
               onClick={() => onOpen(item.projectId, item.sessionId)}
             >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{item.sessionTitle}</span>
-                <span className="timeline-recent-meta">{recentSessionMeta(item)}</span>
+              <span className="timeline-recent-title">{item.sessionTitle}</span>
+              <span className="timeline-recent-row">
+                <span className="timeline-recent-project">{item.projectName}</span>
+                <span className={`timeline-recent-badge is-${item.status}`}>
+                  {recentRunStatusLabel[item.status]}
+                </span>
+                <span className="timeline-recent-time">{formatCompactDateTime(item.startedAt)}</span>
               </span>
             </button>
           ))

@@ -2120,22 +2120,91 @@ button.user-attachment-path {
   gap: 0.15rem;
 }
 .timeline-recent.timeline-outline {
-  width: min(20rem, calc(100vw - 1.5rem));
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 0.7rem 0.65rem 0.6rem;
+}
+.timeline-recent.timeline-outline.is-open {
+  gap: 0.4rem;
+}
+.timeline-recent .timeline-outline-heading {
+  margin: 0 0.2rem 0.15rem;
+  padding: 0.15rem 0.25rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
 }
 .timeline-recent-status {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin: 0.15rem 0.4rem 0.35rem;
+  gap: 0.4rem;
+  margin: 0.45rem 0.35rem 0.55rem;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.timeline-recent.timeline-outline button.timeline-recent-item {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0.28rem;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.timeline-recent.timeline-outline button.timeline-recent-item:hover,
+.timeline-recent.timeline-outline button.timeline-recent-item.is-active {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.timeline-recent.timeline-outline button.timeline-recent-item.is-active {
+  background: color-mix(in oklab, var(--primary) 12%, var(--card));
+}
+.timeline-recent-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-recent-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
   color: var(--muted-foreground);
   font-size: 0.75rem;
+  font-weight: 400;
 }
-.timeline-recent-meta {
-  display: block;
+.timeline-recent-project {
+  min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-recent-badge {
+  flex: none;
+  border-radius: 0.4rem;
+  background: color-mix(in oklab, var(--muted-foreground) 12%, transparent);
+  padding: 0.05rem 0.38rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+.timeline-recent-badge.is-running {
+  background: color-mix(in oklab, #22c55e 18%, transparent);
+  color: #166534;
+}
+.dark .timeline-recent-badge.is-running {
+  color: #86efac;
+}
+.timeline-recent-badge.is-failed {
+  background: color-mix(in oklab, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+.timeline-recent-time {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .timeline-outline-heading {
@@ -2194,9 +2263,19 @@ button.user-attachment-path {
   }
   .timeline-recent.timeline-outline {
     width: auto;
+    padding: 0.75rem 0.7rem 0.8rem;
   }
-  .timeline-recent-meta {
-    font-size: 0.72rem;
+  .timeline-recent .timeline-outline-heading {
+    margin-bottom: 0.2rem;
+    font-size: 0.85rem;
+  }
+  .timeline-recent.timeline-outline button.timeline-recent-item {
+    min-height: 3.4rem;
+    padding: 0.75rem 0.8rem;
+    font-size: 0.95rem;
+  }
+  .timeline-recent-row {
+    font-size: 0.8rem;
   }
   .timeline-outline-heading {
     margin: 0 0 0.2rem;

@@ -71,7 +71,7 @@ describe("timeline chrome layout", () => {
     expect(css).toMatch(/\.timeline-recent-toggle \{[\s\S]*flex: none;/);
     expect(css).toMatch(/\.timeline-recent-toggle \{[\s\S]*min-width: 2rem;/);
     expect(css).toContain(".timeline-chrome .timeline-recent-toggle");
-    expect(css).toContain("width: min(20rem, calc(100vw - 1.5rem));");
+    expect(css).toContain("width: min(26rem, calc(100vw - 2rem));");
     expect(css).toMatch(/\.timeline-recent\.timeline-outline \{[\s\S]*width: auto;/);
   });
 });

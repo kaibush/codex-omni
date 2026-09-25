@@ -46,9 +46,11 @@ describe("RecentSessionsSwitcher", () => {
     expect(html).toContain("timeline-outline-scrim");
     expect(html).toContain("修登录");
     expect(html).toContain("看部署");
-    expect(html).toContain("codex-omni · 运行中");
-    expect(html).toContain("codex-omni · 已完成");
-    expect(html).toContain('class="is-active"');
+    expect(html).toContain("codex-omni");
+    expect(html).toContain("运行中");
+    expect(html).toContain("已完成");
+    expect(html).toContain("timeline-recent-item is-active");
+    expect(html).toContain("timeline-recent-row");
     expect(renderToStaticMarkup(
       <RecentSessionsPanel
         open={false}
