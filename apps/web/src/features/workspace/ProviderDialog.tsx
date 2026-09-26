@@ -420,7 +420,11 @@ export function ProviderDialog({
         </div>
       </DialogContent>
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="w-[min(calc(100vw-1rem),40rem)]">
+        <DialogContent
+          className="w-[min(calc(100vw-1rem),40rem)]"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <DialogTitle className="pr-8">{title}</DialogTitle>
           <DialogDescription>
             新增供应商会填入 config.toml 和 auth.json 模板。修改模型、Base URL、密钥等必要值后即可保存，
@@ -464,22 +468,33 @@ export function ProviderDialog({
                 </Button>
               </div>
             ) : (
-              <label className="field-label sm:col-span-2">
-                配置方式
-                <select
-                  className="field"
-                  value={editing.homeMode === "api-key" ? "api-key" : "managed"}
-                  onChange={(event) =>
-                    setEditing({
-                      ...editing,
-                      homeMode: event.target.value as ProviderHomeMode
-                    })
-                  }
-                >
-                  <option value="managed">编辑 config.toml / auth.json（推荐）</option>
-                  <option value="api-key">快速 API Key 模式</option>
-                </select>
-              </label>
+              <div className="sm:col-span-2">
+                <p className="text-xs font-semibold text-muted-foreground">配置方式</p>
+                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    className={`h-8 rounded-lg border px-2 text-left text-xs ${
+                      editing.homeMode === "api-key"
+                        ? "border-border text-muted-foreground hover:bg-muted"
+                        : "border-primary bg-primary/10 text-foreground"
+                    }`}
+                    onClick={() => setEditing({ ...editing, homeMode: "managed" })}
+                  >
+                    编辑 config.toml / auth.json
+                  </button>
+                  <button
+                    type="button"
+                    className={`h-8 rounded-lg border px-2 text-left text-xs ${
+                      editing.homeMode === "api-key"
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                    onClick={() => setEditing({ ...editing, homeMode: "api-key" })}
+                  >
+                    快速 API Key
+                  </button>
+                </div>
+              </div>
             )}
             <label className="field-label sm:col-span-2">
               供应商名称 <span className="text-red-500">*</span>
