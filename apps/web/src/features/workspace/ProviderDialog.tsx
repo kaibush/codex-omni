@@ -256,7 +256,7 @@ export function ProviderDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-1rem),40rem)]">
+      <DialogContent className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto sm:max-w-[calc(100vw-2rem)]">
         <DialogTitle className="flex items-center gap-2 pr-8">
           <KeyRound /> Provider 管理
         </DialogTitle>
