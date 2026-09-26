@@ -256,14 +256,14 @@ export function ProviderDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:w-[min(96vw,980px)]">
-        <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="w-[min(calc(100vw-1rem),40rem)]">
+        <DialogTitle className="flex items-center gap-2 pr-8">
           <KeyRound /> Provider 管理
         </DialogTitle>
         <DialogDescription>
-          管理 Codex 供应商配置；点击行可切换当前对话使用的供应商。
+          管理 Codex 供应商配置。点名称可切换当前对话使用的供应商。
         </DialogDescription>
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <div className="mt-3 flex gap-2 sm:justify-end">
           <input
             ref={importRef}
             type="file"
@@ -275,181 +275,153 @@ export function ProviderDialog({
               if (file) void importProvider(file);
             }}
           />
-          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}>
+          <Button variant="outline" className="h-8 flex-1 rounded-lg sm:flex-none" onClick={() => importRef.current?.click()}>
             <FileUp className="size-4" /> 导入
           </Button>
-          <Button size="sm" onClick={() => begin()}>
+          <Button className="h-8 flex-1 rounded-lg sm:flex-none" onClick={() => begin()}>
             <Plus className="size-4" /> 新增供应商
           </Button>
         </div>
-        <div className="mt-3 overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-muted text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-3">供应商名称</th>
-                <th className="px-3 py-3">模型</th>
-                <th className="px-3 py-3">Base URL</th>
-                <th className="px-3 py-3">模式</th>
-                <th className="px-3 py-3">配置</th>
-                <th className="px-3 py-3">环境变量</th>
-                <th className="px-3 py-3 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {providers.map((provider) => (
-                <tr key={provider.id} className="hover:bg-muted">
-                  <td className="px-3 py-3 font-medium">
-                    <button
-                      className="text-left hover:text-primary"
-                      onClick={() => onSelect(provider.id)}
-                    >
+        <div className="flex flex-col gap-2">
+          {providers.map((provider) => {
+            const mode = homeModeLabel[provider.homeMode ?? "managed"];
+            const envCount = Object.keys(provider.messageEnvVars ?? {}).length;
+            return (
+              <article key={provider.id} className="rounded-lg border p-3">
+                <button
+                  type="button"
+                  className="block w-full min-w-0 text-left"
+                  onClick={() => onSelect(provider.id)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="line-clamp-2 min-w-0 flex-1 break-all text-sm font-medium">
                       {provider.name}
-                    </button>
-                    {provider.isDefault && (
-                      <span className="provider-pill ml-2">
-                        <Star className="mr-0.5 inline size-3" />
+                    </span>
+                    {provider.isDefault ? (
+                      <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-lg bg-muted px-1.5 text-[11px] text-muted-foreground">
+                        <Star className="size-3 fill-amber-400 text-amber-400" />
                         默认
                       </span>
-                    )}
-                    {provider.codexHome && (
-                      <span
-                        className="mt-1 block max-w-[18rem] truncate font-mono text-[10px] font-normal text-muted-foreground"
-                        title={provider.codexHome}
-                      >
-                        {provider.codexHome}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-muted-foreground">
-                    {provider.model || "配置文件默认"}
-                  </td>
-                  <td className="max-w-[220px] truncate px-3 py-3 text-muted-foreground">
-                    {provider.baseUrl || "Codex 默认"}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    {homeModeLabel[provider.homeMode ?? "managed"]}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">
-                    {provider.homeMode === "external"
-                      ? provider.codexHomePath || provider.codexHome || "-"
-                      : provider.configToml
-                        ? "config.toml"
-                        : "-"}
-                    {provider.homeMode === "external"
-                      ? ""
-                      : ` / ${provider.authJson ? "auth.json" : "-"}`}
-                  </td>
-                  <td className="px-3 py-3 text-muted-foreground">
-                    {Object.keys(provider.messageEnvVars ?? {}).length || 0} 项
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex justify-end gap-1">
-                      {!provider.isDefault && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          aria-label="设为默认"
-                          onClick={() => onSave({ ...provider, isDefault: true })}
-                        >
-                          <Star className="size-4 text-muted-foreground" />
-                        </Button>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="复制供应商"
-                        onClick={async () => {
-                          try {
-                            await api(`/api/providers/${provider.id}/clone`, { method: "POST" });
-                            toast.success("已复制供应商");
-                            await onRefresh?.();
-                          } catch (error) {
-                            toast.error(error instanceof Error ? error.message : "复制失败");
-                          }
-                        }}
-                      >
-                        <Copy className="size-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="导出供应商"
-                        onClick={() => void exportProvider(provider.id, provider.name)}
-                      >
-                        <Download className="size-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="测试连接"
-                        onClick={async () => {
-                          try {
-                            const result = await api<{
-                              ok: boolean;
-                              durationMs: number;
-                              models: string[];
-                              error?: string;
-                            }>(`/api/providers/${provider.id}/test`, { method: "POST" });
-                            toast[result.ok ? "success" : "error"](
-                              result.ok
-                                ? `连接成功 · ${result.durationMs}ms · 获取 ${result.models.length} 个模型`
-                                : `连接失败 · ${result.error || "上游没有返回模型"}`
-                            );
-                            if (result.models.length) await onRefresh?.();
-                          } catch (error) {
-                            toast.error(error instanceof Error ? error.message : "测试失败");
-                          }
-                        }}
-                      >
-                        <RefreshCw className="size-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="编辑"
-                        onClick={() => begin(provider)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="删除"
-                        disabled={deletingId === provider.id}
-                        onClick={async () => {
-                          if (!confirm(`删除 Provider「${provider.name}」？`)) return;
-                          setDeletingId(provider.id);
-                          try {
-                            await onDelete(provider.id);
-                            if (editing.id === provider.id) {
-                              setEditing(empty);
-                              setFormOpen(false);
-                            }
-                          } finally {
-                            setDeletingId(null);
-                          }
-                        }}
-                      >
-                        <Trash2 className="size-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!providers.length && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    还没有配置供应商，请点击“新增供应商”。
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    ) : null}
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-muted-foreground">
+                    {provider.model || "配置文件默认"} · {provider.baseUrl || "Codex 默认"}
+                  </span>
+                  {provider.codexHome ? (
+                    <span
+                      className="mt-1 block truncate font-mono text-[11px] text-muted-foreground"
+                      title={provider.codexHome}
+                    >
+                      {provider.codexHome}
+                    </span>
+                  ) : null}
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    {mode} · 环境变量 {envCount} 项
+                  </span>
+                </button>
+                <div className="mt-2 grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:justify-end">
+                  {!provider.isDefault ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                      onClick={() => onSave({ ...provider, isDefault: true })}
+                    >
+                      <Star className="size-3.5" /> 默认
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                    onClick={async () => {
+                      try {
+                        await api(`/api/providers/${provider.id}/clone`, { method: "POST" });
+                        toast.success("已复制供应商");
+                        await onRefresh?.();
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : "复制失败");
+                      }
+                    }}
+                  >
+                    <Copy className="size-3.5" /> 复制
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                    onClick={() => void exportProvider(provider.id, provider.name)}
+                  >
+                    <Download className="size-3.5" /> 导出
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                    onClick={async () => {
+                      try {
+                        const result = await api<{
+                          ok: boolean;
+                          durationMs: number;
+                          models: string[];
+                          error?: string;
+                        }>(`/api/providers/${provider.id}/test`, { method: "POST" });
+                        toast[result.ok ? "success" : "error"](
+                          result.ok
+                            ? `连接成功 · ${result.durationMs}ms · 获取 ${result.models.length} 个模型`
+                            : `连接失败 · ${result.error || "上游没有返回模型"}`
+                        );
+                        if (result.models.length) await onRefresh?.();
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : "测试失败");
+                      }
+                    }}
+                  >
+                    <RefreshCw className="size-3.5" /> 测试
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                    onClick={() => begin(provider)}
+                  >
+                    <Pencil className="size-3.5" /> 编辑
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="h-8 w-full rounded-lg px-2 text-xs sm:w-auto"
+                    disabled={deletingId === provider.id}
+                    onClick={async () => {
+                      if (!confirm(`删除 Provider「${provider.name}」？`)) return;
+                      setDeletingId(provider.id);
+                      try {
+                        await onDelete(provider.id);
+                        if (editing.id === provider.id) {
+                          setEditing(empty);
+                          setFormOpen(false);
+                        }
+                      } finally {
+                        setDeletingId(null);
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-3.5" /> 删除
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+          {!providers.length ? (
+            <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+              还没有配置供应商，请点击“新增供应商”。
+            </p>
+          ) : null}
         </div>
       </DialogContent>
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:w-[min(94vw,720px)]">
-          <DialogTitle>{title}</DialogTitle>
+        <DialogContent className="w-[min(calc(100vw-1rem),40rem)]">
+          <DialogTitle className="pr-8">{title}</DialogTitle>
           <DialogDescription>
             新增供应商会填入 config.toml 和 auth.json 模板。修改模型、Base URL、密钥等必要值后即可保存，
             也可以保存并同步上游模型，或手动维护模型目录。
@@ -461,23 +433,54 @@ export function ProviderDialog({
               void submit();
             }}
           >
-            <label className="field-label sm:col-span-2">
-              配置方式
-              <select
-                className="field"
-                value={editing.homeMode ?? "api-key"}
-                onChange={(event) =>
-                  setEditing({
-                    ...editing,
-                    homeMode: event.target.value as ProviderHomeMode
-                  })
-                }
-              >
-                <option value="managed">编辑 config.toml / auth.json（推荐）</option>
-                <option value="api-key">快速 API Key 模式</option>
-                <option value="external">复用已有 CODEX_HOME</option>
-              </select>
-            </label>
+            {editing.homeMode === "external" ? (
+              <div className="rounded-lg border p-3 sm:col-span-2">
+                <p className="text-xs leading-5 text-muted-foreground">
+                  这个供应商仍使用已有 CODEX_HOME。新供应商不再提供这种方式。
+                </p>
+                <label className="field-label mt-2">
+                  已有 CODEX_HOME <span className="text-red-500">*</span>
+                  <div className="flex gap-2">
+                    <input
+                      className="field mt-0 font-mono"
+                      value={editing.codexHomePath ?? ""}
+                      onChange={(e) =>
+                        setEditing({ ...editing, codexHomePath: e.target.value || null })
+                      }
+                      placeholder="/home/you/.codex"
+                    />
+                    <Button type="button" variant="outline" className="h-8 shrink-0 rounded-lg" onClick={() => setFolderOpen(true)}>
+                      浏览
+                    </Button>
+                  </div>
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 h-8 rounded-lg"
+                  onClick={() => setEditing({ ...editing, homeMode: "managed", codexHomePath: null })}
+                >
+                  改为托管配置
+                </Button>
+              </div>
+            ) : (
+              <label className="field-label sm:col-span-2">
+                配置方式
+                <select
+                  className="field"
+                  value={editing.homeMode === "api-key" ? "api-key" : "managed"}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      homeMode: event.target.value as ProviderHomeMode
+                    })
+                  }
+                >
+                  <option value="managed">编辑 config.toml / auth.json（推荐）</option>
+                  <option value="api-key">快速 API Key 模式</option>
+                </select>
+              </label>
+            )}
             <label className="field-label sm:col-span-2">
               供应商名称 <span className="text-red-500">*</span>
               <input
@@ -544,24 +547,6 @@ export function ProviderDialog({
                 }
               />
             </label>
-            {(editing.homeMode ?? "api-key") === "external" ? (
-              <label className="field-label sm:col-span-2">
-                已有 CODEX_HOME <span className="text-red-500">*</span>
-                <div className="flex gap-2">
-                  <input
-                    className="field mt-0 font-mono"
-                    value={editing.codexHomePath ?? ""}
-                    onChange={(e) =>
-                      setEditing({ ...editing, codexHomePath: e.target.value || null })
-                    }
-                    placeholder="/home/you/.codex"
-                  />
-                  <Button type="button" variant="outline" onClick={() => setFolderOpen(true)}>
-                    浏览
-                  </Button>
-                </div>
-              </label>
-            ) : null}
             <label className="field-label">
               自定义消息环境变量
               <textarea
@@ -723,14 +708,14 @@ export function ProviderDialog({
                 {error}
               </p>
             )}
-            <div className="mt-1 flex flex-wrap justify-end gap-2 sm:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
+            <div className="mt-1 grid grid-cols-1 gap-2 sm:col-span-2 sm:flex sm:flex-wrap sm:justify-end">
+              <Button type="button" variant="outline" className="h-8 w-full rounded-lg sm:w-auto" onClick={() => setFormOpen(false)}>
                 取消
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" className="h-8 w-full rounded-lg sm:w-auto" disabled={busy}>
                 {busy ? "保存中..." : "保存供应商"}
               </Button>
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => void submit(true)}>
+              <Button type="button" variant="secondary" className="h-8 w-full rounded-lg sm:w-auto" disabled={busy} onClick={() => void submit(true)}>
                 {busy ? "处理中..." : "保存并获取模型"}
               </Button>
             </div>
