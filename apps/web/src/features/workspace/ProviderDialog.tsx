@@ -13,10 +13,11 @@ import {
   Plus,
   RefreshCw,
   Star,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type { Provider, ProviderHomeMode } from "@/types";
 import { ServerFolderPicker } from "./ServerFolderPicker";
@@ -256,14 +257,28 @@ export function ProviderDialog({
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto sm:max-w-[calc(100vw-2rem)]">
-        <DialogTitle className="flex items-center gap-2 pr-8">
-          <KeyRound /> Provider 管理
-        </DialogTitle>
-        <DialogDescription>
-          管理 Codex 供应商配置。点名称可切换当前对话使用的供应商。
-        </DialogDescription>
-        <div className="mt-3 flex gap-2 sm:justify-end">
+      <DialogContent
+        showCloseButton={false}
+        className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden sm:max-w-[calc(100vw-2rem)]"
+        style={{ overflow: "hidden" }}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound /> Provider 管理
+            </DialogTitle>
+            <DialogDescription className="mt-1">
+              管理 Codex 供应商配置。点名称可切换当前对话使用的供应商。
+            </DialogDescription>
+          </div>
+          <DialogClose
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="关闭"
+          >
+            <X className="size-4" />
+          </DialogClose>
+        </div>
+        <div className="flex shrink-0 gap-2 sm:justify-end">
           <input
             ref={importRef}
             type="file"
@@ -282,7 +297,7 @@ export function ProviderDialog({
             <Plus className="size-4" /> 新增供应商
           </Button>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
           {providers.map((provider) => {
             const mode = homeModeLabel[provider.homeMode ?? "managed"];
             const envCount = Object.keys(provider.messageEnvVars ?? {}).length;
@@ -421,17 +436,29 @@ export function ProviderDialog({
       </DialogContent>
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent
-          className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto sm:max-w-[calc(100vw-2rem)]"
+          showCloseButton={false}
+          className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden sm:max-w-[calc(100vw-2rem)]"
+          style={{ overflow: "hidden" }}
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
-          <DialogTitle className="pr-8">{title}</DialogTitle>
-          <DialogDescription>
-            新增供应商会填入 config.toml 和 auth.json 模板。修改模型、Base URL、密钥等必要值后即可保存，
-            也可以保存并同步上游模型，或手动维护模型目录。
-          </DialogDescription>
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle>{title}</DialogTitle>
+              <DialogDescription className="mt-1">
+                新增供应商会填入 config.toml 和 auth.json 模板。修改模型、Base URL、密钥等必要值后即可保存，
+                也可以保存并同步上游模型，或手动维护模型目录。
+              </DialogDescription>
+            </div>
+            <DialogClose
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="关闭"
+            >
+              <X className="size-4" />
+            </DialogClose>
+          </div>
           <form
-            className="provider-form mt-4 grid min-w-0 max-w-full gap-3 sm:grid-cols-2"
+            className="provider-form grid min-h-0 min-w-0 max-w-full flex-1 gap-3 overflow-y-auto overscroll-contain sm:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
