@@ -421,7 +421,7 @@ export function ProviderDialog({
       </DialogContent>
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent
-          className="w-[min(calc(100vw-1rem),40rem)]"
+          className="w-[min(calc(100vw-1rem),68rem)] min-w-0 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto sm:max-w-[calc(100vw-2rem)]"
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
@@ -431,7 +431,7 @@ export function ProviderDialog({
             也可以保存并同步上游模型，或手动维护模型目录。
           </DialogDescription>
           <form
-            className="mt-4 grid gap-3 sm:grid-cols-2"
+            className="provider-form mt-4 grid min-w-0 max-w-full gap-3 sm:grid-cols-2"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
@@ -444,9 +444,9 @@ export function ProviderDialog({
                 </p>
                 <label className="field-label mt-2">
                   已有 CODEX_HOME <span className="text-red-500">*</span>
-                  <div className="flex gap-2">
+                  <div className="flex min-w-0 gap-2">
                     <input
-                      className="field mt-0 font-mono"
+                      className="field mt-0 min-w-0 flex-1 font-mono"
                       value={editing.codexHomePath ?? ""}
                       onChange={(e) =>
                         setEditing({ ...editing, codexHomePath: e.target.value || null })
@@ -541,7 +541,7 @@ export function ProviderDialog({
                 <span className="text-red-500">*</span>
               ) : null}
               <input
-                className="field font-mono"
+                className="field min-w-0 max-w-full font-mono"
                 type={showSecrets ? "text" : "password"}
                 name="apiKey"
                 autoComplete="off"

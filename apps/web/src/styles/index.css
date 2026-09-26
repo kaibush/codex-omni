@@ -63,6 +63,8 @@
 
 .field-label {
   display: block;
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--muted-foreground);
@@ -70,6 +72,8 @@
 .field {
   margin-top: 0.4rem;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--input);
   border-radius: var(--radius-lg);
   background: transparent;
@@ -78,6 +82,15 @@
   font-size: 0.875rem;
   line-height: 1.25rem;
   outline: none;
+}
+.provider-form {
+  min-width: 0;
+  max-width: 100%;
+}
+.provider-form textarea.field {
+  field-sizing: fixed;
+  max-height: 18rem;
+  overflow: auto;
 }
 input.field,
 select.field {
