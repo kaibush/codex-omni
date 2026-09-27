@@ -202,9 +202,48 @@ function isStaleInFlightError(
   return newestCreatedAt > 0 && (item.createdAt ?? 0) <= newestCreatedAt;
 }
 
+function claudeAssistantMessageKey(item: TimelineItem) {
+  if (
+    item.kind !== "assistant" ||
+    item.data?.clientType !== "claude-code" ||
+    item.data?.previewTruncated ||
+    !item.text
+  )
+    return undefined;
+  // Preserve both run and upstream message identity; only remove the block index.
+  return /^assistant-(.+):\d+$/.exec(item.id)?.[1];
+}
+
+/** Older Claude snapshots used array indices, leaving an identical stream under another id. */
+function hideSupersededClaudeStreams(items: TimelineItem[]): TimelineItem[] {
+  const completed = new Map<string, TimelineItem[]>();
+  for (const item of items) {
+    if (item.streaming) continue;
+    const key = claudeAssistantMessageKey(item);
+    if (!key) continue;
+    const group = completed.get(key) ?? [];
+    group.push(item);
+    completed.set(key, group);
+  }
+  return items.filter((item) => {
+    if (!item.streaming) return true;
+    const key = claudeAssistantMessageKey(item);
+    return (
+      !key ||
+      !completed
+        .get(key)
+        ?.some((final) => final.text === item.text && compareTimelineVersions(final, item) > 0)
+    );
+  });
+}
+
 function cleanTimelineItems(items: TimelineItem[]): TimelineItem[] {
   return coalesceDuplicatePlanItems(
-    hideSupersededStreamErrors(items.filter((item) => !isRuntimePlaceholder(item.data, item.text)))
+    hideSupersededStreamErrors(
+      hideSupersededClaudeStreams(
+        items.filter((item) => !isRuntimePlaceholder(item.data, item.text))
+      )
+    )
   );
 }
 

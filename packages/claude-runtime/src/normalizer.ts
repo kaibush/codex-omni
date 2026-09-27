@@ -1,6 +1,15 @@
 import { textPatch, type BridgeEvent, type BridgeRequest } from "@codex-omni/protocol";
 
 type RecordValue = Record<string, any>;
+type TextBlock = {
+  messageId: string;
+  index: number;
+  value: string;
+  thinking: boolean;
+  parent: string | null;
+  completed: boolean;
+  snapshotSeen: boolean;
+};
 const record = (value: unknown): RecordValue =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as RecordValue) : {};
 const blocks = (value: unknown): RecordValue[] => (Array.isArray(value) ? value.map(record) : []);
@@ -48,7 +57,7 @@ export function createClaudeNormalizer(request: BridgeRequest) {
   let firstResponseAt: number | undefined;
   let assistantSeen = false;
   const streams = new Map<string, string>();
-  const text = new Map<string, string>();
+  const text = new Map<string, TextBlock>();
   const tools = new Map<string, RecordValue>();
   const streamTools = new Map<string, string>();
   const toolJson = new Map<string, string>();
@@ -69,29 +78,85 @@ export function createClaudeNormalizer(request: BridgeRequest) {
   });
   const metadata = (parent: string | null) =>
     parent ? { parentToolUseId: parent, subagent: true } : {};
-  const textEvent = (
-    id: string,
+  const textEvents = (
+    messageId: string,
+    index: number,
     value: string,
     thinking: boolean,
     parent: string | null,
-    complete: boolean
-  ) => {
-    const previous = text.get(id) ?? "";
-    text.set(id, value);
-    const patch = textPatch(previous, value);
+    complete: boolean,
+    snapshotSeen = false
+  ): BridgeEvent[] => {
+    const id = `${messageId}:${index}`;
+    const previous = text.get(id);
+    text.set(id, {
+      messageId,
+      index,
+      value,
+      thinking,
+      parent,
+      completed: complete,
+      snapshotSeen: snapshotSeen || previous?.snapshotSeen === true
+    });
+    if (complete && previous?.completed && previous.value === value) return [];
+    const patch = textPatch(previous?.value ?? "", value);
     if (parent)
-      return emit("tool.output", {
-        itemId: id,
-        tool: thinking ? "subagent_reasoning" : "subagent_message",
-        ...metadata(parent),
-        output: value,
-        status: complete ? "completed" : "in_progress"
-      });
+      return [
+        emit("tool.output", {
+          itemId: id,
+          tool: thinking ? "subagent_reasoning" : "subagent_message",
+          ...metadata(parent),
+          output: value,
+          status: complete ? "completed" : "in_progress"
+        })
+      ];
     if (!thinking) assistantSeen = true;
-    return emit(
-      thinking ? "reasoning.delta" : complete ? "assistant.completed" : "assistant.delta",
-      { itemId: id, ...patch, ...(complete ? { text: value, completed: true } : {}) }
+    return [
+      emit(thinking ? "reasoning.delta" : complete ? "assistant.completed" : "assistant.delta", {
+        itemId: id,
+        ...patch,
+        ...(thinking ? { phase: complete ? "completed" : "updated" } : {}),
+        ...(complete ? { text: value, completed: true } : {})
+      })
+    ];
+  };
+  const completeText = (block: TextBlock) =>
+    textEvents(block.messageId, block.index, block.value, block.thinking, block.parent, true);
+  const snapshotIndex = (
+    messageId: string,
+    index: number,
+    value: string,
+    thinking: boolean,
+    parent: string | null,
+    used: Set<number>,
+    multipleBlocks: boolean
+  ) => {
+    const candidates = [...text.values()].filter(
+      (block) =>
+        block.messageId === messageId &&
+        block.parent === parent &&
+        block.thinking === thinking &&
+        !used.has(block.index)
     );
+    const indexed = candidates.find((block) => block.index === index);
+    const pending = candidates.filter((block) => !block.snapshotSeen);
+    // The SDK emits a single-block assistant snapshot at each block stop.
+    // Its array index is not the API's content-block index (e.g. text after thinking).
+    const match =
+      (multipleBlocks && indexed?.value === value ? indexed : undefined) ??
+      pending.find((block) => block.value === value) ??
+      pending.find((block) => value.startsWith(block.value)) ??
+      (pending.length === 1 ? pending[0] : undefined) ??
+      candidates.find((block) => block.value === value) ??
+      indexed;
+    if (match) return match.index;
+    while (
+      used.has(index) ||
+      text.has(`${messageId}:${index}`) ||
+      streamTools.has(`${messageId}:${index}`)
+    )
+      index += 1;
+    return index;
   };
   const toolPayload = (id: string, name: string, input: RecordValue, parent: string | null) => ({
     itemId: id,
@@ -144,8 +209,9 @@ export function createClaudeNormalizer(request: BridgeRequest) {
           events.push(emit("tool.started", { ...payload, status: "in_progress" }));
         } else if (block.type === "text" || block.type === "thinking") {
           events.push(
-            textEvent(
-              id,
+            ...textEvents(
+              streamId,
+              index,
               String(block.text ?? block.thinking ?? ""),
               block.type === "thinking",
               parent,
@@ -157,9 +223,10 @@ export function createClaudeNormalizer(request: BridgeRequest) {
         const delta = record(event.delta);
         if (delta.type === "text_delta" || delta.type === "thinking_delta") {
           events.push(
-            textEvent(
-              id,
-              (text.get(id) ?? "") + String(delta.text ?? delta.thinking ?? ""),
+            ...textEvents(
+              streamId,
+              index,
+              (text.get(id)?.value ?? "") + String(delta.text ?? delta.thinking ?? ""),
               delta.type === "thinking_delta",
               parent,
               false
@@ -170,22 +237,35 @@ export function createClaudeNormalizer(request: BridgeRequest) {
           if (toolId)
             toolJson.set(toolId, (toolJson.get(toolId) ?? "") + String(delta.partial_json ?? ""));
         }
+      } else if (event.type === "content_block_stop") {
+        const block = text.get(id);
+        if (block && !block.completed) events.push(...completeText(block));
+      } else if (event.type === "message_stop") {
+        for (const block of text.values())
+          if (block.messageId === streamId && block.parent === parent && !block.completed)
+            events.push(...completeText(block));
       }
     } else if (message.type === "assistant") {
       firstResponseAt ??= Date.now();
       const assistant = record(message.message);
-      for (const [index, block] of blocks(assistant.content).entries()) {
-        const id = `${assistant.id ?? message.uuid}:${index}`;
+      const messageId = String(assistant.id ?? message.uuid);
+      const content = blocks(assistant.content);
+      const used = new Set<number>();
+      for (const [index, block] of content.entries()) {
         if (block.type === "text" || block.type === "thinking") {
-          events.push(
-            textEvent(
-              id,
-              String(block.text ?? block.thinking ?? ""),
-              block.type === "thinking",
-              parent,
-              true
-            )
+          const value = String(block.text ?? block.thinking ?? "");
+          const thinking = block.type === "thinking";
+          const blockIndex = snapshotIndex(
+            messageId,
+            index,
+            value,
+            thinking,
+            parent,
+            used,
+            content.length > 1
           );
+          used.add(blockIndex);
+          events.push(...textEvents(messageId, blockIndex, value, thinking, parent, true, true));
         } else if (block.type === "tool_use") {
           const toolId = String(block.id);
           const payload = toolPayload(toolId, String(block.name), record(block.input), parent);
@@ -416,8 +496,12 @@ export function createClaudeNormalizer(request: BridgeRequest) {
           emit("run.failed", { ...payload, message: reason || `Claude Code ${message.subtype}` })
         );
       } else {
+        for (const block of text.values())
+          if (!block.parent && !block.completed) events.push(...completeText(block));
         if (!assistantSeen && typeof message.result === "string" && message.result)
-          events.push(textEvent(`result:${message.uuid}`, message.result, false, null, true));
+          events.push(
+            ...textEvents(`result:${message.uuid}`, 0, message.result, false, null, true)
+          );
         events.push(emit("turn.completed", payload));
       }
     }

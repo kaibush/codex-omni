@@ -23,6 +23,56 @@ const item = (id: string, createdAt: number, extra: Partial<TimelineItem> = {}):
   ...extra
 });
 
+describe("legacy Claude assistant snapshots", () => {
+  const stale = item("assistant-run-msg_weather:1", 10, {
+    kind: "assistant",
+    text: "**Weather**",
+    streaming: true,
+    eventSeq: 640,
+    data: { clientType: "claude-code" }
+  });
+  const final = { ...stale, id: "assistant-run-msg_weather:0", streaming: false, eventSeq: 641 };
+
+  it.each(["folded", "flat", "expanded"] as const)(
+    "shows the completed reply once in %s view, regardless of row order",
+    (view) => {
+      expect(displayTimelineEvents([stale, final], view)).toEqual([final]);
+      expect(displayTimelineEvents([final, stale], view)).toEqual([final]);
+    }
+  );
+
+  it("reconciles a live stale block with a completed history snapshot", () => {
+    expect(
+      mergeSessionTimeline({
+        historical: [final],
+        current: [stale],
+        historyExpanded: false,
+        settled: true
+      })
+    ).toEqual([final]);
+  });
+
+  it("preserves distinct blocks, other messages, clients, and newer live text", () => {
+    const withoutSequence = { ...stale };
+    delete withoutSequence.eventSeq;
+    const distinct = [
+      { ...stale, id: "assistant-another-run-msg_weather:1" },
+      { ...stale, id: "assistant-run-msg_other:1" },
+      { ...stale, text: "Different reply" },
+      { ...stale, data: { clientType: "codex" } },
+      { ...stale, data: undefined },
+      { ...stale, streaming: false },
+      { ...stale, eventSeq: 642 },
+      { ...stale, eventSeq: 641 },
+      withoutSequence,
+      { ...stale, data: { clientType: "claude-code", previewTruncated: true } }
+    ];
+    for (const other of distinct) {
+      expect(displayTimelineEvents([final, other], "flat")).toEqual([final, other]);
+    }
+  });
+});
+
 describe("mergeSessionTimeline", () => {
   it("drops older page leftovers after a latest-page refresh", () => {
     expect(

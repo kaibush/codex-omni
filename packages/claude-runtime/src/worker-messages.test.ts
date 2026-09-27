@@ -38,14 +38,21 @@ function respondStream(
   content.forEach((block, index) => {
     send("content_block_start", {
       index,
-      content_block: block.type === "text" ? { type: "text", text: "" } : { ...block, input: {} }
+      content_block:
+        block.type === "text"
+          ? { type: "text", text: "" }
+          : block.type === "thinking"
+            ? { type: "thinking", thinking: "", signature: "" }
+            : { ...block, input: {} }
     });
     send("content_block_delta", {
       index,
       delta:
         block.type === "text"
           ? { type: "text_delta", text: block.text }
-          : { type: "input_json_delta", partial_json: JSON.stringify(block.input) }
+          : block.type === "thinking"
+            ? { type: "thinking_delta", thinking: block.thinking }
+            : { type: "input_json_delta", partial_json: JSON.stringify(block.input) }
     });
     send("content_block_stop", { index });
   });
@@ -181,6 +188,7 @@ describe("Claude worker with the real Agent SDK and local Messages API", () => {
         ]);
       } else
         respondStream(response, body.model, [
+          { type: "thinking", thinking: "Check the response before answering." },
           {
             type: "text",
             text: last.includes("SECOND_TURN_MARKER")
@@ -264,6 +272,17 @@ describe("Claude worker with the real Agent SDK and local Messages API", () => {
           event.type === "assistant.completed" && (event.payload as any).text === "FIRST_REPLY"
       )
     ).toBe(true);
+    const replies = events.filter((event) => event.type.startsWith("assistant."));
+    const completedIds = replies
+      .filter((event) => event.type === "assistant.completed")
+      .map((event) => (event.payload as any).itemId);
+    expect(completedIds).toHaveLength(2);
+    expect(new Set(replies.map((event) => (event.payload as any).itemId))).toEqual(
+      new Set(completedIds)
+    );
+    expect(
+      events.filter((event) => event.type === "reasoning.delta").at(-1)?.payload
+    ).toMatchObject({ phase: "completed" });
     const nativeId = (events.find((event) => event.type === "thread.started")?.payload as any)
       ?.threadId;
     expect(nativeId).toBeTruthy();

@@ -1,8 +1,49 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { displayTimelineEvents } from "@/lib/timeline";
+import { fromMessage } from "./workspace-model";
 import { EventCard } from "./EventCard";
 
 describe("EventCard copy controls", () => {
+  it("renders the table and source link from an affected Claude history reply once", () => {
+    const content =
+      "| 城市 | 现在 | 天气 |\n|---|---|---|\n| 悉尼 | 14°C | 小毛毛雨 |\n\nSources: [Open-Meteo 澳大利亚主要城市](https://api.open-meteo.com/v1/forecast?latitude=-33.8688&longitude=151.2093)";
+    const messages = [
+      {
+        id: "completed",
+        itemId: "run:msg_weather:0",
+        eventType: "assistant.completed",
+        eventSeq: 641
+      },
+      { id: "stale", itemId: "run:msg_weather:1", eventType: "assistant.delta", eventSeq: 640 }
+    ].map(({ eventSeq, ...message }) =>
+      fromMessage({
+        ...message,
+        role: "assistant",
+        sessionId: "session",
+        providerId: "claude",
+        content,
+        createdAt: 1,
+        updatedAt: 2,
+        dataJson: JSON.stringify({ clientType: "claude-code", eventSeq })
+      })
+    );
+    const html = renderToStaticMarkup(
+      <>
+        {displayTimelineEvents(messages).map((item) => (
+          <EventCard key={item.id} item={item} />
+        ))}
+      </>
+    );
+    expect(html.match(/<table>/g)).toHaveLength(1);
+    expect(html).toContain("<td>悉尼</td>");
+    expect(html).toContain("<td>14°C</td>");
+    expect(html).toContain(
+      '<a href="https://api.open-meteo.com/v1/forecast?latitude=-33.8688&amp;longitude=151.2093">Open-Meteo 澳大利亚主要城市</a>'
+    );
+    expect(html).not.toContain("markdown-stream-pre");
+  });
+
   it("offers full-message and fenced-code copy controls for assistant messages", () => {
     const html = renderToStaticMarkup(
       <EventCard

@@ -1182,6 +1182,10 @@ export function Workspace() {
           return put(id, {
             kind: "assistant",
             text: applyTextPatch(previous?.text ?? "", payload),
+            data: {
+              ...previous?.data,
+              ...(payload.clientType ? { clientType: payload.clientType } : {})
+            },
             providerId: providerIdRef.current,
             streaming: event.type !== "assistant.completed",
             createdAt: payload.createdAt ?? previous?.createdAt ?? Date.now()
