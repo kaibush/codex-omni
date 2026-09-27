@@ -4,7 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-pnpm --filter @codex-omni/protocol --filter @codex-omni/db --filter @codex-omni/codex-runtime --filter @codex-omni/server build
+# Include every client runtime and its transitive workspace dependencies.
+pnpm --filter '@codex-omni/server...' build
 
 unit_src="$root/deploy/codex-omni-api.service"
 unit_dst="/etc/systemd/system/codex-omni-api.service"
