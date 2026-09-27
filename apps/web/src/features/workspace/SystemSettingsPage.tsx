@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { clientName, clientType, type ClientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -282,6 +283,7 @@ export function SystemSettingsPage() {
                 </SettingsCard>
                 <SettingsCard
                   title="Codex 运行时"
+                  actions={<ClientIcon client="codex" className="size-5" />}
                   description="对话使用工作台内置的 Codex SDK 和 CLI。PATH 上的 codex 只做对照，不会接管当前对话。"
                 >
                   <SettingsFormGrid>
@@ -317,6 +319,7 @@ export function SystemSettingsPage() {
                 </SettingsCard>
                 <SettingsCard
                   title="Claude Code 运行时"
+                  actions={<ClientIcon client="claude-code" className="size-5" />}
                   description="对话通过内置 Claude Agent SDK 调用，供应商配置相互独立。"
                 >
                   <SettingsFormGrid>
@@ -383,14 +386,21 @@ export function SystemSettingsPage() {
                     <SettingsInfoRow
                       label="供应商"
                       value={
-                        defaultProvider
-                          ? `${providers.length} 个 · ${providers
+                        defaultProvider ? (
+                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>{providers.length} 个</span>
+                            {providers
                               .filter((provider) => provider.isDefault)
-                              .map(
-                                (provider) => `${clientName(provider.kind)} 默认 ${provider.name}`
-                              )
-                              .join(" · ")}`
-                          : "尚未配置"
+                              .map((provider) => (
+                                <span key={provider.id} className="inline-flex items-center gap-1.5">
+                                  <ClientIcon client={clientType(provider.kind)} />
+                                  {clientName(provider.kind)} 默认 {provider.name}
+                                </span>
+                              ))}
+                          </span>
+                        ) : (
+                          "尚未配置"
+                        )
                       }
                     />
                     <SettingsInfoRow
@@ -499,8 +509,12 @@ export function SystemSettingsPage() {
                   className="mb-3"
                 >
                   <TabsList className="h-8 rounded-lg">
-                    <TabsTrigger value="codex">Codex</TabsTrigger>
-                    <TabsTrigger value="claude-code">Claude Code</TabsTrigger>
+                    <TabsTrigger value="codex">
+                      <ClientIcon client="codex" /> Codex
+                    </TabsTrigger>
+                    <TabsTrigger value="claude-code">
+                      <ClientIcon client="claude-code" /> Claude Code
+                    </TabsTrigger>
                   </TabsList>
                 </Tabs>
                 <RuntimeSettingsTabs
@@ -598,7 +612,7 @@ export function SystemSettingsPage() {
                           key={provider.id}
                           className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3"
                         >
-                          <KeyRound className="size-4 text-muted-foreground" />
+                          <ClientIcon client={clientType(provider.kind)} labelled />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="text-sm font-medium">{provider.name}</p>

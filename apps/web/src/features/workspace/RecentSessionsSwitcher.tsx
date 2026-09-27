@@ -1,4 +1,5 @@
 import { History, LoaderCircle } from "lucide-react";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
 import { formatCompactDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
@@ -79,7 +80,10 @@ export function RecentSessionsPanel({
               }}
             >
               <span className="timeline-recent-copy">
-                <span className="timeline-recent-title">{item.sessionTitle}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <SessionIcon session={item} className="size-3.5" labelled />
+                  <span className="timeline-recent-title">{item.sessionTitle}</span>
+                </span>
                 <span className="timeline-recent-row">
                   <span className="timeline-recent-project">{item.projectName}</span>
                   <span className={`timeline-recent-badge is-${item.status}`}>

@@ -1,11 +1,19 @@
-import { clientName } from "@codex-omni/protocol";
+import { clientName, clientType } from "@codex-omni/protocol";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Blocks, Plus } from "lucide-react";
+import { ClientIcon } from "@/components/ClientIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
 import type { McpServer, Provider, SkillInfo } from "@/types";
 
@@ -110,17 +118,21 @@ export function SkillsMcpDialog({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             MCP 服务器
           </h3>
-          <select
-            className="field mt-0"
-            value={selected}
-            onChange={(event) => setProviderId(event.target.value)}
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {clientName(provider.kind)} · {provider.name}
-              </option>
-            ))}
-          </select>
+          <Select value={selected} onValueChange={setProviderId} disabled={!providers.length}>
+            <SelectTrigger className="w-full min-w-0" aria-label="Skills / MCP 供应商">
+              <SelectValue placeholder="选择供应商" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  <ClientIcon client={clientType(provider.kind)} />
+                  <span className="truncate">
+                    {clientName(provider.kind)} · {provider.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {(mcp.data?.servers ?? []).map((server) => (
             <div key={server.name} className="flex items-start gap-2 rounded-xl border bg-card p-3">
               <Switch

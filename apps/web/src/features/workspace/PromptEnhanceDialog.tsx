@@ -1,4 +1,6 @@
 import { LoaderCircle, Sparkles } from "lucide-react";
+import { clientName, type ClientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
@@ -9,6 +11,7 @@ export function PromptEnhanceDialog({
   busy,
   error,
   model,
+  clientType,
   onOpenChange,
   onChangeEnhanced,
   onApply,
@@ -21,6 +24,7 @@ export function PromptEnhanceDialog({
   busy: boolean;
   error: string;
   model: string;
+  clientType: ClientType;
   onOpenChange: (open: boolean) => void;
   onChangeEnhanced: (value: string) => void;
   onApply: () => void;
@@ -34,9 +38,15 @@ export function PromptEnhanceDialog({
           <Sparkles className="size-4" /> 强化提示词
         </DialogTitle>
         <DialogDescription>
-          用当前供应商把草稿改得更具体，方便 Codex 执行。不会发送到当前对话。
-          {model ? ` 模型：${model}` : ""}
+          用当前供应商把草稿改得更具体，方便 {clientName(clientType)} 执行。不会发送到当前对话。
         </DialogDescription>
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <ClientIcon client={clientType} />
+          <span className="min-w-0 truncate">
+            {clientName(clientType)}
+            {model ? ` · 模型：${model}` : ""}
+          </span>
+        </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="field-label">
             原文

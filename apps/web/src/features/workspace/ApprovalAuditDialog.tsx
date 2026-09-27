@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, ShieldQuestion } from "lucide-react";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import type { Session } from "@/types";
 
 type ApprovalStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
-type ApprovalItem = {
+type ApprovalItem = Pick<Session, "kind" | "clientType"> & {
   id: string;
   sessionId: string;
   projectId: string;
@@ -143,7 +145,10 @@ export function ApprovalAuditDialog({
                 <article key={item.id} className="rounded-xl border border-border bg-card p-3">
                   <div className="flex flex-wrap items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{item.sessionTitle}</p>
+                      <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+                        <SessionIcon session={item} labelled />
+                        <span className="truncate">{item.sessionTitle}</span>
+                      </p>
                       <p className="truncate font-mono text-[11px] text-muted-foreground">
                         {item.command || item.tool}
                       </p>

@@ -9,8 +9,10 @@ import {
   Folder
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { SessionIcon } from "@/components/SessionIcon";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { Session } from "@/types";
 import {
   filterPaletteItems,
   groupPaletteItems,
@@ -44,6 +46,8 @@ type SearchHit = {
   snippet?: string | undefined;
   projectId?: string | undefined;
   sessionId?: string | undefined;
+  clientType?: Session["clientType"];
+  sessionKind?: Session["kind"];
   messageId?: string | undefined;
   path?: string | undefined;
   line?: number | null | undefined;
@@ -77,6 +81,8 @@ function hitsToItems(hits: SearchHit[]): PaletteItem[] {
       items.push({
         id: hit.id,
         group: "session",
+        clientType: hit.clientType,
+        sessionKind: hit.sessionKind,
         title: hit.title,
         subtitle: hit.subtitle,
         snippet: hit.snippet,
@@ -89,6 +95,8 @@ function hitsToItems(hits: SearchHit[]): PaletteItem[] {
       items.push({
         id: hit.id,
         group: "message",
+        clientType: hit.clientType,
+        sessionKind: hit.sessionKind,
         title: hit.title,
         subtitle: hit.subtitle,
         snippet: hit.snippet,
@@ -346,7 +354,18 @@ export function CommandPalette({
                       onMouseEnter={() => setActiveIndex(index)}
                       onClick={() => run(item)}
                     >
-                      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      {item.group === "session" || item.group === "message" ? (
+                        <SessionIcon
+                          session={{
+                            kind: item.sessionKind ?? "chat",
+                            clientType: item.clientType ?? "codex"
+                          }}
+                          className="mt-0.5"
+                          labelled
+                        />
+                      ) : (
+                        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      )}
                       <span className="min-w-0 flex-1 text-left">
                         <span className="block truncate text-sm">{item.title}</span>
                         {item.subtitle ? (

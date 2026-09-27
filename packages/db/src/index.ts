@@ -119,7 +119,7 @@ export type SessionSearchHit = SessionRow & {
   snippet: string;
 };
 
-export type MessageSearchHit = {
+export type MessageSearchHit = Pick<SessionRow, "kind" | "clientType"> & {
   id: string;
   sessionId: string;
   projectId: string;
@@ -190,7 +190,7 @@ export type RecentRunSessionRow = Pick<
   | "startedAt"
   | "endedAt"
   | "reason"
-> & {
+> & Pick<SessionRow, "kind" | "clientType"> & {
   sessionTitle: string;
   projectName: string;
   providerName: string | null;
@@ -208,7 +208,7 @@ export type ApprovalRow = {
   createdAt: number;
   resolvedAt: number | null;
 };
-export type ApprovalListItem = ApprovalRow & {
+export type ApprovalListItem = ApprovalRow & Pick<SessionRow, "kind" | "clientType"> & {
   projectId: string;
   projectName: string;
   sessionTitle: string;
@@ -1050,7 +1050,7 @@ export class Store {
       limit
     };
     const fts = ftsMatchQuery(trimmed);
-    type MessageHitRow = {
+    type MessageHitRow = Pick<SessionRow, "kind" | "clientType"> & {
       id: string;
       sessionId: string;
       role: string;
@@ -1064,7 +1064,7 @@ export class Store {
       this.db
         .prepare(
           `SELECT m.id, m.session_id as sessionId, m.role, m.content, m.created_at as createdAt,
-                    s.project_id as projectId, s.title as sessionTitle, p.name as projectName
+                    s.project_id as projectId, s.title as sessionTitle, s.kind, s.client_type as clientType, p.name as projectName
              FROM messages m
              JOIN sessions s ON s.id = m.session_id
              JOIN projects p ON p.id = s.project_id
@@ -1082,7 +1082,7 @@ export class Store {
         rows = this.db
           .prepare(
             `SELECT m.id, m.session_id as sessionId, m.role, m.content, m.created_at as createdAt,
-                    s.project_id as projectId, s.title as sessionTitle, p.name as projectName
+                    s.project_id as projectId, s.title as sessionTitle, s.kind, s.client_type as clientType, p.name as projectName
              FROM messages_fts f
              JOIN messages m ON m.id = f.message_id
              JOIN sessions s ON s.id = m.session_id
@@ -1106,6 +1106,8 @@ export class Store {
       projectId: row.projectId,
       projectName: row.projectName,
       sessionTitle: resolveSessionTitle(row.sessionTitle, null),
+      kind: row.kind,
+      clientType: row.clientType,
       role: row.role,
       snippet: makeSnippet(row.content, trimmed),
       createdAt: row.createdAt
@@ -1673,7 +1675,7 @@ export class Store {
     return this.db
       .prepare(
         `SELECT a.id,a.run_id as runId,a.session_id as sessionId,a.item_id as itemId,a.tool,a.command,a.status,a.decision,a.payload_json as payloadJson,a.created_at as createdAt,a.resolved_at as resolvedAt,
-          s.project_id as projectId, p.name as projectName, s.title as sessionTitle
+          s.project_id as projectId, p.name as projectName, s.title as sessionTitle, s.kind, s.client_type as clientType
          FROM approval_requests a
          JOIN sessions s ON s.id = a.session_id
          JOIN projects p ON p.id = s.project_id
@@ -2219,7 +2221,7 @@ export class Store {
          )
          SELECT l.id,l.session_id as sessionId,l.project_id as projectId,l.provider_id as providerId,l.thread_id as threadId,
                 l.status,l.model,l.cwd,l.started_at as startedAt,l.ended_at as endedAt,l.reason,
-                s.title as sessionTitle,p.name as projectName,pr.name as providerName
+                s.title as sessionTitle,s.kind,s.client_type as clientType,p.name as projectName,pr.name as providerName
          FROM latest l
          JOIN sessions s ON s.id=l.session_id
          JOIN projects p ON p.id=l.project_id

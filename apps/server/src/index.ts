@@ -1596,10 +1596,14 @@ app.delete("/api/templates/:id", { preHandler: auth }, async (req, reply) => {
 });
 app.get("/api/projects/:id/tasks", { preHandler: auth }, async (req) => {
   await getProjectRoot(routeId(req));
-  return store.listTasks(routeId(req)).map((task) => ({
-    ...task,
-    relatedFiles: task.relatedFilesJson ? JSON.parse(task.relatedFilesJson) : []
-  }));
+  return store.listTasks(routeId(req)).map((task) => {
+    const session = task.sessionId ? store.getSession(task.sessionId) : undefined;
+    return {
+      ...task,
+      session: session ? { kind: session.kind, clientType: session.clientType } : null,
+      relatedFiles: task.relatedFilesJson ? JSON.parse(task.relatedFilesJson) : []
+    };
+  });
 });
 app.post("/api/projects/:id/tasks", { preHandler: auth }, async (req) => {
   const projectId = routeId(req);
@@ -1908,10 +1912,14 @@ app.post("/api/operations/:id/undo", { preHandler: auth }, async (req, reply) =>
 });
 app.get("/api/projects/:id/schedules", { preHandler: auth }, async (req) => {
   await getProjectRoot(routeId(req));
-  return store.listScheduledJobs(routeId(req)).map((job) => ({
-    ...job,
-    enabled: Boolean(job.enabled)
-  }));
+  return store.listScheduledJobs(routeId(req)).map((job) => {
+    const session = job.sessionId ? store.getSession(job.sessionId) : undefined;
+    return {
+      ...job,
+      session: session ? { kind: session.kind, clientType: session.clientType } : null,
+      enabled: Boolean(job.enabled)
+    };
+  });
 });
 app.post("/api/projects/:id/schedules", { preHandler: auth }, async (req) => {
   const projectId = routeId(req);

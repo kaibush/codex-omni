@@ -22,6 +22,7 @@ import {
   Trash2
 } from "lucide-react";
 import { toast } from "sonner";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -137,6 +138,7 @@ export function WorkspaceHeader({
         <h1 className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
           {activeSession ? (
             <>
+              <SessionIcon session={activeSession} labelled />
               {renamingSessionId === activeSession.id ? (
                 <Input
                   autoFocus
@@ -165,7 +167,7 @@ export function WorkspaceHeader({
               )}
               {runState && (
                 <span
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
                     runState.reconnecting
                       ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
                       : runState.status === "running"

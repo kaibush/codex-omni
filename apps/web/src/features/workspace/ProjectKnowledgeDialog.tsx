@@ -1,4 +1,5 @@
 import { CLIENTS, type ClientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -109,9 +110,10 @@ export function ProjectKnowledgeDialog({
             <button
               type="button"
               key={entry.id}
-              className={`h-8 rounded-lg border px-3 text-sm ${client === entry.id ? "border-primary bg-accent" : "hover:bg-muted"}`}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-sm ${client === entry.id ? "border-primary bg-accent" : "hover:bg-muted"}`}
               onClick={() => setClient(entry.id)}
             >
+              <ClientIcon client={entry.id} />
               {entry.name}
             </button>
           ))}

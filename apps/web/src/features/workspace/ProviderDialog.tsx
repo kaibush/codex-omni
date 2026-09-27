@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ClientIcon } from "@/components/ClientIcon";
 import {
   CLIENTS,
   clientName,
@@ -336,12 +337,13 @@ export function ProviderDialog({
               <button
                 key={client.id}
                 type="button"
-                className={`h-8 rounded-lg px-3 text-sm ${clientFilter === client.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-muted"}`}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm ${clientFilter === client.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-muted"}`}
                 aria-pressed={clientFilter === client.id}
                 onClick={() => setClientFilter(client.id)}
               >
+                <ClientIcon client={client.id} />
                 {client.name}
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {providers.filter((provider) => clientType(provider.kind) === client.id).length}
                 </span>
               </button>
@@ -381,6 +383,7 @@ export function ProviderDialog({
                   onClick={() => onSelect(provider.id)}
                 >
                   <span className="flex min-w-0 items-center gap-2">
+                    <ClientIcon client={clientType(provider.kind)} />
                     <span className="line-clamp-2 min-w-0 flex-1 break-all text-sm font-medium">
                       {provider.name}
                     </span>
@@ -540,46 +543,52 @@ export function ProviderDialog({
           >
             <label className="field-label sm:col-span-2">
               客户端
-              <select
-                className="field h-8 rounded-lg"
-                value={editing.kind}
-                disabled={Boolean(editing.id)}
-                onChange={(event) => {
-                  const kind = event.target.value;
-                  setEditing(
-                    kind === "claude-code"
-                      ? {
-                          ...empty,
-                          kind,
-                          name: "Claude 供应商",
-                          homeMode: "api-key",
-                          model: "sonnet",
-                          models: ["sonnet", "opus", "haiku"],
-                          baseUrl: "https://api.anthropic.com",
-                          configToml: null,
-                          authJson: null,
-                          settingsJson: "{}",
-                          mcpServersJson: "{}"
-                        }
-                      : {
-                          ...empty,
-                          ...renderProviderTemplates(templates, {
-                            name: empty.name,
-                            model: empty.model ?? "",
-                            baseUrl: empty.baseUrl ?? "",
-                            apiKey: ""
-                          })
-                        }
-                  );
-                  setEnvDraft("");
-                }}
-              >
-                {CLIENTS.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
+              <span className="relative mt-1.5 block">
+                <ClientIcon
+                  client={clientType(editing.kind)}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2"
+                />
+                <select
+                  className="field field-client-select h-8 rounded-lg"
+                  value={editing.kind}
+                  disabled={Boolean(editing.id)}
+                  onChange={(event) => {
+                    const kind = event.target.value;
+                    setEditing(
+                      kind === "claude-code"
+                        ? {
+                            ...empty,
+                            kind,
+                            name: "Claude 供应商",
+                            homeMode: "api-key",
+                            model: "sonnet",
+                            models: ["sonnet", "opus", "haiku"],
+                            baseUrl: "https://api.anthropic.com",
+                            configToml: null,
+                            authJson: null,
+                            settingsJson: "{}",
+                            mcpServersJson: "{}"
+                          }
+                        : {
+                            ...empty,
+                            ...renderProviderTemplates(templates, {
+                              name: empty.name,
+                              model: empty.model ?? "",
+                              baseUrl: empty.baseUrl ?? "",
+                              apiKey: ""
+                            })
+                          }
+                    );
+                    setEnvDraft("");
+                  }}
+                >
+                  {CLIENTS.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+              </span>
             </label>
             <div className="space-y-2 sm:col-span-2">
               <div className="flex flex-wrap gap-2">

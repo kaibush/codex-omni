@@ -1,10 +1,10 @@
 import { clientName, type ClientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Bot,
   CheckCircle2,
   CircleAlert,
   Clock3,
@@ -99,7 +99,7 @@ export function RunStatusBubble({
   return (
     <article className="event-card event-card-bot compact">
       <header className="event-title min-w-0">
-        <Bot className="size-4" />
+        <ClientIcon client={clientType} />
         <span>{clientName(clientType)}</span>
         <Icon
           className={`size-4 ${appearance.iconClassName}${appearance.spin ? " animate-spin" : ""}`}
@@ -350,7 +350,10 @@ export function RuntimeOptionsPanel({
         }}
       >
         <div className="flex items-center justify-between">
-          <b className="text-sm">运行设置</b>
+          <b className="flex items-center gap-1.5 text-sm">
+            <ClientIcon client={clientType} labelled />
+            运行设置
+          </b>
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onClose}>
             关闭
           </Button>

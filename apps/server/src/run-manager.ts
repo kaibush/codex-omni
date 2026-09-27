@@ -353,7 +353,8 @@ export class RunManager {
     return {
       ...run,
       clientType: clientType(
-        run.providerId ? this.store.getProvider(run.providerId)?.kind : undefined
+        this.store.getSession(run.sessionId)?.clientType ??
+          (run.providerId ? this.store.getProvider(run.providerId)?.kind : undefined)
       ),
       usage: parseJson<Record<string, number> | null>(run.usageJson, null),
       reconnecting: parseJson<Record<string, unknown> | null>(run.reconnectingJson, null),
@@ -1835,7 +1836,7 @@ export class RunManager {
         projectName: project?.name ?? run.projectId,
         providerId: run.providerId,
         providerName: provider?.name ?? null,
-        clientType: clientType(provider?.kind),
+        clientType: clientType(session?.clientType ?? provider?.kind),
         threadId: run.threadId,
         status: run.status,
         model: run.model,

@@ -36,6 +36,8 @@ import {
   WifiOff
 } from "lucide-react";
 import { toast } from "sonner";
+import { ClientIcon } from "@/components/ClientIcon";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -454,7 +456,10 @@ export function WorkspaceSidebar({
                       aria-label="供应商"
                       onClick={() => setProviderManager(true)}
                     >
-                      <KeyRound className="size-4 shrink-0" />
+                      <span className="flex shrink-0 items-center gap-0.5" aria-hidden="true">
+                        <ClientIcon client="codex" className="size-3.5" />
+                        <ClientIcon client="claude-code" className="size-3.5" />
+                      </span>
                       {providersCount > 0 ? (
                         <span className="absolute -right-0.5 -top-0.5 rounded-full bg-muted px-1 text-[9px] text-muted-foreground">
                           {providersCount}
@@ -462,7 +467,9 @@ export function WorkspaceSidebar({
                       ) : null}
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="right">供应商 {providersCount}</TooltipContent>
+                  <TooltipContent side="right">
+                    Codex / Claude Code · 供应商 {providersCount}
+                  </TooltipContent>
                 </Tooltip>
                 <SettingsToolsMenu
                   projectId={projectId}
@@ -828,6 +835,7 @@ export function WorkspaceSidebar({
                                     onTouchCancel={cancelSessionLongPress}
                                     className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
                                   >
+                                    <SessionIcon session={s} className="size-3.5" labelled />
                                     <span className="min-w-0 flex-1">
                                       <span className="flex items-center gap-1">
                                         {s.pinnedAt ? (
@@ -1142,11 +1150,14 @@ export function WorkspaceSidebar({
                     type="button"
                     onClick={() => setProviderManager(true)}
                     className="sidebar-action"
+                    aria-label="供应商"
                   >
                     <KeyRound />
                     供应商
-                    <span className="ml-auto text-[10px] text-muted-foreground">
-                      {providersCount}
+                    <span className="ml-auto flex shrink-0 items-center gap-2">
+                      <ClientIcon client="codex" labelled />
+                      <ClientIcon client="claude-code" labelled />
+                      <span className="text-[10px] text-muted-foreground">{providersCount}</span>
                     </span>
                   </button>
                   <SettingsToolsMenu

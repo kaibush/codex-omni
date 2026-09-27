@@ -20,6 +20,57 @@ describe("Store", () => {
     expect(recent.at(-1)?.sessionTitle).toBe("Session 2");
     expect(store.listRecentRunSessions(200)).toHaveLength(51);
   });
+  it("keeps the session client in recent runs, search and approvals without a provider", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const identities = [
+      { kind: "chat", clientType: "codex" },
+      { kind: "chat", clientType: "claude-code" },
+      { kind: "terminal-chat", clientType: "codex" }
+    ] as const;
+    for (const [index, identity] of identities.entries()) {
+      const session = store.createSession({
+        projectId: project.id,
+        title: `Identity ${index}`,
+        ...identity
+      });
+      store.addMessage({
+        sessionId: session.id,
+        role: "assistant",
+        content: "identity marker 图标",
+        providerId: null,
+        eventType: "assistant.completed"
+      });
+      const runId = `identity-run-${index}`;
+      store.createRun({
+        id: runId,
+        sessionId: session.id,
+        projectId: project.id,
+        serviceInstanceId: "test",
+        cwd: "/tmp",
+        startedAt: index + 1
+      });
+      store.upsertApproval({
+        id: `identity-approval-${index}`,
+        runId,
+        sessionId: session.id,
+        tool: "command",
+        command: "pnpm test"
+      });
+      expect(
+        store.listRecentRunSessions().find((item) => item.sessionId === session.id)
+      ).toMatchObject(identity);
+      expect(store.searchSessions("Identity").find((item) => item.id === session.id)).toMatchObject(
+        identity
+      );
+      for (const query of ["identity marker", "图标"]) {
+        expect(store.searchMessages(query).find((item) => item.sessionId === session.id)).toMatchObject(
+          identity
+        );
+      }
+      expect(store.listApprovals({ sessionId: session.id })[0]).toMatchObject(identity);
+    }
+  });
   it("persists, preserves on partial updates, and clears provider model limits", () => {
     store = new Store(":memory:");
     const provider = store.upsertProvider({

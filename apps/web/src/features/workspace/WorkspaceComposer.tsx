@@ -1,4 +1,10 @@
-import { CLIENTS, clientName, type ClientType } from "@codex-omni/protocol";
+import {
+  CLIENTS,
+  clientName,
+  clientType as normalizeClientType,
+  type ClientType
+} from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { claudePermissionLabels } from "./ClaudeRuntimeFields";
 import {
   useEffect,
@@ -12,7 +18,6 @@ import {
   Cpu,
   FileText,
   Image,
-  KeyRound,
   ListPlus,
   LoaderCircle,
   Paperclip,
@@ -436,7 +441,8 @@ export function WorkspaceComposer({
                   <SelectContent>
                     {CLIENTS.map((client) => (
                       <SelectItem key={client.id} value={client.id}>
-                        {client.name}
+                        <ClientIcon client={client.id} className="size-3.5" />
+                        <span className="truncate">{client.name}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -453,13 +459,13 @@ export function WorkspaceComposer({
                       selectedProvider?.name ? `供应商：${selectedProvider.name}` : "选择供应商"
                     }
                   >
-                    <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
                     <SelectValue placeholder="供应商" />
                   </SelectTrigger>
                   <SelectContent>
                     {providers?.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.name}
+                        <ClientIcon client={normalizeClientType(p.kind)} className="size-3.5" />
+                        <span className="truncate">{p.name}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -479,7 +485,7 @@ export function WorkspaceComposer({
                       : availableModels
                     ).map((item) => (
                       <SelectItem key={item} value={item}>
-                        {item}
+                        <span className="truncate">{item}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -681,6 +687,7 @@ export function WorkspaceComposer({
         busy={enhanceBusy}
         error={enhanceError}
         model={enhanceModel}
+        clientType={clientType}
         onOpenChange={setEnhanceOpen}
         onChangeEnhanced={setEnhanceText}
         onApply={() => {

@@ -1,6 +1,7 @@
 import { CLIENTS, clientName, clientType, type ClientType } from "@codex-omni/protocol";
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquarePlus, MessageSquareText, Search } from "lucide-react";
+import { MessageSquarePlus, Search } from "lucide-react";
+import { ClientIcon } from "@/components/ClientIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { listHistoricalSessions, sortSessionsByLatest } from "@/lib/session-title";
@@ -79,7 +80,10 @@ export function NewSessionDialog({
                 setSelectedId(null);
               }}
             >
-              <span className="block text-sm font-medium">{entry.name}</span>
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <ClientIcon client={entry.id} />
+                {entry.name}
+              </span>
               <span className="mt-1 block text-xs text-muted-foreground">
                 {entry.id === "claude-code" ? "原生计划、提问与子智能体" : "Codex 工作流与目标管理"}
               </span>
@@ -107,7 +111,7 @@ export function NewSessionDialog({
             }`}
           >
             <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-card text-muted-foreground shadow-sm">
-              <MessageSquarePlus className="size-4" />
+              <ClientIcon client={client} />
             </span>
             <span className="min-w-0">
               <span className="block text-sm font-medium">全新对话</span>
@@ -129,7 +133,7 @@ export function NewSessionDialog({
               }`}
             >
               <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-card text-primary shadow-sm">
-                <MessageSquareText className="size-4" />
+                <ClientIcon client={session.clientType} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{session.title}</span>

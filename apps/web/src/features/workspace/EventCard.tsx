@@ -1,5 +1,6 @@
 import { ApprovalPrompt, type ApprovalHandler } from "./ApprovalPrompt";
-import { clientName } from "@codex-omni/protocol";
+import { clientName, type ClientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import {
   Children,
   isValidElement,
@@ -12,7 +13,6 @@ import {
   type ReactNode
 } from "react";
 import {
-  Bot,
   Brain,
   Check,
   ChevronRight,
@@ -633,12 +633,20 @@ function TruncatedNotice({
   );
 }
 
-function EventCardLite({ item, height }: { item: TimelineItem; height: number | undefined }) {
+function EventCardLite({
+  item,
+  height,
+  client
+}: {
+  item: TimelineItem;
+  height: number | undefined;
+  client: ClientType | undefined;
+}) {
   const label =
     item.kind === "user"
       ? "你"
       : item.kind === "assistant"
-        ? clientName(item.data?.clientType)
+        ? clientName(client)
         : item.kind === "reasoning"
           ? "Thinking"
           : item.kind === "activity"
@@ -660,6 +668,7 @@ function EventCardLite({ item, height }: { item: TimelineItem; height: number | 
       style={height ? { height } : undefined}
     >
       <header className="event-title min-w-0">
+        {item.kind === "assistant" ? <ClientIcon client={client} /> : null}
         <span className="min-w-0 truncate text-muted-foreground">{label}</span>
       </header>
     </article>
@@ -668,6 +677,7 @@ function EventCardLite({ item, height }: { item: TimelineItem; height: number | 
 
 type EventCardProps = {
   item: TimelineItem;
+  clientType?: ClientType | undefined;
   providerName?: string | undefined;
   defaultOpen?: boolean;
   hidden?: boolean;
@@ -706,6 +716,7 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     prev.item.messageId === next.item.messageId &&
     prev.item.createdAt === next.item.createdAt &&
     prev.item.data === next.item.data &&
+    prev.clientType === next.clientType &&
     prev.highlighted === next.highlighted &&
     prev.defaultOpen === next.defaultOpen &&
     prev.hidden === next.hidden &&
@@ -733,6 +744,7 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
 
 function EventCardComponent({
   item,
+  clientType,
   providerName,
   defaultOpen = true,
   hidden = false,
@@ -756,6 +768,7 @@ function EventCardComponent({
   liteHeight,
   onLoadFull
 }: EventCardProps) {
+  const client = item.data?.clientType ?? clientType;
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
   const [open, setOpen] = useState(() => {
     if (item.kind === "reasoning") return defaultOpen;
@@ -774,7 +787,7 @@ function EventCardComponent({
     return defaultOpen;
   });
   if (hidden) return null;
-  if (lite) return <EventCardLite item={item} height={liteHeight} />;
+  if (lite) return <EventCardLite item={item} height={liteHeight} client={client} />;
   if (isRuntimePlaceholder(item.data, item.text)) return null;
   const highlightClass = highlighted ? " is-highlighted" : "";
   const userAttachments = item.kind === "user" ? timelineAttachments(item.data) : [];
@@ -891,8 +904,8 @@ function EventCardComponent({
     return (
       <article data-message-id={item.id} className={`event-card event-card-bot${highlightClass}`}>
         <header className="event-title message-event-title min-w-0">
-          <Bot className="size-4" />
-          <span>{clientName(item.data?.clientType)}</span>
+          <ClientIcon client={client} />
+          <span>{clientName(client)}</span>
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}
@@ -1169,7 +1182,7 @@ function EventCardComponent({
         <button className="event-title w-full min-w-0" onClick={() => setOpen((value) => !value)}>
           <CollapseIcon open={open} />
           <span className="icon-muted">
-            <Bot />
+            <ClientIcon client={client} labelled />
           </span>
           <span className="min-w-0 truncate">{title}</span>
           {status === "in_progress" ? (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, GitFork, MessageSquareText } from "lucide-react";
-import { clientName } from "@codex-omni/protocol";
+import { clientName, clientType } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { Provider, Session } from "@/types";
@@ -30,10 +31,16 @@ export function ProviderContinuationDialog({
         <DialogTitle>切换供应商</DialogTitle>
         <DialogDescription>选择如何使用新的供应商继续当前工作。</DialogDescription>
         <div className="my-4 flex min-w-0 items-center gap-3 rounded-lg border bg-muted p-3 text-sm">
-          <span className="min-w-0 flex-1 truncate">{source?.title}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <ClientIcon client={source?.clientType} />
+            <span className="truncate">{source?.title}</span>
+          </span>
           <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">
-            {clientName(target?.kind)} · {target?.name}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <ClientIcon client={clientType(target?.kind)} />
+            <span className="truncate">
+              {clientName(target?.kind)} · {target?.name}
+            </span>
           </span>
         </div>
         <div className="space-y-2" role="radiogroup" aria-label="继续方式">

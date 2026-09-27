@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Cpu, KeyRound } from "lucide-react";
+import { clientType } from "@codex-omni/protocol";
+import { Cpu } from "lucide-react";
+import { ClientIcon } from "@/components/ClientIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -124,12 +126,12 @@ export function FirstTurnModelDialog({
             {providerReady ? (
               <Select value={selectedProviderId} onValueChange={chooseProvider} disabled={busy}>
                 <SelectTrigger ref={providerTriggerRef} className="h-8 w-full rounded-lg">
-                  <KeyRound className="size-3.5 text-muted-foreground" />
                   <SelectValue placeholder="选择供应商" />
                 </SelectTrigger>
                 <SelectContent>
                   {providers.map((provider) => (
                     <SelectItem key={provider.id} value={provider.id}>
+                      <ClientIcon client={clientType(provider.kind)} className="size-3.5" />
                       {provider.name}
                       {provider.isDefault ? "（默认）" : ""}
                     </SelectItem>

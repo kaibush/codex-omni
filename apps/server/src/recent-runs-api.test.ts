@@ -29,7 +29,7 @@ describe("recent run sessions API", () => {
     const store = new Store(database);
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
     const first = store.createSession({ projectId: project.id, title: "First" });
-    const second = store.createSession({ projectId: project.id, title: "Second" });
+    const second = store.createSession({ projectId: project.id, title: "Second", clientType: "claude-code" });
     for (const [id, sessionId, startedAt] of [
       ["first-old", first.id, 10],
       ["second", second.id, 20],
@@ -104,8 +104,8 @@ describe("recent run sessions API", () => {
     const recent = await fetch(`${baseUrl}/api/runs/recent-sessions`, { headers: { cookie } });
     expect(recent.status).toBe(200);
     expect(await recent.json()).toMatchObject([
-      { id: "first-new", sessionTitle: "First", projectName: "Project" },
-      { id: "second", sessionTitle: "Second", projectName: "Project" }
+      { id: "first-new", sessionTitle: "First", projectName: "Project", kind: "chat", clientType: "codex" },
+      { id: "second", sessionTitle: "Second", projectName: "Project", kind: "chat", clientType: "claude-code" }
     ]);
     const limited = await fetch(`${baseUrl}/api/runs/recent-sessions?limit=1`, {
       headers: { cookie }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Clock3, Plus, Trash2 } from "lucide-react";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
@@ -90,7 +91,10 @@ export function ScheduleDialog({
                 aria-label={`启用 ${job.title}`}
               />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{job.title}</p>
+                <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+                  {job.session ? <SessionIcon session={job.session} labelled /> : null}
+                  <span className="min-w-0 break-words">{job.title}</span>
+                </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {job.cadence === "daily"
                     ? `每天 ${job.dailyAt}`

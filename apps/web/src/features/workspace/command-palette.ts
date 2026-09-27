@@ -1,3 +1,5 @@
+import type { Session } from "@/types";
+
 export type PaletteGroup = "command" | "session" | "message" | "file" | "git" | "project";
 
 export type PaletteAction =
@@ -37,6 +39,8 @@ export type PaletteItem = {
   title: string;
   subtitle?: string | undefined;
   snippet?: string | undefined;
+  clientType?: Session["clientType"];
+  sessionKind?: Session["kind"];
   shortcut?: string | undefined;
   keywords: string[];
   action: PaletteAction;

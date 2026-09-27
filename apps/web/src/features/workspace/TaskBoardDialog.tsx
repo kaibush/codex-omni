@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckSquare, Plus, Trash2 } from "lucide-react";
+import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -163,9 +164,12 @@ export function TaskBoardDialog({
                       {task.sessionId ? (
                         <button
                           type="button"
-                          className="text-[11px] text-primary"
+                          className="inline-flex items-center gap-1 text-[11px] text-primary"
                           onClick={() => onOpenSession(task.sessionId!)}
                         >
+                          {task.session ? (
+                            <SessionIcon session={task.session} className="size-3.5" labelled />
+                          ) : null}
                           打开对话
                         </button>
                       ) : null}

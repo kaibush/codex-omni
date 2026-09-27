@@ -1,6 +1,6 @@
 import { listGitBranches, listGitLog } from "./project-git.js";
 import { searchProjectFiles } from "./project-file.js";
-import type { Store } from "@codex-omni/db";
+import type { SessionRow, Store } from "@codex-omni/db";
 
 export type WorkspaceSearchHit = {
   type: "project" | "session" | "message" | "file" | "branch" | "commit";
@@ -10,6 +10,8 @@ export type WorkspaceSearchHit = {
   snippet?: string;
   projectId?: string;
   sessionId?: string;
+  clientType?: SessionRow["clientType"];
+  sessionKind?: SessionRow["kind"];
   messageId?: string;
   path?: string;
   line?: number | null;
@@ -84,7 +86,9 @@ export async function searchWorkspace(input: {
         subtitle: `${session.projectName} · ${SESSION_STATUS_LABEL[session.status] ?? session.status}`,
         snippet: session.snippet,
         projectId: session.projectId,
-        sessionId: session.id
+        sessionId: session.id,
+        clientType: session.clientType,
+        sessionKind: session.kind
       });
     }
   }
@@ -99,6 +103,8 @@ export async function searchWorkspace(input: {
         snippet: message.snippet,
         projectId: message.projectId,
         sessionId: message.sessionId,
+        clientType: message.clientType,
+        sessionKind: message.kind,
         messageId: message.id
       });
     }

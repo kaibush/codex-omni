@@ -23,7 +23,7 @@ describe("workspace search", () => {
       displayPath: directory,
       realPath: directory
     });
-    const session = store.createSession({ projectId: project.id, title: "Reconnect notes" });
+    const session = store.createSession({ projectId: project.id, title: "Reconnect notes", clientType: "claude-code" });
     store.addMessage({
       sessionId: session.id,
       role: "user",
@@ -38,6 +38,13 @@ describe("workspace search", () => {
       rootPath: directory
     });
     expect(result.hits.some((hit) => hit.type === "message")).toBe(true);
+    for (const type of ["session", "message"]) {
+      expect(result.hits.find((hit) => hit.type === type)).toMatchObject({
+        sessionId: session.id,
+        clientType: "claude-code",
+        sessionKind: "chat"
+      });
+    }
     expect(result.hits.some((hit) => hit.type === "file" && hit.path === "readme.md")).toBe(false);
     const files = await searchWorkspace({
       store,

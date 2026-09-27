@@ -1,5 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientName } from "@codex-omni/protocol";
+import { ClientIcon } from "@/components/ClientIcon";
+import { SessionIcon } from "@/components/SessionIcon";
 import { useState } from "react";
 import {
   Activity,
@@ -149,6 +151,7 @@ export function RunningCenterDialog({
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
+                            <ClientIcon client={run.clientType} labelled />
                             <b className="truncate text-sm">{run.sessionTitle}</b>
                             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                               {run.runtimeAlive ? "确认执行中" : "状态待核对"}
@@ -221,7 +224,7 @@ export function RunningCenterDialog({
                   </span>
                   <b className="mt-3 text-sm">当前没有后台任务</b>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    运行中的 Codex turn 会显示在这里。
+                    运行中的 Codex / Claude Code 任务会显示在这里。
                   </p>
                 </div>
               )}
@@ -244,6 +247,7 @@ export function RunningCenterDialog({
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
+                          <SessionIcon session={run} labelled />
                           <b className="truncate text-sm">{run.sessionTitle}</b>
                           <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                             {recentRunStatusLabel[run.status]}

@@ -21,6 +21,7 @@ import {
   TerminalSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SessionIcon } from "@/components/SessionIcon";
 import {
   liveFollowActionFromScroll,
   shouldPauseLiveFollowFromKey,
@@ -629,6 +630,7 @@ export function WorkspaceTimeline({
                   renderItem={(item, _index, meta) => (
                     <EventCard
                       item={item}
+                      clientType={activeSession?.clientType}
                       lite={meta.lite}
                       liteHeight={meta.height}
                       onLoadFull={item.messageId ? () => loadFullMessage(item) : undefined}
@@ -710,7 +712,11 @@ export function WorkspaceTimeline({
                         onClick={() => onOpenSession(latestSession.id)}
                         disabled={startSessionPending}
                       >
-                        <MessageSquareText className="size-4" />
+                        <SessionIcon
+                          session={latestSession}
+                          className="text-primary-foreground dark:text-primary-foreground"
+                          labelled
+                        />
                         打开最近对话
                       </Button>
                     ) : null}
@@ -742,7 +748,7 @@ export function WorkspaceTimeline({
                         className="flex w-full items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-muted"
                       >
                         <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-background text-primary shadow-sm">
-                          <MessageSquareText className="size-4" />
+                          <SessionIcon session={session} labelled />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-1">

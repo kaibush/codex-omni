@@ -19,6 +19,7 @@ export type WorkspaceTask = {
   id: string;
   projectId: string;
   sessionId: string | null;
+  session?: Pick<Session, "kind" | "clientType"> | null;
   title: string;
   description: string | null;
   status: "todo" | "doing" | "done" | "blocked";
@@ -78,6 +79,7 @@ export type ScheduledJob = {
   id: string;
   projectId: string;
   sessionId: string | null;
+  session?: Pick<Session, "kind" | "clientType"> | null;
   title: string;
   prompt: string;
   cadence: "interval" | "daily";
@@ -252,7 +254,7 @@ export type ActiveRun = {
   runtimeAlive: boolean;
   reconnecting: Record<string, unknown> | null;
 };
-export type RecentRun = {
+export type RecentRun = Pick<Session, "kind" | "clientType"> & {
   id: string;
   sessionId: string;
   sessionTitle: string;

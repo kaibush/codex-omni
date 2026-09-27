@@ -607,6 +607,21 @@ describe("EventCard copy controls", () => {
     expect(html).not.toContain("language-typescript");
   });
 
+  it.each([false, true])(
+    "uses the conversation client when old messages have no client metadata (lite: %s)",
+    (lite) => {
+      const html = renderToStaticMarkup(
+        <EventCard
+          clientType="claude-code"
+          lite={lite}
+          item={{ id: "older-assistant", kind: "assistant", text: "历史回复" }}
+        />
+      );
+      expect(html).toContain("Claude Code");
+      expect(html).not.toContain(">Codex<");
+    }
+  );
+
   it("offers to load the full truncated payload", () => {
     const html = renderToStaticMarkup(
       <EventCard
