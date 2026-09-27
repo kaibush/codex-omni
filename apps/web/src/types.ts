@@ -101,7 +101,7 @@ export type RunStats = {
   totalTokens: number;
   lastRunAt: number | null;
 };
-export type ProviderHomeMode = "managed" | "api-key" | "external";
+export type ProviderHomeMode = "managed" | "api-key" | "native";
 export type Provider = {
   id: string;
   name: string;
@@ -117,10 +117,7 @@ export type Provider = {
   messageEnvVars: Record<string, string>;
   isDefault: boolean;
   homeMode?: ProviderHomeMode;
-  codexHomePath?: string | null;
-  codexHome?: string;
   runtimeHome?: string;
-  claudeHomePath?: string | null;
   settingsJson?: string | null;
   mcpServersJson?: string | null;
 };
@@ -424,7 +421,7 @@ export type RuntimeInfo = {
   claude?: { sdkVersion: string; bundledCliVersion: string | null };
   defaultClaudeHome?: string;
   defaultCodexHome: string;
-  providersRoot: string;
+  clientsRoot: string;
   host: HostInfo;
   codex?: CodexRuntimeInfo;
 };

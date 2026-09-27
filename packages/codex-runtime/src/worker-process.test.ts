@@ -43,7 +43,7 @@ function request(message = "test"): BridgeRequest {
     projectId: "p",
     sessionId: "s",
     cwd: dir,
-    codexHome: dir,
+    runtimeHome: dir,
     runtimeKey: "k",
     message,
     sandbox: "read-only",

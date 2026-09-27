@@ -2655,7 +2655,11 @@ export function Workspace() {
               beginRenameSession={beginRenameSession}
               runState={runState}
               selectedProvider={selectedProvider ?? undefined}
-              runtimeCodexHome={runtime.data?.defaultCodexHome}
+              runtimeClientHome={
+                activeSession?.clientType === "claude-code"
+                  ? runtime.data?.defaultClaudeHome
+                  : runtime.data?.defaultCodexHome
+              }
               runElapsed={runElapsed}
               runFirstResponse={runFirstResponse}
               runTokenLabel={runTokenLabel}
@@ -2795,7 +2799,11 @@ export function Workspace() {
                   )}
                   connection={connection}
                   reconnectAttempt={reconnectAttempts.current}
-                  runtimeCodexHome={runtime.data?.defaultCodexHome}
+                  runtimeClientHome={
+                    activeSession?.clientType === "claude-code"
+                      ? runtime.data?.defaultClaudeHome
+                      : runtime.data?.defaultCodexHome
+                  }
                   workspaceSettings={workspaceSettings}
                   approvalNotice={approvalNotice}
                   pendingApprovalsCount={pendingApprovals.length}

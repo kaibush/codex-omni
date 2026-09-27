@@ -16,12 +16,7 @@ export class BridgeWorkerAdapter extends AgentBridgeWorkerAdapter {
   }
 }
 
-export {
-  assertExternalCodexHome,
-  materializeProviderHome,
-  resolveProviderHome,
-  runtimeKey
-} from "./provider-home.js";
+export { parseCodexProviderConfig } from "./configuration.js";
 export { createNormalizer } from "./normalizer.js";
 export { extractRolloutToolEvents, findRolloutFile } from "./collab-rollout.js";
 export type { CollabRolloutEvent } from "./collab-rollout.js";

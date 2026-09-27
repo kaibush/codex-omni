@@ -5,7 +5,6 @@ import path from "node:path";
 import type { BridgeEvent, BridgeRequest } from "@codex-omni/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeWorkerAdapter } from "./index.js";
-import { resolveProviderHome } from "./provider-home.js";
 
 let dir: string | undefined;
 let server: Server | undefined;
@@ -96,12 +95,8 @@ describe.skipIf(process.platform === "win32")(
         )
       );
       const configToml = `model = "omni-fixture"\nmodel_provider = "custom"\n[model_providers.custom]\nname = "Fixture"\nbase_url = "${baseUrl}"\nwire_api = "responses"\nrequest_max_retries = 0\nstream_max_retries = 0\n`;
-      const codexHome = await resolveProviderHome({
-        providersRoot: dir,
-        providerId: "home",
-        configToml,
-        authJson: '{"OPENAI_API_KEY":"fixture-key"}'
-      });
+      const codexHome = path.join(dir, "client-codex");
+      await mkdir(codexHome);
       worker = new BridgeWorkerAdapter();
       timer = setTimeout(() => worker?.cancel("session"), 10_000);
       const request: BridgeRequest = {
@@ -111,7 +106,7 @@ describe.skipIf(process.platform === "win32")(
         sessionId: "session",
         cwd: project,
         runtimeKey: "fixture",
-        codexHome,
+        runtimeHome: codexHome,
         configToml,
         baseUrl,
         apiKey: "fixture-key",

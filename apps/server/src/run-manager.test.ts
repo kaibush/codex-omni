@@ -57,11 +57,8 @@ vi.mock("@codex-omni/codex-runtime", async (importOriginal) => ({
       runtimeMocks.shutdown();
     }
   },
-  materializeProviderHome: vi.fn(async () => "/tmp/provider-home"),
-  resolveProviderHome: vi.fn(async () => "/tmp/provider-home"),
   extractRolloutToolEvents: vi.fn(() => []),
   findRolloutFile: vi.fn(() => ""),
-  runtimeKey: vi.fn(() => "runtime-key"),
   INCOMPLETE_TURN_MESSAGE: "Codex 流在 turn.completed 前结束，任务未完成",
   terminateRecordedWorker: vi.fn(() => true)
 }));
@@ -74,6 +71,8 @@ let manager: RunManager | undefined;
 const tempDirs: string[] = [];
 
 beforeEach(() => {
+  vi.stubEnv("CODEX_OMNI_CODEX_HOME", "");
+  vi.stubEnv("CODEX_OMNI_CLAUDE_HOME", "");
   runtimeMocks.run.mockReset();
   runtimeMocks.respond.mockReset();
   runtimeMocks.respond.mockReturnValue(false);
@@ -88,6 +87,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   manager?.shutdown();
   manager = undefined;
   store?.db.close();
@@ -116,33 +116,12 @@ function fixture(root = "/tmp/project") {
   return { provider, project, session, socket, sent };
 }
 
-it("does not advance transferred-history cursors when the runtime fails", async () => {
-  const { provider, project, session, socket } = fixture();
-  const previous = store!.addMessage({
-    sessionId: session.id,
-    providerId: provider.id,
-    role: "assistant",
-    content: "Last confirmed context",
-    eventType: null
-  });
+it("keeps the native thread after a provider failure without inserting text history", async () => {
+  const { project, session, socket } = fixture();
   store!.updateSession(session.id, { threadId: "existing-thread" });
-  store!.saveSessionRuntimeBinding({
-    sessionId: session.id,
-    providerId: provider.id,
-    clientType: "codex",
-    threadId: "existing-thread",
-    lastMessageId: previous.id,
-    lastMessageAt: previous.createdAt
-  });
-  const other = store!.upsertProvider({ name: "Other provider" });
-  store!.addMessage({
-    sessionId: session.id,
-    providerId: other.id,
-    role: "assistant",
-    content: "Unseen context from another provider",
-    eventType: null
-  });
-  runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+  runtimeMocks.run.mockImplementation(async (request, onEvent) => {
+    expect(request.threadId).toBe("existing-thread");
+    expect(request.message).not.toContain("provider-history");
     onEvent(bridgeEvent({ seq: 1, type: "run.failed", payload: { message: "401 Unauthorized" } }));
   });
   manager = new RunManager(store!, "/tmp/runtime");
@@ -150,7 +129,7 @@ it("does not advance transferred-history cursors when the runtime fails", async 
     { type: "turn.start", sessionId: session.id, projectId: project.id, message: "Continue" },
     socket
   );
-  expect(store!.getSessionRuntimeBinding(session.id, provider.id)?.lastMessageId).toBe(previous.id);
+  expect(store!.getSession(session.id)?.threadId).toBe("existing-thread");
 });
 
 function attachmentFixture() {
@@ -1085,8 +1064,7 @@ describe("RunManager reconnect state", () => {
     ).run("thread-locked", "goal-1", "完成缺思考换号记录表", "budget_limited", 80_000, 2_352_069);
     db.close();
     store!.updateSession(session.id, { threadId: "thread-locked" });
-    const { resolveProviderHome } = await import("@codex-omni/codex-runtime");
-    vi.mocked(resolveProviderHome).mockResolvedValueOnce(home);
+    vi.stubEnv("CODEX_OMNI_CODEX_HOME", home);
 
     let calls = 0;
     runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
@@ -1510,6 +1488,7 @@ describe("RunManager reconnect state", () => {
       socket
     );
 
+    await expect.poll(() => store!.getLatestRun(session.id)?.status).toBe("completed");
     expect(runtimeMocks.run).toHaveBeenCalled();
   });
 

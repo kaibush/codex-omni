@@ -1,18 +1,12 @@
 import { claudeRuntimeInfo } from "@codex-omni/claude-runtime";
 import { listClaudeResources } from "./claude-resources.js";
-import { CLIENTS, clientTypeSchema, claudeOptionsSchema } from "@codex-omni/protocol";
-import {
-  claudeProviderFiles,
-  providerRuntimeHome,
-  resolveClientHome,
-  claudeMcpList,
-  updateClaudeMcp
-} from "./client-provider.js";
+import { CLIENTS, clientType, clientTypeSchema, claudeOptionsSchema } from "@codex-omni/protocol";
+import { claudeProviderFiles, claudeMcpList, updateClaudeMcp } from "./client-provider.js";
+import { clientRuntimeHome, ensureClientHome } from "./client-home.js";
 import { selectSessionProvider, switchSessionProvider } from "./session-runtime.js";
 import { buildForkContext } from "./session-context.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import Fastify from "fastify";
@@ -30,7 +24,7 @@ import {
   providerInputSchema,
   runCommandSchema
 } from "@codex-omni/protocol";
-import { assertExternalCodexHome } from "@codex-omni/codex-runtime";
+import { parseCodexProviderConfig } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
 import {
   browseDirectory,
@@ -148,8 +142,7 @@ await app.register(cors, {
 await app.register(websocket);
 const auth = authenticate(store.db);
 const runtimeRoot = path.join(path.dirname(dataPath), "runtime");
-const providersRoot = path.join(runtimeRoot, "providers");
-const defaultCodexHome = process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex");
+const defaultCodexHome = clientRuntimeHome("codex", runtimeRoot);
 const httpError = (statusCode: number, message: string) =>
   Object.assign(new Error(message), { statusCode });
 const routeParam = (req: { params: unknown }, name: string) => {
@@ -163,10 +156,10 @@ const queryValue = (req: { query: unknown }, name: string) => {
   const value = z.record(z.string(), z.unknown()).parse(req.query ?? {})[name];
   return typeof value === "string" ? value : undefined;
 };
-const providerHome = (provider: ProviderRow) => resolveClientHome(provider, providersRoot);
+const providerHome = (provider: ProviderRow) =>
+  ensureClientHome(clientType(provider.kind), runtimeRoot);
 const sessionThreadGoal = async (session: {
   threadId: string | null;
-  runtimeHome?: string | null;
   providerId: string | null;
   projectId: string;
   clientType?: string;
@@ -176,7 +169,7 @@ const sessionThreadGoal = async (session: {
   const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
   if (!provider) return null;
   try {
-    return readThreadGoal(session.runtimeHome ?? (await providerHome(provider)), session.threadId);
+    return readThreadGoal(await providerHome(provider), session.threadId);
   } catch {
     return null;
   }
@@ -233,12 +226,10 @@ const publicProvider = (provider: ReturnType<typeof store.getProvider>) => {
     messageEnvVars = {};
   }
   const homeMode = normalizeProviderHomeMode(provider.homeMode);
-  const codexHomePath = homeMode === "external" ? provider.codexHomePath : null;
   return {
     id: provider.id,
     name: provider.name,
     kind: provider.kind,
-    claudeHomePath: provider.claudeHomePath ?? null,
     settingsJson: provider.settingsJson ?? null,
     mcpServersJson: provider.mcpServersJson ?? null,
     model: provider.model,
@@ -252,19 +243,7 @@ const publicProvider = (provider: ReturnType<typeof store.getProvider>) => {
     messageEnvVars,
     isDefault: Boolean(provider.isDefault),
     homeMode,
-    codexHomePath,
-    runtimeHome:
-      provider.kind === "claude-code"
-        ? homeMode === "external"
-          ? (provider.claudeHomePath ?? path.join(os.homedir(), ".claude"))
-          : path.join(providersRoot, provider.id, "claude")
-        : homeMode === "external"
-          ? (codexHomePath ?? "")
-          : path.join(providersRoot, provider.id),
-    codexHome:
-      homeMode === "external" && codexHomePath
-        ? path.resolve(codexHomePath)
-        : path.join(providersRoot, provider.id)
+    runtimeHome: clientRuntimeHome(clientType(provider.kind), runtimeRoot)
   };
 };
 const persistProvider = (provider: ProviderRow, patch: Partial<ProviderRow> = {}) =>
@@ -328,7 +307,6 @@ const providerFilesFromInput = async (
     return {
       homeMode,
       ...runtimeSettings,
-      codexHomePath: null as string | null,
       configToml: files.configToml,
       authJson: files.authJson,
       apiKey: key,
@@ -336,26 +314,16 @@ const providerFilesFromInput = async (
       baseUrl: input.baseUrl ?? current?.baseUrl ?? null
     };
   }
-  if (homeMode === "external") {
-    try {
-      const home = await assertExternalCodexHome(input.codexHomePath ?? current?.codexHomePath);
-      return {
-        homeMode,
-        ...runtimeSettings,
-        codexHomePath: home,
-        configToml: input.configToml ?? current?.configToml ?? null,
-        authJson,
-        model: input.model ?? current?.model ?? null,
-        baseUrl: input.baseUrl ?? current?.baseUrl ?? null,
-        // An external CODEX_HOME owns its auth file. A stale form value must
-        // never override that file through the SDK constructor.
-        apiKey: null
-      };
-    } catch (error) {
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-        statusCode: 400
-      });
-    }
+  if (homeMode === "native") {
+    return {
+      homeMode,
+      ...runtimeSettings,
+      configToml: null,
+      authJson: null,
+      apiKey: null,
+      baseUrl: null,
+      model: input.model ?? current?.model ?? null
+    };
   }
   const configToml = input.configToml ?? current?.configToml;
   if (!configToml?.trim()) throw httpError(400, "config.toml 为必填项");
@@ -367,10 +335,14 @@ const providerFilesFromInput = async (
       throw httpError(400, "auth.json 必须是有效的 JSON");
     }
   }
+  try {
+    parseCodexProviderConfig(configToml, authJson);
+  } catch (error) {
+    throw httpError(400, error instanceof Error ? error.message : "供应商配置无效");
+  }
   return {
     homeMode,
     ...runtimeSettings,
-    codexHomePath: null as string | null,
     configToml: setProviderStreamIdleTimeout(configToml),
     authJson,
     model: /^\s*model\s*=/.test(configToml)
@@ -481,8 +453,6 @@ app.post("/api/providers", { preHandler: auth }, async (req) => {
       envJson: JSON.stringify(input.messageEnvVars ?? {}),
       isDefault: input.isDefault ? 1 : 0,
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath,
-      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
       settingsJson: "settingsJson" in files ? files.settingsJson : null,
       mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
@@ -511,8 +481,6 @@ app.put("/api/providers/:id", { preHandler: auth }, async (req) => {
         input.messageEnvVars === undefined ? current.envJson : JSON.stringify(input.messageEnvVars),
       isDefault: (input.isDefault ?? Boolean(current.isDefault)) ? 1 : 0,
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath,
-      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
       settingsJson: "settingsJson" in files ? files.settingsJson : null,
       mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
@@ -530,7 +498,6 @@ app.get("/api/providers/:id/export", { preHandler: auth }, async (req, reply) =>
   return serializeProviderExport({
     name: provider.name,
     kind: provider.kind,
-    claudeHomePath: provider.claudeHomePath ?? null,
     settingsJson: provider.settingsJson ?? null,
     mcpServersJson: provider.mcpServersJson ?? null,
     model: provider.model,
@@ -542,8 +509,7 @@ app.get("/api/providers/:id/export", { preHandler: auth }, async (req, reply) =>
     configToml: provider.configToml,
     authJson: provider.authJson,
     messageEnvVars: published?.messageEnvVars ?? {},
-    homeMode: provider.homeMode,
-    codexHomePath: provider.codexHomePath
+    homeMode: provider.homeMode
   });
 });
 app.post("/api/providers/import", { preHandler: auth }, async (req) => {
@@ -563,8 +529,6 @@ app.post("/api/providers/import", { preHandler: auth }, async (req) => {
       authJson: files.authJson,
       envJson: JSON.stringify(input.messageEnvVars),
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath,
-      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
       settingsJson: "settingsJson" in files ? files.settingsJson : null,
       mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
@@ -577,7 +541,6 @@ app.post("/api/providers/:id/clone", { preHandler: auth }, async (req, reply) =>
     store.upsertProvider({
       name: cloneProviderName(provider.name),
       kind: provider.kind,
-      claudeHomePath: provider.claudeHomePath ?? null,
       settingsJson: provider.settingsJson ?? null,
       mcpServersJson: provider.mcpServersJson ?? null,
       model: provider.model,
@@ -590,8 +553,7 @@ app.post("/api/providers/:id/clone", { preHandler: auth }, async (req, reply) =>
       authJson: provider.authJson,
       envJson: provider.envJson,
       isDefault: 0,
-      homeMode: provider.homeMode,
-      codexHomePath: provider.codexHomePath
+      homeMode: provider.homeMode
     })
   );
 });
@@ -665,9 +627,9 @@ app.get("/api/providers/:id/models", { preHandler: auth }, async (req, reply) =>
 app.get("/api/clients", { preHandler: auth }, async () => CLIENTS);
 app.get("/api/runtime", { preHandler: auth }, async () => ({
   defaultCodexHome,
-  providersRoot,
+  clientsRoot: path.join(runtimeRoot, "clients"),
   clients: CLIENTS,
-  defaultClaudeHome: process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"),
+  defaultClaudeHome: clientRuntimeHome("claude-code", runtimeRoot),
   host: await collectHostInfo(path.dirname(dataPath)),
   claude: claudeRuntimeInfo(),
   codex: await collectCodexRuntimeInfo()
@@ -1261,7 +1223,7 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
         sessionId: session.id,
         threadId: session.threadId,
         providerId: session.providerId,
-        codexHome: session.runtimeHome ?? (await providerHome(provider))
+        codexHome: await providerHome(provider)
       });
     } catch {
       // Rollout files are optional; keep the session readable if Codex home is missing.
@@ -1395,24 +1357,16 @@ app.post("/api/sessions/bulk-delete", { preHandler: auth }, async (req) => {
     runs.cancel(id);
     const terminalSession = store.getTerminalSessionBySession(id);
     if (terminalSession) terminalChats.remove(terminalSession.id);
-    const providerId = session.providerId ?? store.getProject(session.projectId)?.providerId ?? "";
-    if (body.purgeSource && session.clientType === "codex") {
-      const addThread = (home: string | null, threadId: string | null) => {
-        if (!home || !threadId || !isCodexThreadId(threadId)) return;
-        const bucket = threads.get(home) ?? new Set<string>();
-        bucket.add(threadId);
-        threads.set(home, bucket);
-      };
-      const provider = store.getProvider(providerId);
-      addThread(
-        session.runtimeHome ?? (provider ? providerRuntimeHome(provider, providersRoot) : null),
-        session.threadId
-      );
-      for (const binding of store.listSessionRuntimeBindings(id)) {
-        const previous = store.getProvider(binding.providerId);
-        if (binding.clientType === "codex" && previous?.kind === "codex")
-          addThread(providerRuntimeHome(previous, providersRoot), binding.threadId);
-      }
+    if (
+      body.purgeSource &&
+      session.clientType === "codex" &&
+      session.threadId &&
+      isCodexThreadId(session.threadId)
+    ) {
+      const home = clientRuntimeHome("codex", runtimeRoot);
+      const bucket = threads.get(home) ?? new Set<string>();
+      bucket.add(session.threadId);
+      threads.set(home, bucket);
     }
     store.deleteSession(id);
     deleted.push(id);
@@ -1452,7 +1406,7 @@ app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
 });
 app.put("/api/sessions/:id/provider", { preHandler: auth }, async (req) => {
   const body = z.object({ providerId: z.string().min(1) }).parse(req.body);
-  return switchSessionProvider(store, routeId(req), body.providerId, providersRoot);
+  return switchSessionProvider(store, routeId(req), body.providerId);
 });
 app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
   const source = store.getSession(routeId(req));
@@ -1531,7 +1485,7 @@ app.post("/api/sessions/:id/clear-goal", { preHandler: auth }, async (req, reply
   if (!provider) return reply.code(400).send({ error: "当前会话没有可用的供应商" });
   let home: string;
   try {
-    home = session.runtimeHome ?? (await providerHome(provider));
+    home = await providerHome(provider);
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法打开 Codex 目录";
     return reply.code(400).send({ error: message });

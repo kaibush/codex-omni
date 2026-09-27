@@ -31,8 +31,6 @@ export type ProviderRow = {
   envJson: string | null;
   isDefault: number;
   homeMode: string | null;
-  codexHomePath: string | null;
-  claudeHomePath?: string | null;
   settingsJson?: string | null;
   mcpServersJson?: string | null;
   createdAt: number;
@@ -55,7 +53,6 @@ export type SessionRow = {
   kind: "chat" | "terminal-chat";
   clientType: "codex" | "claude-code";
   threadId: string | null;
-  runtimeHome: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
   providerId: string | null;
@@ -434,8 +431,6 @@ export class Store {
       this.db.exec("ALTER TABLE sessions ADD COLUMN tags_json TEXT");
     if (!sessionColumns.has("client_type"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN client_type TEXT NOT NULL DEFAULT 'codex'");
-    if (!sessionColumns.has("runtime_home"))
-      this.db.exec("ALTER TABLE sessions ADD COLUMN runtime_home TEXT");
     if (!sessionColumns.has("kind"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
     const projectColumns = new Set(
@@ -476,35 +471,16 @@ export class Store {
         (column) => column.name
       )
     );
-    for (const column of ["claude_home_path", "settings_json", "mcp_servers_json"]) {
+    for (const column of ["settings_json", "mcp_servers_json"]) {
       if (!providerColumns.has(column))
         this.db.exec(`ALTER TABLE providers ADD COLUMN ${column} TEXT`);
     }
-    this.db.exec(`CREATE TABLE IF NOT EXISTS session_runtime_bindings (
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-      client_type TEXT NOT NULL,
-      thread_id TEXT NOT NULL,
-      last_message_id TEXT,
-      last_message_at INTEGER,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY(session_id,provider_id)
-    );
-    INSERT OR IGNORE INTO session_runtime_bindings(session_id,provider_id,client_type,thread_id,last_message_id,last_message_at,updated_at)
-      SELECT s.id,s.provider_id,s.client_type,s.thread_id,
-        (SELECT id FROM messages WHERE session_id=s.id AND role IN ('user','assistant') ORDER BY rowid DESC LIMIT 1),
-        (SELECT created_at FROM messages WHERE session_id=s.id AND role IN ('user','assistant') ORDER BY rowid DESC LIMIT 1),
-        s.updated_at
-      FROM sessions s WHERE s.thread_id IS NOT NULL AND s.provider_id IS NOT NULL;
-    `);
     if (!providerColumns.has("models_json"))
       this.db.exec("ALTER TABLE providers ADD COLUMN models_json TEXT");
     if (!providerColumns.has("env_json"))
       this.db.exec("ALTER TABLE providers ADD COLUMN env_json TEXT");
     if (!providerColumns.has("home_mode"))
       this.db.exec("ALTER TABLE providers ADD COLUMN home_mode TEXT");
-    if (!providerColumns.has("codex_home_path"))
-      this.db.exec("ALTER TABLE providers ADD COLUMN codex_home_path TEXT");
     this.db.transaction(() => {
       if (!providerColumns.has("context_window"))
         this.db.exec("ALTER TABLE providers ADD COLUMN context_window INTEGER");
@@ -526,7 +502,7 @@ export class Store {
     this.db.transaction(() => {
       const providers = this.db
         .prepare(
-          "SELECT id,config_toml as configToml FROM providers WHERE COALESCE(home_mode,'managed') != 'external' AND config_toml IS NOT NULL"
+          "SELECT id,config_toml as configToml FROM providers WHERE COALESCE(home_mode,'managed') != 'native' AND config_toml IS NOT NULL"
         )
         .all() as Array<{ id: string; configToml: string }>;
       const update = this.db.prepare("UPDATE providers SET config_toml=? WHERE id=?");
@@ -808,14 +784,14 @@ export class Store {
   listProviders(): ProviderRow[] {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,claude_home_path as claudeHomePath,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
       )
       .all() as ProviderRow[];
   }
   getProvider(id: string) {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,claude_home_path as claudeHomePath,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
       )
       .get(id) as ProviderRow | undefined;
   }
@@ -831,15 +807,11 @@ export class Store {
       }
       this.db
         .prepare(
-          `INSERT INTO providers(id,name,kind,model,context_window,auto_compact_token_limit,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,codex_home_path,claude_home_path,settings_json,mcp_servers_json,created_at,updated_at) VALUES(@id,@name,@kind,@model,@contextWindow,@autoCompactTokenLimit,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@codexHomePath,@claudeHomePath,@settingsJson,@mcpServersJson,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,context_window=@contextWindow,auto_compact_token_limit=@autoCompactTokenLimit,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,codex_home_path=@codexHomePath,claude_home_path=@claudeHomePath,settings_json=@settingsJson,mcp_servers_json=@mcpServersJson,updated_at=@now`
+          `INSERT INTO providers(id,name,kind,model,context_window,auto_compact_token_limit,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,settings_json,mcp_servers_json,created_at,updated_at) VALUES(@id,@name,@kind,@model,@contextWindow,@autoCompactTokenLimit,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@settingsJson,@mcpServersJson,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,context_window=@contextWindow,auto_compact_token_limit=@autoCompactTokenLimit,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,settings_json=@settingsJson,mcp_servers_json=@mcpServersJson,updated_at=@now`
         )
         .run({
           id,
           name: input.name,
-          claudeHomePath:
-            input.claudeHomePath === undefined
-              ? (current?.claudeHomePath ?? null)
-              : input.claudeHomePath,
           settingsJson:
             input.settingsJson === undefined ? (current?.settingsJson ?? null) : input.settingsJson,
           mcpServersJson:
@@ -864,7 +836,6 @@ export class Store {
           envJson: input.envJson ?? null,
           isDefault: input.isDefault ? 1 : 0,
           homeMode: input.homeMode ?? "managed",
-          codexHomePath: input.codexHomePath ?? null,
           now
         });
     });
@@ -995,7 +966,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,runtime_home as runtimeHome,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -1026,7 +997,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.runtime_home as runtimeHome,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -1143,7 +1114,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,runtime_home as runtimeHome,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -1162,7 +1133,6 @@ export class Store {
     }
     return {
       ...session,
-      runtimeHome: session.runtimeHome ?? null,
       tagsJson: tagsJson ?? null,
       tags,
       color: session.color ?? null,
@@ -1207,59 +1177,6 @@ export class Store {
         now
       );
     return this.getSession(id)!;
-  }
-  listSessionRuntimeBindings(sessionId: string) {
-    const providers = this.db
-      .prepare("SELECT provider_id FROM session_runtime_bindings WHERE session_id=?")
-      .all(sessionId) as Array<{ provider_id: string }>;
-    return providers.map((provider) =>
-      this.getSessionRuntimeBinding(sessionId, provider.provider_id)!
-    );
-  }
-  getSessionRuntimeBinding(sessionId: string, providerId: string) {
-    return this.db
-      .prepare(
-        `SELECT session_id as sessionId,provider_id as providerId,client_type as clientType,thread_id as threadId,last_message_id as lastMessageId,last_message_at as lastMessageAt
-      FROM session_runtime_bindings WHERE session_id=? AND provider_id=?`
-      )
-      .get(sessionId, providerId) as
-      | {
-          sessionId: string;
-          providerId: string;
-          clientType: "codex" | "claude-code";
-          threadId: string;
-          lastMessageId: string | null;
-          lastMessageAt: number | null;
-        }
-      | undefined;
-  }
-  saveSessionRuntimeBinding(input: {
-    sessionId: string;
-    providerId: string;
-    clientType: "codex" | "claude-code";
-    threadId: string;
-    lastMessageId?: string | null;
-    lastMessageAt?: number | null;
-  }) {
-    const previous = this.getSessionRuntimeBinding(input.sessionId, input.providerId);
-    this.db
-      .prepare(
-        `INSERT INTO session_runtime_bindings(session_id,provider_id,client_type,thread_id,last_message_id,last_message_at,updated_at)
-      VALUES(@sessionId,@providerId,@clientType,@threadId,@lastMessageId,@lastMessageAt,@now)
-      ON CONFLICT(session_id,provider_id) DO UPDATE SET client_type=excluded.client_type,thread_id=excluded.thread_id,last_message_id=excluded.last_message_id,last_message_at=excluded.last_message_at,updated_at=excluded.updated_at`
-      )
-      .run({
-        ...input,
-        lastMessageId:
-          input.lastMessageId === undefined
-            ? (previous?.lastMessageId ?? null)
-            : input.lastMessageId,
-        lastMessageAt:
-          input.lastMessageAt === undefined
-            ? (previous?.lastMessageAt ?? null)
-            : input.lastMessageAt,
-        now: Date.now()
-      });
   }
   conversationSince(
     sessionId: string,
@@ -1398,7 +1315,6 @@ export class Store {
       Pick<
         SessionRow,
         | "threadId"
-        | "runtimeHome"
         | "status"
         | "providerId"
         | "title"

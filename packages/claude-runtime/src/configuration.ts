@@ -1,29 +1,9 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { McpServerConfig, Options } from "@anthropic-ai/claude-agent-sdk";
 import type { BridgeRequest } from "@codex-omni/protocol";
 import { z } from "zod";
-
-export async function resolveClaudeHome(input: {
-  providersRoot: string;
-  providerId: string;
-  homeMode?: string | null;
-  claudeHomePath?: string | null;
-}) {
-  if (input.homeMode === "external") {
-    const selected =
-      input.claudeHomePath?.trim() ||
-      process.env.CLAUDE_CONFIG_DIR ||
-      path.join(os.homedir(), ".claude");
-    const home = await realpath(selected);
-    if (!(await stat(home)).isDirectory()) throw new Error("Claude Code 配置路径必须是目录");
-    return home;
-  }
-  const home = path.join(input.providersRoot, input.providerId, "claude");
-  await mkdir(home, { recursive: true, mode: 0o700 });
-  return home;
-}
 
 export function parseClaudeSettings(value?: string | null): NonNullable<Options["settings"]> {
   const parsed: unknown = value?.trim() ? JSON.parse(value) : {};
@@ -62,41 +42,87 @@ export function parseClaudeMcpServers(value?: string | null): Record<string, Mcp
   >;
 }
 
+const ROUTING_KEYS = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+  "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"
+];
+
+function requestEnvironment(request: BridgeRequest) {
+  const settings = parseClaudeSettings(request.settingsJson) as { env?: Record<string, string> };
+  const env: Record<string, string> = {
+    ...(request.homeMode !== "native"
+      ? Object.fromEntries(ROUTING_KEYS.map((key) => [key, ""]))
+      : {}),
+    ...settings.env,
+    ...request.messageEnvVars
+  };
+  delete env.HOME;
+  delete env.CODEX_HOME;
+  delete env.CLAUDECODE;
+  if (request.apiKey) {
+    env.ANTHROPIC_API_KEY = request.apiKey;
+    env.ANTHROPIC_AUTH_TOKEN = "";
+    env.CLAUDE_CODE_OAUTH_TOKEN = "";
+  }
+  if (request.baseUrl)
+    env.ANTHROPIC_BASE_URL = request.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  env.CLAUDE_CONFIG_DIR = request.runtimeHome;
+  return env;
+}
+
 export function claudeEnvironment(
   request: BridgeRequest,
   inherited: NodeJS.ProcessEnv = process.env
 ) {
   const env: NodeJS.ProcessEnv = { ...inherited };
-  // Managed providers own their credentials and model mapping. Never inherit a
-  // different provider's login, proxy URL, model aliases, or cloud backend.
   for (const key of Object.keys(env)) {
     if (
       key === "CLAUDECODE" ||
       key === "CLAUDE_CODE_ENTRYPOINT" ||
       key.startsWith("CODEX_") ||
-      (request.homeMode !== "external" &&
-        (key.startsWith("ANTHROPIC_") ||
-          key.startsWith("CLAUDE_CODE_OAUTH") ||
-          key.startsWith("CLAUDE_CODE_USE_")))
-    ) {
+      key.startsWith("ANTHROPIC_") ||
+      key.startsWith("CLAUDE_CODE_OAUTH") ||
+      key.startsWith("CLAUDE_CODE_USE_") ||
+      ROUTING_KEYS.includes(key)
+    )
       delete env[key];
-    }
   }
-  const settings = parseClaudeSettings(request.settingsJson) as { env?: Record<string, string> };
-  Object.assign(env, settings.env ?? {}, request.messageEnvVars ?? {});
-  if (request.apiKey) {
-    env.ANTHROPIC_API_KEY = request.apiKey;
-    delete env.ANTHROPIC_AUTH_TOKEN;
-    delete env.CLAUDE_CODE_OAUTH_TOKEN;
-  }
-  if (request.baseUrl)
-    env.ANTHROPIC_BASE_URL = request.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
-  env.CLAUDE_CONFIG_DIR = request.runtimeHome ?? request.codexHome;
+  Object.assign(env, requestEnvironment(request));
   env.CLAUDE_AGENT_SDK_CLIENT_APP = "codex-omni/0.1.0";
-  // This worker is an independent SDK host even when the server was started
-  // from an interactive coding session.
-  delete env.CLAUDECODE;
   return env;
+}
+
+/** The SDK accepts a settings filename. Keep credentials out of CLI argv and
+ * never overwrite the shared native settings.json when selecting a provider.
+ */
+export function stageClaudeSettings(settings: Options["settings"]) {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "codex-omni-claude-"));
+  const cleanup = () => {
+    process.removeListener("exit", cleanup);
+    rmSync(directory, { recursive: true, force: true });
+  };
+  const file = path.join(directory, "settings.json");
+  try {
+    writeFileSync(file, JSON.stringify(settings ?? {}), { mode: 0o600 });
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+  process.once("exit", cleanup);
+  return { file, cleanup };
 }
 
 export function claudeQueryOptions(request: BridgeRequest): Options {
@@ -125,23 +151,13 @@ export function claudeQueryOptions(request: BridgeRequest): Options {
     settingSources: ["user", "project", "local"],
     settings: {
       ...(settings as object),
-      env: {
-        ...(settings as { env?: Record<string, string> }).env,
-        ...request.messageEnvVars,
-        ...(request.apiKey
-          ? {
-              ANTHROPIC_API_KEY: request.apiKey,
-              ANTHROPIC_AUTH_TOKEN: "",
-              CLAUDE_CODE_OAUTH_TOKEN: ""
-            }
-          : {}),
-        ...(request.baseUrl
-          ? { ANTHROPIC_BASE_URL: request.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "") }
-          : {}),
-        // CLI settings env is applied after the inherited process env. Keep
-        // both layers on the native home recorded by the server.
-        CLAUDE_CONFIG_DIR: request.runtimeHome ?? request.codexHome
-      }
+      ...(request.homeMode !== "native"
+        ? {
+            apiKeyHelper: "",
+            model: request.model || "default"
+          }
+        : {}),
+      env: requestEnvironment(request)
     },
     mcpServers,
     includePartialMessages: true,

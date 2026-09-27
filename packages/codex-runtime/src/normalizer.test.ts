@@ -7,7 +7,7 @@ const req = {
   sessionId: "s",
   cwd: "/tmp",
   runtimeKey: "k",
-  codexHome: "/tmp/home",
+  runtimeHome: "/tmp/home",
   message: "hi",
   sandbox: "workspace-write" as const,
   approvalPolicy: "never" as const,

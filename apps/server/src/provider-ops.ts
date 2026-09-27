@@ -29,8 +29,6 @@ export type ProviderExport = {
   authJson: string | null;
   messageEnvVars: Record<string, string>;
   homeMode: ProviderHomeMode;
-  codexHomePath: string | null;
-  claudeHomePath?: string | null;
   settingsJson?: string | null;
   mcpServersJson?: string | null;
 };
@@ -48,8 +46,6 @@ export function serializeProviderExport(input: {
   authJson?: string | null;
   messageEnvVars?: Record<string, string>;
   homeMode?: string | null;
-  codexHomePath?: string | null;
-  claudeHomePath?: string | null;
   settingsJson?: string | null;
   mcpServersJson?: string | null;
 }): ProviderExport {
@@ -59,7 +55,6 @@ export function serializeProviderExport(input: {
     kind: clientTypeSchema.parse(input.kind || "codex"),
     ...(input.kind === "claude-code"
       ? {
-          claudeHomePath: input.claudeHomePath ?? null,
           settingsJson: input.settingsJson ?? null,
           mcpServersJson: input.mcpServersJson ?? null
         }
@@ -73,8 +68,7 @@ export function serializeProviderExport(input: {
     configToml: input.configToml ?? null,
     authJson: input.authJson ?? null,
     messageEnvVars: input.messageEnvVars ?? {},
-    homeMode,
-    codexHomePath: homeMode === "external" ? (input.codexHomePath ?? null) : null
+    homeMode
   };
 }
 
@@ -92,18 +86,13 @@ export function parseProviderImport(value: unknown): ProviderExport {
   const configToml = typeof record.configToml === "string" ? record.configToml : "";
   const authJson = typeof record.authJson === "string" ? record.authJson : "";
   const apiKey = typeof record.apiKey === "string" && record.apiKey.trim() ? record.apiKey : null;
-  const codexHomePath =
-    typeof record.codexHomePath === "string" && record.codexHomePath.trim()
-      ? record.codexHomePath.trim()
-      : null;
   if (kind === "claude-code") {
-    // Claude native settings and external login are validated by its adapter.
+    // Claude settings and native login are validated by its adapter.
   } else if (homeMode === "api-key") {
     if (!apiKey && !authJson.trim())
       throw Object.assign(new Error("导入配置缺少 API Key"), { statusCode: 400 });
-  } else if (homeMode === "external") {
-    if (!codexHomePath)
-      throw Object.assign(new Error("导入配置缺少 CODEX_HOME 路径"), { statusCode: 400 });
+  } else if (homeMode === "native") {
+    // Uses the fixed client HOME; it never supplies a provider-specific path.
   } else {
     if (!configToml.trim())
       throw Object.assign(new Error("导入配置缺少 config.toml"), { statusCode: 400 });
@@ -127,7 +116,6 @@ export function parseProviderImport(value: unknown): ProviderExport {
     kind,
     ...(kind === "claude-code"
       ? {
-          claudeHomePath: typeof record.claudeHomePath === "string" ? record.claudeHomePath : null,
           settingsJson: typeof record.settingsJson === "string" ? record.settingsJson : null,
           mcpServersJson: typeof record.mcpServersJson === "string" ? record.mcpServersJson : null
         }
@@ -141,8 +129,7 @@ export function parseProviderImport(value: unknown): ProviderExport {
     configToml,
     authJson,
     messageEnvVars,
-    homeMode,
-    codexHomePath: homeMode === "external" ? codexHomePath : null
+    homeMode
   };
 }
 

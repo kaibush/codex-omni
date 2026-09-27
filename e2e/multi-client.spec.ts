@@ -4,10 +4,11 @@ import { apiJson, createChatSession, ensureWorkspace } from "./helpers";
 async function fixture(page: Page) {
   await ensureWorkspace(page);
   const created = await createChatSession(page);
+  const codex = { ...created.provider, name: `Codex ${created.session.id}` };
   await apiJson(page.request, `/api/providers/${created.provider.id}`, {
     method: "PUT",
     csrf: created.csrf,
-    data: { model: "fake-model", models: ["fake-model"] }
+    data: { name: codex.name, model: "fake-model", models: ["fake-model"] }
   });
   const claude = await apiJson<{ id: string; name: string }>(page.request, "/api/providers", {
     method: "POST",
@@ -51,8 +52,47 @@ async function fixture(page: Page) {
   });
   await page.goto(`/projects/${created.project.id}/sessions/${created.session.id}`);
   await expect(page.getByRole("combobox", { name: "客户端", exact: true })).toBeVisible();
-  return { ...created, claude, another, codexPeer };
+  return { ...created, codex, claude, another, codexPeer };
 }
+
+test("configures native providers against fixed client homes", async ({ page }) => {
+  await fixture(page);
+  await page
+    .getByRole("button", { name: /^供应商(?:\s*\d+)?$/ })
+    .first()
+    .click();
+  const providersDialog = page.getByRole("dialog", { name: "供应商管理", exact: true });
+  const runtime = await apiJson<{ defaultCodexHome: string; defaultClaudeHome: string }>(
+    page.request,
+    "/api/runtime"
+  );
+  for (const kind of ["codex", "claude-code"] as const) {
+    await providersDialog.getByRole("button", { name: "新增供应商", exact: true }).click();
+    const form = page.getByRole("dialog", { name: "新增供应商", exact: true });
+    await form.getByRole("combobox", { name: "客户端", exact: true }).selectOption(kind);
+    if (kind === "claude-code") {
+      await form.getByRole("button", { name: "运行设置 / 环境变量", exact: true }).click();
+      await expect(form.getByLabel("config.toml", { exact: false })).toHaveCount(0);
+      await expect(form.getByText("Claude 原生设置、Hooks 与 MCP", { exact: true })).toBeVisible();
+    }
+    await form.getByRole("button", { name: "客户端原生配置", exact: true }).click();
+    await expect(form.getByLabel("API Key", { exact: false })).toBeDisabled();
+    await expect(form.getByLabel("Base URL", { exact: true })).toBeDisabled();
+    await expect(form.getByPlaceholder("/home/you/.codex")).toHaveCount(0);
+    const name = `Native ${kind} ${Date.now()}`;
+    await form.getByLabel("供应商名称", { exact: false }).fill(name);
+    await form.getByRole("button", { name: "保存供应商", exact: true }).click();
+    await expect(form).not.toBeVisible();
+    const saved = await apiJson<Array<{ name: string; homeMode: string; runtimeHome: string }>>(
+      page.request,
+      "/api/providers"
+    );
+    expect(saved.find((provider) => provider.name === name)).toMatchObject({
+      homeMode: "native",
+      runtimeHome: kind === "codex" ? runtime.defaultCodexHome : runtime.defaultClaudeHome
+    });
+  }
+});
 
 for (const kind of ["codex", "claude-code"] as const) {
   test(`switches providers within one ${kind} conversation and offers a separate continuation`, async ({
@@ -83,7 +123,7 @@ for (const kind of ["codex", "claude-code"] as const) {
     await expect(client).toBeDisabled();
     // A blank conversation may use the last composer preference. Explicitly
     // select A so that the later action really switches to another provider.
-    const sourceName = kind === "codex" ? "Fake Provider" : created.claude.name;
+    const sourceName = kind === "codex" ? created.codex.name : created.claude.name;
     await provider.click();
     await page.getByRole("option", { name: sourceName, exact: true }).click();
     await expect(provider).toHaveText(sourceName);

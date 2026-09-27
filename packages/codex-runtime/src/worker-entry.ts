@@ -7,7 +7,7 @@ import { buildCodexRunInput } from "./codex-input.js";
 import { gitMetadataWritableRoots } from "./git-metadata.js";
 import { resolveCodexModelRuntimeConfig } from "./model-runtime-config.js";
 import { createNormalizer } from "./normalizer.js";
-import { workerEnvironment } from "./provider-home.js";
+import { codexLaunchOptions } from "./configuration.js";
 import {
   consumeCodexEventStream,
   createMappedStreamState,
@@ -86,7 +86,7 @@ const requestApproval = (item: { id: string; command: string }) => {
   });
 };
 send(normalizer.initial());
-const collabTailer = createCollabRolloutTailer(request.codexHome);
+const collabTailer = createCollabRolloutTailer(request.runtimeHome);
 if (request.threadId) collabTailer.setThreadId(request.threadId, { fromEnd: true });
 const flushCollab = () => {
   for (const event of collabTailer.flush()) send(normalizer.toolEvent(event));
@@ -96,22 +96,20 @@ collabTimer.unref();
 const streamState = createMappedStreamState();
 try {
   const modelRuntime = resolveCodexModelRuntimeConfig(request);
+  const launch = codexLaunchOptions(request);
   const codex = new Codex({
-    ...(request.baseUrl ? { baseUrl: request.baseUrl } : {}),
-    ...(request.apiKey ? { apiKey: request.apiKey } : {}),
-    env: workerEnvironment(request),
+    ...launch,
     config: {
-      features: { multi_agent: true },
-      // Existing API-key providers may have been created without this flag.
-      // Custom providers otherwise ignore auth.json and the SDK API key.
-      ...(request.homeMode === "api-key" && request.baseUrl
-        ? { model_providers: { custom: { requires_openai_auth: true } } }
-        : {}),
-      ...(modelRuntime.contextWindow ? { model_context_window: modelRuntime.contextWindow } : {}),
+      features: { multi_agent: true }
+    },
+    configOverrides: [
+      ...(launch.configOverrides ?? []),
+      "features.multi_agent=true",
+      ...(modelRuntime.contextWindow ? [`model_context_window=${modelRuntime.contextWindow}`] : []),
       ...(modelRuntime.autoCompactTokenLimit
-        ? { model_auto_compact_token_limit: modelRuntime.autoCompactTokenLimit }
-        : {})
-    }
+        ? [`model_auto_compact_token_limit=${modelRuntime.autoCompactTokenLimit}`]
+        : [])
+    ]
   });
   const options = {
     workingDirectory: request.cwd,

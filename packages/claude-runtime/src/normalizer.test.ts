@@ -9,7 +9,7 @@ const request = bridgeRequestSchema.parse({
   sessionId: "session",
   clientType: "claude-code",
   cwd: "/tmp",
-  codexHome: "/tmp/claude",
+  runtimeHome: "/tmp/claude",
   runtimeKey: "key",
   message: "hello",
   sandbox: "workspace-write",

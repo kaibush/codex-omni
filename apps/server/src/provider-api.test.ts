@@ -61,7 +61,8 @@ describe("provider runtime settings HTTP contract", () => {
           CODEX_OMNI_DATABASE: database,
           CODEX_OMNI_FAKE_RUNTIME: "1",
           CODEX_OMNI_INSTANCE: "provider-api-test",
-          CODEX_HOME: path.join(dir, "home")
+          CODEX_OMNI_CODEX_HOME: "",
+          CODEX_OMNI_CLAUDE_HOME: ""
         }
       }
     );
@@ -221,6 +222,29 @@ describe("provider runtime settings HTTP contract", () => {
       isDefault: true
     });
     const claudeId = String(claude.body.id);
+    expect(claude.body.runtimeHome).toBe(path.join(dir!, "runtime", "clients", "claude-code"));
+    for (const kind of ["codex", "claude-code"]) {
+      const native = await call("/api/providers", "POST", {
+        name: `${kind} native`,
+        kind,
+        homeMode: "native"
+      });
+      expect(native.response.status).toBe(200);
+      expect(native.body).toMatchObject({
+        homeMode: "native",
+        apiKey: null,
+        runtimeHome: path.join(dir!, "runtime", "clients", kind)
+      });
+      expect(
+        (
+          await call("/api/providers", "POST", {
+            name: "Retired mode",
+            kind,
+            homeMode: "external"
+          })
+        ).response.status
+      ).toBe(400);
+    }
     const connection = await call(`/api/providers/${claudeId}/test`, "POST", {});
     expect(connection.body).toMatchObject({
       ok: true,
@@ -374,22 +398,19 @@ describe("provider runtime settings HTTP contract", () => {
       "# Claude rules"
     );
     const threadId = randomUUID();
-    const nativeHomes = [id, String(cloned.body.id)].map((providerId) =>
-      path.join(dir!, "runtime", "providers", providerId)
+    const nativeFile = path.join(
+      dir!,
+      "runtime",
+      "clients",
+      "codex",
+      "sessions",
+      `rollout-fixture-${threadId}.jsonl`
     );
-    const nativeFiles: string[] = [];
-    for (const home of nativeHomes) {
-      const file = path.join(home, "sessions", `rollout-fixture-${threadId}.jsonl`);
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, "native-session-fixture");
-      nativeFiles.push(file);
-    }
+    await mkdir(path.dirname(nativeFile), { recursive: true });
+    await writeFile(nativeFile, "native-session-fixture");
     const seed = new Store(database);
     try {
-      // Selected provider B, but A still owns the latest native history.
-      seed.updateSession(sessionId, { threadId, runtimeHome: nativeHomes[0]! });
-      for (const providerId of [id, String(cloned.body.id)])
-        seed.saveSessionRuntimeBinding({ sessionId, providerId, clientType: "codex", threadId });
+      seed.updateSession(sessionId, { threadId });
     } finally {
       seed.db.close();
     }
@@ -398,9 +419,8 @@ describe("provider runtime settings HTTP contract", () => {
       purgeSource: true
     });
     expect(purged.response.status).toBe(200);
-    expect(purged.body.purgedFiles).toBe(2);
-    for (const file of nativeFiles)
-      await expect(readFile(file)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(purged.body.purgedFiles).toBe(1);
+    await expect(readFile(nativeFile)).rejects.toMatchObject({ code: "ENOENT" });
     await stopServer();
     const store = new Store(database);
     try {

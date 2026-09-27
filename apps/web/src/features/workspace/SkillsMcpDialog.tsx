@@ -102,7 +102,7 @@ export function SkillsMcpDialog({
           {(skills.data?.project.length ?? 0) + (skills.data?.provider.length ?? 0) === 0 ? (
             <p className="text-xs text-muted-foreground">
               未发现 SKILL.md。Codex 使用 .codex/skills，Claude Code 使用
-              .claude/skills；供应商配置目录下的 skills 也会加载。
+              .claude/skills；客户端固定目录下的 skills 也会加载。
             </p>
           ) : null}
         </section>

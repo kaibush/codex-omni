@@ -1,7 +1,6 @@
 import type { Store } from "@codex-omni/db";
 import { clientName, clientType, type ClientType } from "@codex-omni/protocol";
 import { buildForkContext } from "./session-context.js";
-import { providerRuntimeHome } from "./client-provider.js";
 
 const fail = (message: string, statusCode = 400): never => {
   throw Object.assign(new Error(message), { statusCode });
@@ -27,26 +26,7 @@ export function selectSessionProvider(
   return { clientType: kind, providerId: provider?.id ?? null };
 }
 
-export function saveRuntimeCursor(store: Store, sessionId: string) {
-  const session = store.getSession(sessionId);
-  if (!session?.providerId || !session.threadId) return;
-  const latest = store.conversationSince(sessionId, undefined, 1)[0];
-  store.saveSessionRuntimeBinding({
-    sessionId,
-    providerId: session.providerId,
-    clientType: session.clientType,
-    threadId: session.threadId,
-    lastMessageId: latest?.id ?? null,
-    lastMessageAt: latest?.createdAt ?? null
-  });
-}
-
-export function switchSessionProvider(
-  store: Store,
-  sessionId: string,
-  providerId: string,
-  providersRoot: string
-) {
+export function switchSessionProvider(store: Store, sessionId: string, providerId: string) {
   const session = store.getSession(sessionId);
   if (!session) return fail("Session not found", 404);
   if (session.kind !== "chat") return fail("终端会话不能切换 SDK 供应商");
@@ -59,22 +39,7 @@ export function switchSessionProvider(
     return fail("请等待当前任务结束后切换供应商", 409);
   if (store.listQueuedTurns(sessionId).length)
     return fail("请先处理或移除待发送队列后切换供应商", 409);
-  if (
-    session.providerId &&
-    session.threadId &&
-    !store.getSessionRuntimeBinding(sessionId, session.providerId)
-  )
-    saveRuntimeCursor(store, sessionId);
-  let runtimeHome = session.runtimeHome;
-  if (session.threadId && !runtimeHome) {
-    const previous = session.providerId ? store.getProvider(session.providerId) : undefined;
-    if (!previous) return fail("无法定位原生会话目录，请选择新建续接对话", 409);
-    runtimeHome = providerRuntimeHome(previous, providersRoot);
-  }
-  const updated = store.updateSession(sessionId, {
-    providerId,
-    runtimeHome
-  });
+  const updated = store.updateSession(sessionId, { providerId });
   if (store.hasMessageRole(sessionId, "user"))
     store.addMessage({
       sessionId,

@@ -38,7 +38,7 @@ describe("provider context migration", () => {
       expect(removeLegacyGeneratedContextDefaults(edited)).toBe(edited);
   });
 
-  it("migrates only old API-key templates once while preserving manual/external homes", () => {
+  it("migrates only old API-key templates once while preserving manual/native homes", () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "omni-provider-migration-"));
     const file = path.join(dir, "store.db");
     store = new Store(file);
@@ -52,9 +52,9 @@ describe("provider context migration", () => {
       homeMode: "managed",
       configToml: legacy
     });
-    const external = store.upsertProvider({
-      name: "External",
-      homeMode: "external",
+    const native = store.upsertProvider({
+      name: "Native",
+      homeMode: "native",
       configToml: legacy
     });
     store.db.exec(
@@ -66,7 +66,7 @@ describe("provider context migration", () => {
     expect(store.getProvider(apiKey.id)?.configToml).toContain('wire_api = "responses"');
     expect(store.getProvider(apiKey.id)?.contextWindow).toBeNull();
     expect(store.getProvider(manual.id)?.configToml).toContain("stream_idle_timeout_ms = 600000");
-    expect(store.getProvider(external.id)?.configToml).toBe(legacy);
+    expect(store.getProvider(native.id)?.configToml).toBe(legacy);
     store.upsertProvider({
       ...store.getProvider(apiKey.id)!,
       configToml: setProviderStreamIdleTimeout(legacy),
@@ -99,7 +99,7 @@ describe("provider stream idle timeout", () => {
     );
   });
 
-  it("migrates managed and API-key homes but preserves external homes", () => {
+  it("migrates managed and API-key homes but preserves native homes", () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "omni-provider-timeout-"));
     const file = path.join(dir, "store.db");
     store = new Store(file);
@@ -115,15 +115,15 @@ describe("provider stream idle timeout", () => {
       homeMode: "api-key",
       configToml
     });
-    const external = store.upsertProvider({
-      name: "External",
-      homeMode: "external",
+    const native = store.upsertProvider({
+      name: "Native",
+      homeMode: "native",
       configToml
     });
     store.db.close();
     store = new Store(file);
     expect(store.getProvider(managed.id)?.configToml).toContain("stream_idle_timeout_ms = 600000");
     expect(store.getProvider(apiKey.id)?.configToml).toContain("stream_idle_timeout_ms = 600000");
-    expect(store.getProvider(external.id)?.configToml).toBe(configToml);
+    expect(store.getProvider(native.id)?.configToml).toBe(configToml);
   });
 });

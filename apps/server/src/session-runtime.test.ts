@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Store } from "@codex-omni/db";
 import {
   runtimeHistoryContext,
-  saveRuntimeCursor,
   selectSessionProvider,
   switchSessionProvider
 } from "./session-runtime.js";
@@ -24,7 +23,7 @@ function fixture() {
     providerId: codex.id
   });
   const session = store.createSession({ projectId: project.id, providerId: codex.id });
-  const switchTo = (id: string) => switchSessionProvider(store, session.id, id, "/tmp/providers");
+  const switchTo = (id: string) => switchSessionProvider(store, session.id, id);
   return { store, codex, claude, other, project, session, switchTo };
 }
 
@@ -48,8 +47,10 @@ describe("sessions with a fixed client", () => {
     expect(store.getProvider(claude.id)?.isDefault).toBe(1);
   });
 
-  it("keeps the latest native thread and its home without injecting text snapshots", () => {
+  it("switches only this session's provider while preserving its native thread", () => {
     const { store, codex, other, session, project, switchTo } = fixture();
+    const second = store.createSession({ projectId: project.id, providerId: codex.id });
+    store.updateSession(session.id, { threadId: "native-thread" });
     store.addMessage({
       sessionId: session.id,
       role: "user",
@@ -57,53 +58,17 @@ describe("sessions with a fixed client", () => {
       providerId: codex.id,
       eventType: null
     });
-    store.updateSession(session.id, { threadId: "native-thread", runtimeHome: "/tmp/home-a" });
-    saveRuntimeCursor(store, session.id);
-    // A stale binding must not replace the latest native thread.
-    store.saveSessionRuntimeBinding({
-      sessionId: session.id,
-      providerId: other.id,
-      clientType: "codex",
-      threadId: "stale-thread"
-    });
     expect(switchTo(other.id)).toMatchObject({
       id: session.id,
       clientType: "codex",
       providerId: other.id,
-      threadId: "native-thread",
-      runtimeHome: "/tmp/home-a"
+      threadId: "native-thread"
     });
     expect(runtimeHistoryContext(store, session.id, other.id)).toBeNull();
-    // Several switches before a run still use the authoritative home.
-    expect(switchTo(codex.id).runtimeHome).toBe("/tmp/home-a");
-    switchTo(other.id);
-    store.updateSession(session.id, { runtimeHome: "/tmp/home-c" });
-    store.addMessage({
-      sessionId: session.id,
-      role: "assistant",
-      content: "Tests pass",
-      providerId: other.id,
-      eventType: null
-    });
-    saveRuntimeCursor(store, session.id);
-    expect(switchTo(codex.id)).toMatchObject({
-      threadId: "native-thread",
-      runtimeHome: "/tmp/home-c"
-    });
-    expect(runtimeHistoryContext(store, session.id, codex.id)).toBeNull();
-    expect(store.listSessions(project.id)).toHaveLength(1);
-    expect(store.conversationSince(session.id)).toHaveLength(2);
-  });
-
-  it("records the origin for legacy isolated homes before switching", () => {
-    const { store, codex, other, session, switchTo } = fixture();
-    store.updateSession(session.id, { threadId: "legacy-thread" });
-    expect(switchTo(other.id)).toMatchObject({
-      threadId: "legacy-thread",
-      runtimeHome: "/tmp/providers/" + codex.id
-    });
-    store.updateSession(session.id, { runtimeHome: "/custom/native-home" });
-    expect(switchTo(codex.id).runtimeHome).toBe("/custom/native-home");
+    expect(switchTo(codex.id).threadId).toBe("native-thread");
+    expect(store.getSession(second.id)?.providerId).toBe(codex.id);
+    expect(store.listSessions(project.id)).toHaveLength(2);
+    expect(store.conversationSince(session.id)).toHaveLength(1);
   });
 
   it("rejects cross-client switches and continuations without changing sessions or history", () => {
@@ -153,13 +118,12 @@ describe("sessions with a fixed client", () => {
       eventType: null
     });
     store.updateSession(source.id, { threadId: "claude-original" });
-    expect(switchSessionProvider(store, source.id, another.id, "/tmp/providers")).toMatchObject({
+    expect(switchSessionProvider(store, source.id, another.id)).toMatchObject({
       clientType: "claude-code",
-      threadId: "claude-original",
-      runtimeHome: "/tmp/providers/" + claude.id + "/claude"
+      threadId: "claude-original"
     });
     const fork = store.forkSession(source.id)!;
-    expect(fork).toMatchObject({ clientType: "claude-code", threadId: null, runtimeHome: null });
+    expect(fork).toMatchObject({ clientType: "claude-code", threadId: null });
     expect(runtimeHistoryContext(store, fork.id, another.id)).toContain("Review");
   });
 });

@@ -104,7 +104,7 @@ export function WorkspaceComposer({
   providers,
   connection,
   reconnectAttempt,
-  runtimeCodexHome,
+  runtimeClientHome,
   workspaceSettings,
   approvalNotice,
   pendingApprovalsCount,
@@ -167,7 +167,7 @@ export function WorkspaceComposer({
   providers: Provider[] | undefined;
   connection: ConnectionState;
   reconnectAttempt: number;
-  runtimeCodexHome: string | undefined;
+  runtimeClientHome: string | undefined;
   workspaceSettings: WorkspaceSettings;
   approvalNotice: string | null;
   pendingApprovalsCount: number;
@@ -605,11 +605,7 @@ export function WorkspaceComposer({
                       settings={workspaceSettings}
                       onChange={saveWorkspaceSettings}
                       onClose={() => setRuntimeOptionsOpen(false)}
-                      homePath={
-                        selectedProvider?.runtimeHome ||
-                        selectedProvider?.codexHome ||
-                        runtimeCodexHome
-                      }
+                      homePath={selectedProvider?.runtimeHome || runtimeClientHome}
                       anchorRef={runtimeButtonRef}
                     />
                   )}

@@ -11,7 +11,7 @@ const request = bridgeRequestSchema.parse({
   clientType: "claude-code",
   cwd: "/tmp",
   runtimeKey: "provider",
-  codexHome: "/tmp/claude",
+  runtimeHome: "/tmp/claude",
   message: "start",
   sandbox: "workspace-write",
   approvalPolicy: "on-request",

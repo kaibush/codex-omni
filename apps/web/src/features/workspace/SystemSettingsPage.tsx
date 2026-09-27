@@ -77,8 +77,8 @@ const approvalLabel: Record<WorkspaceSettings["approvalPolicy"], string> = {
 
 const homeModeLabel: Record<ProviderHomeMode, string> = {
   "api-key": "API Key",
-  external: "已有目录",
-  managed: "托管配置"
+  native: "客户端原生配置",
+  managed: "运行配置"
 };
 
 export function SystemSettingsPage() {
@@ -400,8 +400,8 @@ export function SystemSettingsPage() {
                     />
                     <SettingsInfoRow
                       icon={Folder}
-                      label="运行时目录"
-                      value={runtimeQuery.data?.providersRoot || "未读取"}
+                      label="客户端目录"
+                      value={runtimeQuery.data?.clientsRoot || "未读取"}
                     />
                   </SettingsFormGrid>
                 </SettingsCard>
@@ -608,7 +608,7 @@ export function SystemSettingsPage() {
                               </Badge>
                             </div>
                             <p className="truncate text-xs text-muted-foreground">
-                              {provider.baseUrl || provider.codexHome || "未配置 Base URL"}
+                              {provider.baseUrl || provider.runtimeHome || "未配置 Base URL"}
                             </p>
                           </div>
                           <label className="grid min-w-40 gap-1">

@@ -39,7 +39,7 @@ describe("protocol", () => {
         sessionId: "s",
         cwd: "/tmp",
         runtimeKey: "k",
-        codexHome: "/tmp/home",
+        runtimeHome: "/tmp/home",
         message: "hi",
         sandbox: "read-only",
         approvalPolicy: "never",
@@ -240,7 +240,7 @@ describe("protocol", () => {
   });
   it("normalizes provider home modes and accepts api-key input", () => {
     expect(normalizeProviderHomeMode(null)).toBe("managed");
-    expect(normalizeProviderHomeMode("external")).toBe("external");
+    expect(normalizeProviderHomeMode("native")).toBe("native");
     expect(
       providerInputSchema.parse({
         name: "Work",

@@ -1043,7 +1043,7 @@ export function WorkspaceSidebar({
                         const count = selectedSessionIds.length;
                         const message = purgeSource
                           ? `删除 ${count} 个对话，并同步删除供应商里的原始对话数据？此操作不可恢复。`
-                          : `删除 ${count} 个对话？供应商里的原始数据会保留。`;
+                          : `删除 ${count} 个对话？客户端目录中的原始数据会保留。`;
                         if (!window.confirm(message)) return;
                         bulkDeleteSessions.mutate(
                           { ids: selectedSessionIds, purgeSource },
@@ -1056,7 +1056,7 @@ export function WorkspaceSidebar({
                   </div>
                   <label
                     className="mt-1 flex h-8 items-center gap-2 rounded-lg px-1 text-xs text-muted-foreground"
-                    title="同时删除供应商目录里的 rollout、快照和历史记录，用来腾出磁盘空间。仍被其他会话使用的原始数据会保留。"
+                    title="同时删除客户端目录里的 rollout、快照和历史记录，用来腾出磁盘空间。仍被其他会话使用的原始数据会保留。"
                   >
                     <input
                       type="checkbox"

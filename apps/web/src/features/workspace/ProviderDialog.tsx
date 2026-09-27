@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import type { Provider, ProviderHomeMode } from "@/types";
-import { ServerFolderPicker } from "./ServerFolderPicker";
 import { ProviderRuntimeFields } from "./ProviderRuntimeFields";
 import {
   defaultProviderTemplates,
@@ -57,14 +56,13 @@ const empty: ProviderInput = {
   configToml: "",
   authJson: "",
   messageEnvVars: {},
-  homeMode: "managed",
-  codexHomePath: null
+  homeMode: "managed"
 };
 
 const homeModeLabel: Record<ProviderHomeMode, string> = {
   "api-key": "API Key",
-  external: "已有目录",
-  managed: "托管配置"
+  native: "客户端原生配置",
+  managed: "运行配置"
 };
 
 const envText = (env: Record<string, string>) =>
@@ -103,7 +101,6 @@ export function ProviderDialog({
   const [testNotice, setTestNotice] = useState("");
   const [testIsError, setTestIsError] = useState(false);
   const [manualModel, setManualModel] = useState("");
-  const [folderOpen, setFolderOpen] = useState(false);
   const [secretLoading, setSecretLoading] = useState(false);
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -142,7 +139,6 @@ export function ProviderDialog({
             baseUrl: "https://api.anthropic.com",
             configToml: null,
             authJson: null,
-            claudeHomePath: null,
             settingsJson: "{}",
             mcpServersJson: "{}"
           }
@@ -164,7 +160,7 @@ export function ProviderDialog({
     setTestIsError(false);
     setManualModel("");
     setFormOpen(true);
-    if (provider && provider.homeMode !== "external") {
+    if (provider && provider.homeMode !== "native") {
       setSecretLoading(true);
       void api<{ apiKey: string | null; authJson: string | null; configToml: string | null }>(
         `/api/providers/${provider.id}/export`
@@ -258,9 +254,7 @@ export function ProviderDialog({
     } else if (homeMode === "api-key") {
       const key = editing.apiKey?.trim();
       if (!key || (key === "••••••••" && !editing.id)) return setError("API Key 为必填项");
-    } else if (homeMode === "external") {
-      if (!editing.codexHomePath?.trim()) return setError("请填写已有 CODEX_HOME 路径");
-    } else {
+    } else if (homeMode === "managed") {
       if (secretLoading) return setError("正在读取 auth.json，请稍候");
       if (!editing.configToml?.trim()) return setError("config.toml 为必填项");
       if (!editing.authJson?.trim()) return setError("auth.json 为必填项");
@@ -289,8 +283,7 @@ export function ProviderDialog({
         name,
         models: editing.models ?? [],
         homeMode,
-        messageEnvVars,
-        codexHomePath: homeMode === "external" ? (editing.codexHomePath ?? null) : null
+        messageEnvVars
       };
       const saved = await onSave(payload);
       if (fetchAfterSave) {
@@ -402,12 +395,12 @@ export function ProviderDialog({
                     {clientName(provider.kind)} · {provider.model || "客户端默认"} ·{" "}
                     {provider.baseUrl || "本地登录"}
                   </span>
-                  {provider.runtimeHome || provider.codexHome ? (
+                  {provider.runtimeHome ? (
                     <span
                       className="mt-1 block truncate font-mono text-[11px] text-muted-foreground"
-                      title={provider.runtimeHome || provider.codexHome}
+                      title={provider.runtimeHome}
                     >
-                      {provider.runtimeHome || provider.codexHome}
+                      {provider.runtimeHome}
                     </span>
                   ) : null}
                   <span className="mt-1 block text-[11px] text-muted-foreground">
@@ -527,7 +520,7 @@ export function ProviderDialog({
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription className="mt-1">
                 {isClaude
-                  ? "使用 Anthropic Messages 兼容供应商，或复用服务器上的 Claude Code 登录。配置会独立保存。"
+                  ? "使用 Anthropic Messages 兼容供应商，或复用服务器上的 Claude Code 登录。供应商参数按运行隔离，会话保存在客户端固定目录。"
                   : "填写 Codex 配置、模型和密钥后保存；支持同步上游模型或手动维护模型目录。"}
               </DialogDescription>
             </div>
@@ -588,109 +581,36 @@ export function ProviderDialog({
                 ))}
               </select>
             </label>
-            {isClaude ? (
-              <div className="space-y-3 sm:col-span-2">
-                <div className="flex gap-2">
-                  {(
-                    [
-                      ["api-key", "API Key / 兼容供应商"],
-                      ["external", "已有 Claude Code 登录"],
-                      ["managed", "原生设置 / 环境变量"]
-                    ] as const
-                  ).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`h-8 rounded-lg border px-3 text-xs ${editing.homeMode === mode ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
-                      onClick={() => setEditing({ ...editing, homeMode: mode })}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {editing.homeMode === "external" ? (
-                  <label className="field-label">
-                    Claude 配置目录
-                    <input
-                      className="field font-mono"
-                      value={editing.claudeHomePath ?? ""}
-                      placeholder="留空使用服务器默认 ~/.claude"
-                      onChange={(event) =>
-                        setEditing({ ...editing, claudeHomePath: event.target.value || null })
-                      }
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      使用该目录已有的登录和原生设置。
-                    </span>
-                  </label>
-                ) : null}
+            <div className="space-y-2 sm:col-span-2">
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["managed", isClaude ? "运行设置 / 环境变量" : "运行配置"],
+                    ["api-key", "快速 API Key"],
+                    ["native", "客户端原生配置"]
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`h-8 rounded-lg border px-3 text-xs ${editing.homeMode === mode ? "border-primary bg-primary/10" : "hover:bg-muted"}`}
+                    onClick={() => setEditing({ ...editing, homeMode: mode })}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            ) : editing.homeMode === "external" ? (
-              <div className="rounded-lg border p-3 sm:col-span-2">
-                <p className="text-xs leading-5 text-muted-foreground">
-                  这个供应商仍使用已有 CODEX_HOME。新供应商不再提供这种方式。
+              <p className="text-xs leading-5 text-muted-foreground">
+                {editing.homeMode === "native"
+                  ? "使用该客户端固定目录中的登录和原生配置。供应商切换不会修改这些文件。"
+                  : "配置仅用于本次运行。不同对话可以同时使用不同供应商，共享该客户端的会话目录。"}
+              </p>
+              {editing.homeMode === "native" && editing.runtimeHome ? (
+                <p className="break-all font-mono text-xs text-muted-foreground">
+                  {editing.runtimeHome}
                 </p>
-                <label className="field-label mt-2">
-                  已有 CODEX_HOME <span className="text-red-500">*</span>
-                  <div className="flex min-w-0 gap-2">
-                    <input
-                      className="field mt-0 min-w-0 flex-1 font-mono"
-                      value={editing.codexHomePath ?? ""}
-                      onChange={(e) =>
-                        setEditing({ ...editing, codexHomePath: e.target.value || null })
-                      }
-                      placeholder="/home/you/.codex"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-8 shrink-0 rounded-lg"
-                      onClick={() => setFolderOpen(true)}
-                    >
-                      浏览
-                    </Button>
-                  </div>
-                </label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="mt-2 h-8 rounded-lg"
-                  onClick={() =>
-                    setEditing({ ...editing, homeMode: "managed", codexHomePath: null })
-                  }
-                >
-                  改为托管配置
-                </Button>
-              </div>
-            ) : (
-              <div className="sm:col-span-2">
-                <p className="text-xs font-semibold text-muted-foreground">配置方式</p>
-                <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    className={`h-8 rounded-lg border px-2 text-left text-xs ${
-                      editing.homeMode === "api-key"
-                        ? "border-border text-muted-foreground hover:bg-muted"
-                        : "border-primary bg-primary/10 text-foreground"
-                    }`}
-                    onClick={() => setEditing({ ...editing, homeMode: "managed" })}
-                  >
-                    编辑 config.toml / auth.json
-                  </button>
-                  <button
-                    type="button"
-                    className={`h-8 rounded-lg border px-2 text-left text-xs ${
-                      editing.homeMode === "api-key"
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                    onClick={() => setEditing({ ...editing, homeMode: "api-key" })}
-                  >
-                    快速 API Key
-                  </button>
-                </div>
-              </div>
-            )}
+              ) : null}
+            </div>
             <label className="field-label sm:col-span-2">
               供应商名称 <span className="text-red-500">*</span>
               <input
@@ -725,6 +645,7 @@ export function ProviderDialog({
             <label className="field-label">
               Base URL
               <input
+                disabled={editing.homeMode === "native"}
                 className="field"
                 value={
                   !isClaude && editing.homeMode === "managed"
@@ -757,6 +678,7 @@ export function ProviderDialog({
                 className="field min-w-0 max-w-full font-mono"
                 type={showSecrets ? "text" : "password"}
                 name="apiKey"
+                disabled={editing.homeMode === "native"}
                 autoComplete="off"
                 value={
                   !isClaude && editing.homeMode === "managed"
@@ -781,7 +703,9 @@ export function ProviderDialog({
                       : "填写 API Key"
                     : secretLoading
                       ? "正在读取 auth.json"
-                      : "填写后同步到 auth.json"
+                      : editing.homeMode === "native"
+                        ? "使用客户端登录状态"
+                        : "填写后同步到运行配置"
                 }
               />
             </label>
@@ -931,7 +855,7 @@ export function ProviderDialog({
                   ))}
               </div>
             </div>
-            {isClaude ? (
+            {isClaude && editing.homeMode !== "native" ? (
               <details className="rounded-lg border p-3 sm:col-span-2">
                 <summary className="cursor-pointer text-sm font-medium">
                   Claude 原生设置、Hooks 与 MCP
@@ -969,7 +893,7 @@ export function ProviderDialog({
                 onChange={(patch) => setEditing((current) => ({ ...current, ...patch }))}
               />
             )}
-            {(editing.homeMode ?? "api-key") === "managed" ? (
+            {!isClaude && (editing.homeMode ?? "api-key") === "managed" ? (
               <>
                 <label className="field-label sm:col-span-2">
                   config.toml <span className="text-red-500">*</span>
@@ -990,16 +914,16 @@ export function ProviderDialog({
                   />
                 </label>
               </>
-            ) : (editing.homeMode ?? "api-key") === "api-key" ? (
+            ) : !isClaude && (editing.homeMode ?? "api-key") === "api-key" ? (
               <p className="sm:col-span-2 text-xs leading-5 text-muted-foreground">
                 保存时会根据名称、模型、Base URL 和 API Key 自动生成该供应商的 config.toml 与
-                auth.json，并写入独立的 CODEX_HOME。
+                auth.json 运行参数，仅注入当前进程，不改写客户端目录中的配置。
               </p>
-            ) : (
+            ) : editing.homeMode === "native" ? (
               <p className="sm:col-span-2 text-xs leading-5 text-muted-foreground">
-                运行时直接使用这个已有目录，不会覆盖其中的 config.toml / auth.json。
+                运行时使用该客户端固定目录中的配置和登录状态，会话目录始终保持不变。
               </p>
-            )}
+            ) : null}
             {error && (
               <p className="sm:col-span-2 mt-1 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
                 {error}
@@ -1030,15 +954,6 @@ export function ProviderDialog({
           </form>
         </DialogContent>
       </Dialog>
-      <ServerFolderPicker
-        open={folderOpen}
-        initialPath={editing.codexHomePath || ""}
-        onOpenChange={setFolderOpen}
-        onSelect={(path) => {
-          setEditing((current) => ({ ...current, codexHomePath: path }));
-          setFolderOpen(false);
-        }}
-      />
     </Dialog>
   );
 }

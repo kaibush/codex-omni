@@ -56,7 +56,7 @@ export function WorkspaceHeader({
   beginRenameSession,
   runState,
   selectedProvider,
-  runtimeCodexHome,
+  runtimeClientHome,
   runElapsed,
   runFirstResponse,
   runTokenLabel,
@@ -89,7 +89,7 @@ export function WorkspaceHeader({
   beginRenameSession: (session: Session) => void;
   runState: RunState | null;
   selectedProvider: Provider | undefined;
-  runtimeCodexHome: string | undefined;
+  runtimeClientHome: string | undefined;
   runElapsed: string;
   runFirstResponse: string;
   runTokenLabel: string | null;
@@ -197,10 +197,10 @@ export function WorkspaceHeader({
           title={[
             activeProject.displayPath,
             activeSession?.createdAt ? `会话 ${formatDateTime(activeSession.createdAt)}` : "",
-            selectedProvider?.codexHome
-              ? `CODEX_HOME ${selectedProvider.codexHome}`
-              : runtimeCodexHome
-                ? `CODEX_HOME ${runtimeCodexHome}`
+            selectedProvider?.runtimeHome
+              ? `客户端目录 ${selectedProvider.runtimeHome}`
+              : runtimeClientHome
+                ? `客户端目录 ${runtimeClientHome}`
                 : ""
           ]
             .filter(Boolean)
@@ -214,7 +214,7 @@ export function WorkspaceHeader({
             runState && runState.status !== "running" && runElapsed ? `耗时 ${runElapsed}` : "",
             runFirstResponse ? `首响 ${runFirstResponse}` : "",
             runTokenLabel ? `tokens ${runTokenLabel}` : "",
-            selectedProvider?.codexHome ?? runtimeCodexHome
+            selectedProvider?.runtimeHome ?? runtimeClientHome
           ]
             .filter(Boolean)
             .join(" · ")}

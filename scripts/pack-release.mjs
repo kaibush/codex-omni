@@ -33,8 +33,20 @@ function productionDeps(...pkgs) {
   return deps;
 }
 
-function skipTestArtifacts(src) {
-  return !/\.test\.(js|d\.ts|js\.map)$/.test(src);
+function currentBuildArtifacts(projectRoot) {
+  const distRoot = path.join(projectRoot, "dist");
+  const sourceRoot = path.join(projectRoot, "src");
+  return (src) => {
+    if (/\.test\.(?:js|d\.ts)(?:\.map)?$/.test(src)) return false;
+    const relative = path.relative(distRoot, src);
+    const compiled = relative.match(/^(.*)\.(?:js|d\.ts)(?:\.map)?$/);
+    if (!compiled) return true;
+    // tsc leaves outputs for deleted sources behind. Omit them from releases
+    // without clearing dist, which a running local server may still be using.
+    return [".ts", ".tsx"].some((extension) =>
+      existsSync(path.join(sourceRoot, `${compiled[1]}${extension}`))
+    );
+  };
 }
 
 function bundledManifest(pkg) {
@@ -76,7 +88,7 @@ for (const { directory, manifest } of workspacePackages) {
   await mkdir(destination, { recursive: true });
   await cp(path.join(root, "packages", directory, "dist"), path.join(destination, "dist"), {
     recursive: true,
-    filter: skipTestArtifacts
+    filter: currentBuildArtifacts(path.join(root, "packages", directory))
   });
   await writeFile(
     path.join(destination, "package.json"),
@@ -85,7 +97,7 @@ for (const { directory, manifest } of workspacePackages) {
 }
 await cp(path.join(root, "apps/server/dist"), path.join(out, "dist"), {
   recursive: true,
-  filter: skipTestArtifacts
+  filter: currentBuildArtifacts(path.join(root, "apps/server"))
 });
 await cp(path.join(root, "apps/web/dist"), path.join(out, "public"), { recursive: true });
 

@@ -158,17 +158,15 @@ describe("Store", () => {
     expect(store.deleteProvider(second.id)).toBe(true);
     expect(store.getProvider(first.id)?.isDefault).toBe(1);
   });
-  it("stores provider home mode and existing CODEX_HOME path", () => {
+  it("stores provider configuration mode without a per-provider HOME", () => {
     store = new Store(":memory:");
     const managed = store.upsertProvider({ name: "Managed" });
     expect(managed.homeMode).toBe("managed");
     const external = store.upsertProvider({
       name: "External",
-      homeMode: "external",
-      codexHomePath: "/tmp/existing-codex"
+      homeMode: "native"
     });
-    expect(store.getProvider(external.id)?.homeMode).toBe("external");
-    expect(store.getProvider(external.id)?.codexHomePath).toBe("/tmp/existing-codex");
+    expect(store.getProvider(external.id)?.homeMode).toBe("native");
   });
   it("stores an independent model catalog for each provider", () => {
     store = new Store(":memory:");

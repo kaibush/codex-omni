@@ -13,12 +13,7 @@ export class ClaudeWorkerAdapter extends AgentBridgeWorkerAdapter {
   }
 }
 
-export {
-  resolveClaudeHome,
-  claudeEnvironment,
-  parseClaudeMcpServers,
-  parseClaudeSettings
-} from "./configuration.js";
+export { claudeEnvironment, parseClaudeMcpServers, parseClaudeSettings } from "./configuration.js";
 export { createClaudeNormalizer } from "./normalizer.js";
 
 export { claudeRuntimeInfo } from "./versions.js";

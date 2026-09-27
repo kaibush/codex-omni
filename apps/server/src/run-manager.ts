@@ -1,12 +1,9 @@
 import { RuntimeRouter } from "./runtime-router.js";
-import { providerRuntimeHome, resolveClientHome } from "./client-provider.js";
-import { runtimeHistoryContext, saveRuntimeCursor } from "./session-runtime.js";
-import { transferNativeSession } from "./native-session.js";
-import path from "node:path";
+import { clientRuntimeHome, ensureClientHome } from "./client-home.js";
+import { runtimeHistoryContext } from "./session-runtime.js";
 import { nanoid } from "nanoid";
 import {
   INCOMPLETE_TURN_MESSAGE,
-  runtimeKey,
   sanitizeCodexAttachments,
   terminateRecordedWorker,
   type WorkerRuntimeInfo
@@ -214,7 +211,6 @@ export class RunManager {
   private cancelling = new Set<string>();
   private reconnecting = new Set<string>();
   private activeRuns = new Map<string, ActiveRun>();
-  private nativeTransfers = new Set<string>();
   private failureRetryAborters = new Map<string, () => void>();
   private runtimeMonitor: NodeJS.Timeout;
   readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
@@ -281,9 +277,7 @@ export class RunManager {
       const project = this.store.getProject(session.projectId);
       const provider = this.store.getProvider(session.providerId ?? project?.providerId ?? "");
       if (!provider) return null;
-      const home =
-        session.runtimeHome ??
-        providerRuntimeHome(provider, path.join(this.runtimeRoot, "providers"));
+      const home = clientRuntimeHome("codex", this.runtimeRoot);
       return readThreadGoal(home, session.threadId);
     } catch {
       return null;
@@ -1029,8 +1023,6 @@ export class RunManager {
   }
 
   private async startTurn(input: TurnStartCommand, sourceQueueId?: string) {
-    if (this.nativeTransfers.has(input.sessionId))
-      throw new Error("原生会话正在同步，请稍后再发送");
     let command = input;
     if (input.type === "run.retry" && input.messageId) {
       const source = this.store.getMessage(input.messageId);
@@ -1319,12 +1311,6 @@ export class RunManager {
         if (threadId) {
           this.store.updateSession(session.id, { threadId });
           this.store.updateRun(requestId, { threadId });
-          this.store.saveSessionRuntimeBinding({
-            sessionId: session.id,
-            providerId: provider.id,
-            clientType: session.clientType,
-            threadId
-          });
         }
       }
       if (event.type === "run.failed") {
@@ -1378,31 +1364,8 @@ export class RunManager {
           onEvent: onRuntimeEvent
         });
       } else {
-        const codexHome = await resolveClientHome(
-          provider,
-          path.join(this.runtimeRoot, "providers")
-        );
-        if (
-          session.threadId &&
-          session.runtimeHome &&
-          path.resolve(session.runtimeHome) !== path.resolve(codexHome)
-        ) {
-          this.nativeTransfers.add(session.id);
-          try {
-            await transferNativeSession({
-              clientType: session.clientType,
-              threadId: session.threadId,
-              sourceHome: session.runtimeHome,
-              targetHome: codexHome
-            });
-          } finally {
-            this.nativeTransfers.delete(session.id);
-          }
-        }
-        // A cancellation can arrive during filesystem I/O. Never launch a new
-        // worker after the run has stopped or advance its native state cursor.
+        const runtimeHome = await ensureClientHome(session.clientType, this.runtimeRoot);
         if (this.store.getRun(requestId)?.status !== "running") return;
-        this.store.updateSession(session.id, { runtimeHome: codexHome });
         await this.worker.run(
           {
             protocolVersion: 1,
@@ -1412,12 +1375,11 @@ export class RunManager {
             sessionId: session.id,
             ...(session.threadId ? { threadId: session.threadId } : {}),
             cwd: project.realPath,
-            runtimeKey: runtimeKey(project.id, provider.id),
-            codexHome,
-            runtimeHome: codexHome,
+            runtimeKey: `${session.clientType}::${project.id}::${session.id}`,
+            runtimeHome,
             homeMode:
-              provider.homeMode === "external"
-                ? "external"
+              provider.homeMode === "native"
+                ? "native"
                 : provider.homeMode === "api-key"
                   ? "api-key"
                   : "managed",
@@ -1463,12 +1425,12 @@ export class RunManager {
             projectId: project.id,
             providerId: provider.id,
             threadId: latest?.threadId ?? session.threadId,
-            codexHome
+            codexHome: runtimeHome
           });
         try {
           const currentGoal =
             session.clientType === "codex"
-              ? readThreadGoal(codexHome, latest?.threadId ?? session.threadId)
+              ? readThreadGoal(runtimeHome, latest?.threadId ?? session.threadId)
               : null;
           if (currentGoal && isThreadGoalLocked(currentGoal)) lockedGoal = currentGoal;
         } catch {
@@ -1612,9 +1574,6 @@ export class RunManager {
         this.finishRun(session.id, "failed", { startedAt, reason });
       }
     } finally {
-      // Failed startup or cancellation may leave the transferred history unread.
-      // Keep the old cursor so a subsequent attempt cannot silently skip it.
-      if (completed) saveRuntimeCursor(this.store, session.id);
       clearTimeout(timeout);
       const cancelled =
         this.cancelling.has(session.id) || this.store.getRun(requestId)?.status === "cancelled";

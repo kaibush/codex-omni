@@ -75,7 +75,7 @@ export function SettingsDialog({
   onOpenChange: (value: boolean) => void;
   settings: WorkspaceSettings;
   providers: Provider[];
-  runtime?: { defaultCodexHome: string; providersRoot: string } | undefined;
+  runtime?: { defaultCodexHome: string; clientsRoot: string } | undefined;
   currentCodexHome?: string | undefined;
   onSaveProvider: (provider: Provider) => Promise<void>;
   onSave: (settings: WorkspaceSettings) => Promise<void>;
@@ -269,9 +269,9 @@ export function SettingsDialog({
               <p>
                 <span className="font-sans font-semibold text-foreground">运行时目录</span>
                 <br />
-                {selectedProvider?.codexHome ||
+                {selectedProvider?.runtimeHome ||
                   currentCodexHome ||
-                  runtime?.providersRoot ||
+                  runtime?.clientsRoot ||
                   "未读取"}
               </p>
             </div>

@@ -9,7 +9,7 @@ import type {
   BridgeRequest,
   TurnAttachment
 } from "@codex-omni/protocol";
-import { claudeQueryOptions, parseClaudeSettings } from "./configuration.js";
+import { claudeQueryOptions, parseClaudeSettings, stageClaudeSettings } from "./configuration.js";
 import { claudeInput, PromptQueue } from "./input.js";
 import { createClaudeNormalizer } from "./normalizer.js";
 
@@ -47,7 +47,7 @@ export class ClaudeTurn {
       parseClaudeSettings(this.request.settingsJson) as { plansDirectory?: string }
     ).plansDirectory;
     const roots = [
-      path.join(this.request.runtimeHome ?? this.request.codexHome, "plans"),
+      path.join(this.request.runtimeHome, "plans"),
       path.join(this.request.cwd, ".claude", "plans")
     ];
     if (typeof configured === "string") roots.push(path.resolve(this.request.cwd, configured));
@@ -270,7 +270,11 @@ export class ClaudeTurn {
         this.releaseTimer = setTimeout(release, 500);
       }
     };
+    let cleanupSettings = () => {};
     try {
+      const staged = stageClaudeSettings(options.settings);
+      cleanupSettings = staged.cleanup;
+      options.settings = staged.file;
       if (this.request.conversationContext) {
         const context = await claudeInput(this.request.conversationContext, this.request.cwd);
         this.prompts.push({
@@ -330,6 +334,7 @@ export class ClaudeTurn {
       if (this.releaseTimer) clearTimeout(this.releaseTimer);
       this.cancel();
       this.query?.close();
+      cleanupSettings();
     }
   }
 }

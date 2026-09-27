@@ -83,7 +83,7 @@ export function firstUsefulFailureMessage(...values: unknown[]) {
   return "";
 }
 
-export const providerHomeModeSchema = z.enum(["managed", "api-key", "external"]);
+export const providerHomeModeSchema = z.enum(["managed", "api-key", "native"]);
 export type ProviderHomeMode = z.infer<typeof providerHomeModeSchema>;
 
 export const DEFAULT_PROVIDER_CONFIG_TEMPLATE = `model = "{{model}}"
@@ -100,7 +100,7 @@ export const DEFAULT_PROVIDER_AUTH_TEMPLATE = `{
 }`;
 
 export function normalizeProviderHomeMode(value: string | null | undefined): ProviderHomeMode {
-  return value === "api-key" || value === "external" ? value : "managed";
+  return value === "api-key" || value === "native" ? value : "managed";
 }
 
 const modelRuntimeSettingsFields = {
@@ -159,9 +159,6 @@ export const providerSchema = z.object({
   messageEnvVars: z.record(z.string(), z.string()),
   isDefault: z.boolean(),
   homeMode: providerHomeModeSchema,
-  codexHomePath: z.string().nullable(),
-  codexHome: z.string().optional(),
-  claudeHomePath: z.string().nullable().optional(),
   settingsJson: z.string().nullable().optional(),
   mcpServersJson: z.string().nullable().optional(),
   runtimeHome: z.string().optional()
@@ -183,8 +180,6 @@ export const providerInputSchema = z
     messageEnvVars: z.record(z.string(), z.string()).optional(),
     isDefault: z.boolean().optional(),
     homeMode: providerHomeModeSchema.optional(),
-    codexHomePath: z.string().nullable().optional(),
-    claudeHomePath: z.string().nullable().optional(),
     settingsJson: z.string().nullable().optional(),
     mcpServersJson: z.string().nullable().optional()
   })
@@ -206,7 +201,6 @@ export const sessionSchema = z.object({
   projectId: z.string(),
   clientType: clientTypeSchema.optional(),
   threadId: z.string().nullable(),
-  runtimeHome: z.string().nullable().optional(),
   title: z.string(),
   status: z.enum(["idle", "running", "failed", "cancelled", "interrupted"]),
   providerId: z.string().nullable(),
@@ -414,8 +408,7 @@ export const bridgeRequestSchema = z
     clientType: clientTypeSchema.optional(),
     cwd: z.string(),
     runtimeKey: z.string(),
-    codexHome: z.string(),
-    runtimeHome: z.string().optional(),
+    runtimeHome: z.string(),
     settingsJson: z.string().optional(),
     mcpServersJson: z.string().optional(),
     homeMode: providerHomeModeSchema.optional(),

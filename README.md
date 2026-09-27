@@ -17,8 +17,8 @@ Codex Omni 把 Codex 和 Claude Code 跑在远程服务器上，用浏览器完�
 
 - **对话工作台**：多工程、多 Session；流式回复、工具调用、审批、草稿和消息队列。
 - **工程与会话**：浏览服务器目录创建工程；会话支持搜索、重命名、置顶、归档和导出。
-- **供应商与模型**：按客户端管理供应商和默认模型；独立配置目录与凭据，支持 API Key、兼容 Base URL、原生配置和模型目录。
-- **跨供应商续聊**：切换时选择在当前对话继续或新建续接对话；切回已有供应商会恢复其原生线程，并补入切换期间的历史。
+- **供应商与模型**：按客户端管理供应商和默认模型；会话按客户端保存，供应商配置和凭据按运行隔离，支持 API Key、兼容 Base URL、原生配置和模型目录。
+- **跨供应商续聊**：切换时选择在当前对话继续或新建续接对话；同一客户端使用原生会话 ID 继续，保留完整原生历史，无需复制会话。
 - **Claude Code**：原生计划审批、提问表单、工具审批、子智能体与后台任务、单独停止子任务、思考强度、预算、原生命令、Skills / MCP 和 Hooks。
 - **文件工作区**：文件树、搜索、CodeMirror 编辑、Markdown 预览和冲突提示。
 - **Git**：分支状态、staged / working-tree Diff、暂存、提交和历史。
@@ -90,13 +90,15 @@ pnpm user:create --username admin --password 'change-this-password'
 
 ## 使用 Claude Code 与跨供应商续聊
 
-1. 在「供应商」选择 Claude Code，添加 Anthropic Messages 兼容供应商的 Base URL、API Key 和模型。也可选择已有 Claude 配置目录，或通过原生 `settings.json` 和环境变量配置网关。
+1. 在「供应商」选择 Claude Code，添加 Anthropic Messages 兼容供应商的 Base URL、API Key 和模型。也可选择「客户端原生配置」使用固定目录中的登录状态，或通过运行设置和环境变量配置网关。
 2. 新建对话时选择 Codex 或 Claude Code；创建后客户端固定，输入区只显示该客户端的供应商、模型与权限选项。两种客户端各自保留默认供应商，同一工程可以分别创建两种对话，共享工程文件。
 3. 切换同一客户端的供应商时，弹框默认选择「在当前对话继续」，也可选择「新建续接对话」。运行中或仍有待发送队列时，先结束任务或处理队列再切换。
 
 Claude 使用原生计划模式；计划卡片可审阅正文并批准执行，提问卡片支持选项与自由回答。子智能体和后台任务显示执行状态，运行中的子任务可单独停止。输入区支持 SDK 可用的原生命令、项目 `.claude/commands`，并自动加载 `CLAUDE.md`、`.claude/agents`、`.claude/skills`、MCP 和 Hooks。系统设置中可分别管理 Codex 与 Claude 的权限、思考强度、轮次、预算和自定义子智能体。
 
-在当前对话切换供应商时，认证和配置仍按供应商 HOME 隔离；下一轮运行前同步该客户端的原生会话文件及相关状态，再使用原会话 ID resume。原生会话缺失或无法迁移时会明确报错，不会自动用文字摘要替代。Codex 与 Claude Code 不互相恢复或续接会话。
+Codex 与 Claude Code 各自使用固定 HOME，默认位于数据库目录下的 `runtime/clients/codex` 和 `runtime/clients/claude-code`。可通过 `CODEX_OMNI_CODEX_HOME`、`CODEX_OMNI_CLAUDE_HOME` 指定各客户端的绝对目录；原生登录和全局 Skills 等资源也放在该目录中。
+
+在当前对话切换供应商时，下一轮只更换独立 Worker 的配置和凭据，使用原会话 ID 从相同 HOME 恢复，不复制会话，也不改写共享的原生配置和认证文件。不同对话可以同时使用不同供应商；同一对话串行执行。Codex 与 Claude Code 不互相恢复或续接会话。
 
 「新建续接对话」使用同一客户端，带入最近用户与助手消息的有限快照（最多 40 条、约 48,000 字符），长消息保留首尾，并携带附件路径。CLI 专属交互以 SDK 提供的能力为准，长期定时任务使用工作台的「定时任务」页面。
 
@@ -127,6 +129,8 @@ npm i -g https://github.com/kaibush/codex-omni/releases/latest/download/codex-om
 | `CODEX_OMNI_HOST` | `0.0.0.0` | 监听地址 |
 | `CODEX_OMNI_PORT` | `8790` | 服务端口 |
 | `CODEX_OMNI_DATABASE` | `./data/codex-omni.db` | SQLite 路径 |
+| `CODEX_OMNI_CODEX_HOME` | 数据库目录下的 `runtime/clients/codex` | Codex 固定配置、登录与会话目录，所有 Codex 供应商共用 |
+| `CODEX_OMNI_CLAUDE_HOME` | 数据库目录下的 `runtime/clients/claude-code` | Claude Code 固定配置、登录与会话目录，所有 Claude 供应商共用 |
 | `CODEX_OMNI_INSTANCE` | 空（随机 id） | 同库多进程时的实例名；`pnpm dev` 设为 `dev` |
 | `CODEX_OMNI_ORIGIN` | 空（回显请求 Origin） | CORS Origin 白名单，逗号分隔；生产应写成明确站点 |
 | `CODEX_OMNI_STATIC` | 打包内的 `public/` | 前端静态目录 |

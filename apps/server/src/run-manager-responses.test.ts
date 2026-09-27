@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Store } from "@codex-omni/db";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunManager } from "./run-manager.js";
 
 let dir: string | undefined;
@@ -23,6 +23,7 @@ afterEach(async () => {
   store = undefined;
   server = undefined;
   dir = undefined;
+  vi.unstubAllEnvs();
 });
 
 type Reply = { text: string } | { command: string };
@@ -31,6 +32,8 @@ type Reply = { text: string } | { command: string };
 // subprocess, installed SDK, CLI resume and actual tool execution are real.
 describe.skipIf(process.platform === "win32")("RunManager with real Responses transport", () => {
   async function fixture(reply: (index: number) => Reply) {
+    vi.stubEnv("CODEX_OMNI_CODEX_HOME", "");
+    vi.stubEnv("CODEX_OMNI_CLAUDE_HOME", "");
     dir = await mkdtemp(path.join(os.tmpdir(), "omni-run-responses-"));
     const projectPath = path.join(dir, "project");
     await mkdir(projectPath);

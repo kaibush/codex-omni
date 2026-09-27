@@ -9,7 +9,6 @@ const request = bridgeRequestSchema.parse({
   sessionId: "session",
   clientType: "claude-code",
   cwd: "/tmp",
-  codexHome: "/tmp/claude",
   runtimeHome: "/tmp/isolated",
   runtimeKey: "key",
   message: "hello",
@@ -48,14 +47,13 @@ describe("Claude SDK configuration", () => {
       CLAUDE_CONFIG_DIR: "/tmp/isolated",
       CUSTOM: "yes"
     });
+    for (const key of ["CLAUDECODE", "CODEX_HOME"]) expect(env[key]).toBeUndefined();
     for (const key of [
-      "CLAUDECODE",
-      "CODEX_HOME",
       "CLAUDE_CODE_OAUTH_TOKEN",
       "ANTHROPIC_DEFAULT_SONNET_MODEL",
       "CLAUDE_CODE_USE_BEDROCK"
     ])
-      expect(env[key]).toBeUndefined();
+      expect(env[key]).toBe("");
     expect(inherited.ANTHROPIC_API_KEY).toBe("unrelated-key");
   });
 

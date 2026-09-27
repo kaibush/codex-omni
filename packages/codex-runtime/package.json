@@ -11,10 +11,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@codex-omni/agent-runtime": "workspace:*",
     "@codex-omni/protocol": "workspace:*",
     "@openai/codex-sdk": "0.156.1",
     "nanoid": "^5.1.5",
-    "@codex-omni/agent-runtime": "workspace:*"
+    "smol-toml": "^1.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",

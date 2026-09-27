@@ -1,51 +1,22 @@
 import type { ProviderRow } from "@codex-omni/db";
-import path from "node:path";
-import os from "node:os";
-import { resolveProviderHome } from "@codex-omni/codex-runtime";
-import {
-  parseClaudeMcpServers,
-  parseClaudeSettings,
-  resolveClaudeHome
-} from "@codex-omni/claude-runtime";
+import { parseClaudeMcpServers, parseClaudeSettings } from "@codex-omni/claude-runtime";
 import type { ProviderInput } from "@codex-omni/protocol";
-
-// Resolve existing native state without rewriting the provider's configuration.
-export function providerRuntimeHome(provider: ProviderRow, providersRoot: string) {
-  if (provider.homeMode === "external") {
-    const home =
-      provider.kind === "claude-code"
-        ? provider.claudeHomePath ||
-          process.env.CLAUDE_CONFIG_DIR ||
-          path.join(os.homedir(), ".claude")
-        : provider.codexHomePath;
-    if (!home) throw new Error("无法定位供应商的原生会话目录");
-    return path.resolve(home);
-  }
-  return provider.kind === "claude-code"
-    ? path.resolve(providersRoot, provider.id, "claude")
-    : path.resolve(providersRoot, provider.id);
-}
-
-export function resolveClientHome(provider: ProviderRow, providersRoot: string) {
-  return provider.kind === "claude-code"
-    ? resolveClaudeHome({
-        providersRoot,
-        providerId: provider.id,
-        homeMode: provider.homeMode,
-        claudeHomePath: provider.claudeHomePath ?? null
-      })
-    : resolveProviderHome({
-        providersRoot,
-        providerId: provider.id,
-        homeMode: provider.homeMode,
-        codexHomePath: provider.codexHomePath,
-        configToml: provider.configToml,
-        authJson: provider.authJson
-      });
-}
 
 export async function claudeProviderFiles(input: ProviderInput, current?: ProviderRow) {
   const homeMode = input.homeMode ?? current?.homeMode ?? "api-key";
+  if (homeMode === "native")
+    return {
+      homeMode,
+      apiKey: null,
+      baseUrl: null,
+      model: input.model ?? current?.model ?? null,
+      contextWindow: null,
+      autoCompactTokenLimit: null,
+      settingsJson: null,
+      mcpServersJson: null,
+      configToml: null,
+      authJson: null
+    };
   const apiKey =
     input.apiKey === "••••••••" || input.apiKey === undefined
       ? (current?.apiKey ?? null)
@@ -65,24 +36,13 @@ export async function claudeProviderFiles(input: ProviderInput, current?: Provid
   const baseUrl =
     input.baseUrl === undefined ? (current?.baseUrl ?? null) : input.baseUrl?.trim() || null;
   if (baseUrl && !/^https?:\/\//.test(baseUrl)) throw new Error("Base URL 必须是 HTTP(S) 地址");
-  const claudeHomePath =
-    homeMode === "external"
-      ? await resolveClaudeHome({
-          providersRoot: "",
-          providerId: "",
-          homeMode,
-          claudeHomePath: input.claudeHomePath ?? current?.claudeHomePath ?? null
-        })
-      : null;
   return {
-    homeMode: homeMode as "managed" | "api-key" | "external",
+    homeMode,
     apiKey: homeMode === "api-key" ? apiKey : null,
     baseUrl,
     model: input.model === undefined ? (current?.model ?? null) : input.model,
     contextWindow: null,
     autoCompactTokenLimit: null,
-    codexHomePath: null,
-    claudeHomePath,
     settingsJson,
     mcpServersJson,
     configToml: null,
