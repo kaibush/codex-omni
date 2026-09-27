@@ -2,13 +2,17 @@ import { createServer, type ServerResponse } from "node:http";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BridgeEvent, BridgeRequest } from "@codex-omni/protocol";
 import { ClaudeWorkerAdapter } from "./index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 function respondStream(
@@ -57,6 +61,75 @@ function respondStream(
 }
 
 describe("Claude worker with the real Agent SDK and local Messages API", () => {
+  it("runs bypass permission mode without an inherited sandbox marker", async () => {
+    vi.stubEnv("IS_SANDBOX", undefined);
+    const directory = await mkdtemp(path.join(os.tmpdir(), "omni-claude-bypass-"));
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    const requests: string[] = [];
+    const server = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      if (request.url?.includes("count_tokens")) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"input_tokens":20}');
+        return;
+      }
+      if (!request.url?.startsWith("/v1/messages")) {
+        response.writeHead(404);
+        response.end("{}");
+        return;
+      }
+      requests.push(body);
+      const parsed = JSON.parse(body) as { model: string };
+      respondStream(response, parsed.model, [{ type: "text", text: "BYPASS_READY" }]);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    cleanups.push(async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    const address = server.address() as { port: number };
+    const adapter = new ClaudeWorkerAdapter();
+    cleanups.push(async () => adapter.shutdown());
+    const events: BridgeEvent[] = [];
+    await adapter.run(
+      {
+        protocolVersion: 1,
+        clientType: "claude-code",
+        requestId: "bypass",
+        projectId: "project",
+        sessionId: "session",
+        cwd: directory,
+        runtimeKey: "provider",
+        runtimeHome: directory,
+        homeMode: "api-key",
+        apiKey: "fixture-key",
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        model: "sonnet",
+        message: "BYPASS_STARTUP_MARKER",
+        sandbox: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true,
+        claude: { permissionMode: "bypassPermissions" },
+        messageEnvVars: {
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+          DISABLE_TELEMETRY: "1",
+          DISABLE_ERROR_REPORTING: "1"
+        }
+      },
+      (event) => events.push(event)
+    );
+    expect(requests.some((body) => body.includes("BYPASS_STARTUP_MARKER"))).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "assistant.completed" &&
+          (event.payload as { text?: string }).text === "BYPASS_READY"
+      )
+    ).toBe(true);
+    expect(events.at(-1)?.type, JSON.stringify(events)).toBe("turn.completed");
+  }, 60_000);
+
   it("streams, answers a native question, and restores the same SDK thread on the next turn", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "omni-claude-sdk-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));

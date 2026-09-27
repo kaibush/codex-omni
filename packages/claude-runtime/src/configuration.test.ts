@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeRequestSchema } from "@codex-omni/protocol";
 import { claudeEnvironment, claudeQueryOptions, parseClaudeMcpServers } from "./configuration.js";
 
@@ -16,6 +16,8 @@ const request = bridgeRequestSchema.parse({
   approvalPolicy: "on-request",
   networkAccessEnabled: true
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("Claude SDK configuration", () => {
   it("isolates credentials, endpoints, nesting markers and model mappings", () => {
@@ -65,6 +67,50 @@ describe("Claude SDK configuration", () => {
     });
     expect(options.env?.CLAUDE_CONFIG_DIR).toBe("/tmp/isolated");
     expect(options.settings).toMatchObject({ env: { CLAUDE_CONFIG_DIR: "/tmp/isolated" } });
+  });
+
+  describe.skipIf(typeof process.getuid !== "function")("root permission compatibility", () => {
+    const unixProcess = process as NodeJS.Process & { getuid: () => number };
+
+    it("marks explicitly requested bypass mode in both the startup environment and settings", () => {
+      vi.spyOn(unixProcess, "getuid").mockReturnValue(0);
+      const options = claudeQueryOptions({
+        ...request,
+        claude: { permissionMode: "bypassPermissions" }
+      });
+      expect(options.permissionMode).toBe("bypassPermissions");
+      expect(options.allowDangerouslySkipPermissions).toBe(true);
+      expect(options.env?.IS_SANDBOX).toBe("1");
+      expect(options.settings).toMatchObject({ env: { IS_SANDBOX: "1" } });
+    });
+
+    it("only adds the marker for root execution in bypass mode", () => {
+      const uid = vi.spyOn(unixProcess, "getuid").mockReturnValue(0);
+      const bypass = { ...request, claude: { permissionMode: "bypassPermissions" as const } };
+      expect(claudeEnvironment(request, {}).IS_SANDBOX).toBeUndefined();
+      expect(claudeEnvironment({ ...bypass, mode: "plan" }, {}).IS_SANDBOX).toBeUndefined();
+      uid.mockReturnValue(1000);
+      expect(claudeEnvironment(bypass, {}).IS_SANDBOX).toBeUndefined();
+    });
+
+    it("preserves explicit provider and message sandbox markers", () => {
+      vi.spyOn(unixProcess, "getuid").mockReturnValue(0);
+      const configured = {
+        ...request,
+        claude: { permissionMode: "bypassPermissions" as const },
+        settingsJson: '{"env":{"IS_SANDBOX":"0"}}'
+      };
+      expect(claudeEnvironment(configured, {}).IS_SANDBOX).toBe("0");
+      expect(
+        claudeEnvironment(
+          {
+            ...configured,
+            messageEnvVars: { IS_SANDBOX: "1" }
+          },
+          {}
+        ).IS_SANDBOX
+      ).toBe("1");
+    });
   });
 
   it("uses native planning, resume, project settings, budget and subagent options", () => {

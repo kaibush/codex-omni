@@ -80,6 +80,13 @@ function requestEnvironment(request: BridgeRequest) {
   if (request.baseUrl)
     env.ANTHROPIC_BASE_URL = request.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
   env.CLAUDE_CONFIG_DIR = request.runtimeHome;
+  // Claude requires this marker when root explicitly requests permission bypass.
+  if (
+    process.getuid?.() === 0 &&
+    request.mode !== "plan" &&
+    request.claude?.permissionMode === "bypassPermissions"
+  )
+    env.IS_SANDBOX ??= "1";
   return env;
 }
 
