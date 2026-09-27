@@ -17,6 +17,7 @@ import {
   FolderInput,
   FolderPlus,
   GitFork,
+  History,
   KeyRound,
   ListChecks,
   LoaderCircle,
@@ -271,6 +272,10 @@ export function WorkspaceSidebar({
   const [selectingSessions, setSelectingSessions] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const currentProjectExpanded = Boolean(projectId) && expandedProjectIds.includes(projectId);
+  const openHome = () => {
+    openWorkspace("", "", false, "chat");
+    if (isMobile) setSidebar(false);
+  };
   useEffect(() => {
     setSelectingSessions(false);
     setSelectedSessionIds([]);
@@ -327,17 +332,23 @@ export function WorkspaceSidebar({
             }`}
           >
             {!(sidebarCollapsed && !isMobile) ? (
-              <>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="最近对话首页"
+                title="最近对话首页"
+                onClick={openHome}
+              >
                 <span className="brand-mark grid size-8 shrink-0 place-items-center rounded-lg">
                   <Bot className="size-4 shrink-0" />
                 </span>
-                <div className="min-w-0 flex-1">
+                <span className="min-w-0 flex-1">
                   <b className="block truncate text-sm">Codex Omni</b>
                   <span className="block truncate text-[11px] text-muted-foreground">
                     项目与会话工作台
                   </span>
-                </div>
-              </>
+                </span>
+              </button>
             ) : null}
             <Button
               variant="ghost"
@@ -358,6 +369,20 @@ export function WorkspaceSidebar({
           </div>
           {sidebarCollapsed && !isMobile ? (
             <div className="flex min-h-0 flex-1 flex-col items-center gap-1 px-1 py-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={`size-8 shrink-0 rounded-lg${!projectId ? " bg-sidebar-accent" : ""}`}
+                    aria-label="最近对话首页"
+                    onClick={openHome}
+                  >
+                    <History className="size-4 shrink-0" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">最近对话首页</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { formatCompactDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
 
-const recentRunStatusLabel: Record<RecentRun["status"], string> = {
+export const recentRunStatusLabel: Record<RecentRun["status"], string> = {
   running: "运行中",
   completed: "已完成",
   failed: "失败",

@@ -18,7 +18,7 @@ import {
   type TurnAttachment
 } from "@codex-omni/protocol";
 import { useNavigate, useParams } from "react-router";
-import { FolderPlus, LoaderCircle, Menu } from "lucide-react";
+import { LoaderCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -151,6 +151,7 @@ import {
 } from "@/features/workspace/SettingsDialog";
 import { WorkspaceComposer } from "@/features/workspace/WorkspaceComposer";
 import { WorkspaceHeader } from "@/features/workspace/WorkspaceHeader";
+import { WorkspaceHome } from "@/features/workspace/WorkspaceHome";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
 import { terminalKeepaliveClassName } from "@/features/workspace/terminal-chrome";
@@ -561,12 +562,14 @@ export function Workspace() {
     refetchOnWindowFocus: false
   });
   useEffect(() => {
-    const fallback = projectList[0];
-    if (!fallback) return;
-    if (!projectId || !projectList.some((project) => project.id === projectId)) {
-      openWorkspace(fallback.id, "", true);
+    if (
+      projectId &&
+      projects.isSuccess &&
+      !projects.data.some((project) => project.id === projectId)
+    ) {
+      openWorkspace("", "", true);
     }
-  }, [projectId, projectList, openWorkspace]);
+  }, [projectId, projects.data, projects.isSuccess, openWorkspace]);
   useEffect(() => {
     const updateViewport = () => {
       const mobile = window.innerWidth < 768;
@@ -1634,6 +1637,13 @@ export function Workspace() {
     }
   });
   const beginNewSession = () => {
+    if (!projectId) {
+      if (projectList.length) {
+        setSidebar(true);
+        toast.info("请先选择工程，再新建对话");
+      } else setNewProject(true);
+      return;
+    }
     setNewSessionOpen(true);
   };
   const changeWorkspaceView = (view: WorkspaceView) => {
@@ -1897,7 +1907,7 @@ export function Workspace() {
     onSuccess: (_result, id) => {
       const remaining = (projects.data ?? []).filter((project) => project.id !== id);
       qc.setQueryData<Project[]>(["projects"], remaining);
-      if (projectId === id) openWorkspace(remaining[0]?.id ?? "", "", true);
+      if (projectId === id) openWorkspace("", "", true);
       void qc.invalidateQueries({ queryKey: ["projects"] });
       void qc.removeQueries({ queryKey: ["sessions", id] });
     },
@@ -2918,25 +2928,37 @@ export function Workspace() {
               )}
               <div className="min-w-0 flex-1">
                 <h1 className="text-sm font-semibold tracking-tight">Codex Omni</h1>
-                <p className="text-[11px] text-muted-foreground">打开工程后先查看文件</p>
+                <p className="text-[11px] text-muted-foreground">选择对话，继续工作</p>
               </div>
               <ThemeSwitch />
             </header>
-            <div className="grid min-h-0 flex-1 place-items-center px-6">
-              <div className="max-w-sm text-center">
-                <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-card shadow-sm">
-                  <FolderPlus className="size-6 text-muted-foreground" />
-                </span>
-                <h2 className="mt-4 font-semibold">打开第一个工程</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  选择服务器上的项目目录，即可开始远程编码。
-                </p>
-                <Button className="mt-5" onClick={() => setNewProject(true)}>
-                  <FolderPlus className="size-4" />
-                  打开工程
-                </Button>
+            {projectId && projects.isPending ? (
+              <div
+                className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+                role="status"
+              >
+                <LoaderCircle className="size-4 animate-spin" /> 正在读取工程
               </div>
-            </div>
+            ) : (
+              <WorkspaceHome
+                projects={projectList}
+                projectsPending={projects.isPending}
+                onNewProject={() => setNewProject(true)}
+                onOpenProject={(id) => {
+                  openWorkspace(id, "", false, "chat");
+                  if (isMobile) setSidebar(false);
+                }}
+                onOpenSession={(session) => {
+                  openWorkspace(
+                    session.projectId,
+                    session.sessionId,
+                    false,
+                    session.kind === "terminal-chat" ? "terminal-chat" : "chat"
+                  );
+                  if (isMobile) setSidebar(false);
+                }}
+              />
+            )}
           </>
         )}
       </main>
