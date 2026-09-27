@@ -102,6 +102,11 @@ try {
     env: workerEnvironment(request),
     config: {
       features: { multi_agent: true },
+      // Existing API-key providers may have been created without this flag.
+      // Custom providers otherwise ignore auth.json and the SDK API key.
+      ...(request.homeMode === "api-key" && request.baseUrl
+        ? { model_providers: { custom: { requires_openai_auth: true } } }
+        : {}),
       ...(modelRuntime.contextWindow ? { model_context_window: modelRuntime.contextWindow } : {}),
       ...(modelRuntime.autoCompactTokenLimit
         ? { model_auto_compact_token_limit: modelRuntime.autoCompactTokenLimit }

@@ -424,11 +424,12 @@ export function WorkspaceComposer({
                 <Select
                   value={clientType}
                   onValueChange={(value) => onClientChange?.(value as ClientType)}
-                  disabled={runState?.status === "running"}
+                  disabled={Boolean(activeSession) || runState?.status === "running"}
                 >
                   <SelectTrigger
                     className="composer-select h-8 w-auto min-w-0 rounded-lg"
                     aria-label="客户端"
+                    title={activeSession ? "对话客户端已固定；切换客户端请新建对话" : "选择客户端"}
                   >
                     <SelectValue />
                   </SelectTrigger>

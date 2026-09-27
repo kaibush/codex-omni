@@ -27,7 +27,7 @@ export function ProviderContinuationDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogTitle>切换客户端 / 供应商</DialogTitle>
+        <DialogTitle>切换供应商</DialogTitle>
         <DialogDescription>选择如何使用新的供应商继续当前工作。</DialogDescription>
         <div className="my-4 flex min-w-0 items-center gap-3 rounded-lg border bg-muted p-3 text-sm">
           <span className="min-w-0 flex-1 truncate">{source?.title}</span>
@@ -48,7 +48,7 @@ export function ProviderContinuationDialog({
             <span>
               <span className="block text-sm font-medium">在当前对话继续</span>
               <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                保留当前对话和所有消息。恢复此供应商的线程，并补入切换期间的可读上下文。
+                延续当前客户端的原生会话，保留已有消息与工具上下文。
               </span>
             </span>
           </button>
@@ -69,7 +69,8 @@ export function ProviderContinuationDialog({
           </button>
         </div>
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          跨客户端会带入最近的用户与助手消息，过长内容会截断；共享项目文件，工具执行状态由各客户端分别保存。
+          当前对话使用 {clientName(source?.clientType)}，只能切换同一客户端的供应商。
+          新建续接对话会带入最近的文字上下文，过长内容会截断。
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button

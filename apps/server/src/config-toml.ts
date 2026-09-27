@@ -312,6 +312,7 @@ export function buildApiKeyProviderFiles(input: {
       `name = ${tomlString(input.name.trim() || "custom")}`,
       `base_url = ${tomlString(baseUrl)}`,
       `wire_api = "responses"`,
+      `requires_openai_auth = true`,
       `stream_idle_timeout_ms = ${PROVIDER_STREAM_IDLE_TIMEOUT_MS}`
     );
   }

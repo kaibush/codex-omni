@@ -1,6 +1,7 @@
 import { RuntimeRouter } from "./runtime-router.js";
-import { resolveClientHome } from "./client-provider.js";
+import { providerRuntimeHome, resolveClientHome } from "./client-provider.js";
 import { runtimeHistoryContext, saveRuntimeCursor } from "./session-runtime.js";
+import { transferNativeSession } from "./native-session.js";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import {
@@ -213,6 +214,7 @@ export class RunManager {
   private cancelling = new Set<string>();
   private reconnecting = new Set<string>();
   private activeRuns = new Map<string, ActiveRun>();
+  private nativeTransfers = new Set<string>();
   private failureRetryAborters = new Map<string, () => void>();
   private runtimeMonitor: NodeJS.Timeout;
   readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
@@ -280,9 +282,8 @@ export class RunManager {
       const provider = this.store.getProvider(session.providerId ?? project?.providerId ?? "");
       if (!provider) return null;
       const home =
-        provider.homeMode === "external" && provider.codexHomePath
-          ? provider.codexHomePath
-          : path.join(this.runtimeRoot, "providers", provider.id);
+        session.runtimeHome ??
+        providerRuntimeHome(provider, path.join(this.runtimeRoot, "providers"));
       return readThreadGoal(home, session.threadId);
     } catch {
       return null;
@@ -1028,6 +1029,8 @@ export class RunManager {
   }
 
   private async startTurn(input: TurnStartCommand, sourceQueueId?: string) {
+    if (this.nativeTransfers.has(input.sessionId))
+      throw new Error("原生会话正在同步，请稍后再发送");
     let command = input;
     if (input.type === "run.retry" && input.messageId) {
       const source = this.store.getMessage(input.messageId);
@@ -1078,7 +1081,7 @@ export class RunManager {
     const provider = this.store.getProvider(requestedProvider);
     if (!provider) throw new Error("Provider not found");
     if (provider.kind !== session.clientType)
-      throw new Error("供应商与会话客户端不匹配，请先切换客户端");
+      throw new Error("供应商与会话客户端不匹配；切换客户端请新建全新对话");
     const portableContext =
       runtimeHistoryContext(this.store, session.id, provider.id) ??
       (session.threadId
@@ -1379,6 +1382,27 @@ export class RunManager {
           provider,
           path.join(this.runtimeRoot, "providers")
         );
+        if (
+          session.threadId &&
+          session.runtimeHome &&
+          path.resolve(session.runtimeHome) !== path.resolve(codexHome)
+        ) {
+          this.nativeTransfers.add(session.id);
+          try {
+            await transferNativeSession({
+              clientType: session.clientType,
+              threadId: session.threadId,
+              sourceHome: session.runtimeHome,
+              targetHome: codexHome
+            });
+          } finally {
+            this.nativeTransfers.delete(session.id);
+          }
+        }
+        // A cancellation can arrive during filesystem I/O. Never launch a new
+        // worker after the run has stopped or advance its native state cursor.
+        if (this.store.getRun(requestId)?.status !== "running") return;
+        this.store.updateSession(session.id, { runtimeHome: codexHome });
         await this.worker.run(
           {
             protocolVersion: 1,

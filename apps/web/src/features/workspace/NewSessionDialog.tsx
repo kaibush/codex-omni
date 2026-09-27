@@ -1,4 +1,4 @@
-import { CLIENTS, clientName, type ClientType } from "@codex-omni/protocol";
+import { CLIENTS, clientName, clientType, type ClientType } from "@codex-omni/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { MessageSquarePlus, MessageSquareText, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,13 @@ export function NewSessionDialog({
   const [client, setClient] = useState<ClientType>(initialClient);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const history = useMemo(() => sortSessionsByLatest(listHistoricalSessions(sessions)), [sessions]);
+  const history = useMemo(
+    () =>
+      sortSessionsByLatest(listHistoricalSessions(sessions)).filter(
+        (session) => clientType(session.clientType) === client
+      ),
+    [sessions, client]
+  );
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return history;
@@ -58,7 +64,9 @@ export function NewSessionDialog({
           <MessageSquarePlus className="size-5" />
           新建对话
         </DialogTitle>
-        <DialogDescription>选择客户端；可从空白开始，或带入本项目的历史对话。</DialogDescription>
+        <DialogDescription>
+          选择客户端；可从空白开始，或续接该客户端在本项目的历史对话。
+        </DialogDescription>
         <div className="mt-3 grid grid-cols-2 gap-2" aria-label="对话客户端">
           {CLIENTS.map((entry) => (
             <button
@@ -66,7 +74,10 @@ export function NewSessionDialog({
               key={entry.id}
               aria-pressed={client === entry.id}
               className={`rounded-lg border p-3 text-left ${client === entry.id ? "border-primary bg-accent" : "hover:bg-muted"}`}
-              onClick={() => setClient(entry.id)}
+              onClick={() => {
+                setClient(entry.id);
+                setSelectedId(null);
+              }}
             >
               <span className="block text-sm font-medium">{entry.name}</span>
               <span className="mt-1 block text-xs text-muted-foreground">

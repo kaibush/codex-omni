@@ -206,6 +206,7 @@ export const sessionSchema = z.object({
   projectId: z.string(),
   clientType: clientTypeSchema.optional(),
   threadId: z.string().nullable(),
+  runtimeHome: z.string().nullable().optional(),
   title: z.string(),
   status: z.enum(["idle", "running", "failed", "cancelled", "interrupted"]),
   providerId: z.string().nullable(),

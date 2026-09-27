@@ -55,6 +55,7 @@ export type SessionRow = {
   kind: "chat" | "terminal-chat";
   clientType: "codex" | "claude-code";
   threadId: string | null;
+  runtimeHome: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
   providerId: string | null;
@@ -433,6 +434,8 @@ export class Store {
       this.db.exec("ALTER TABLE sessions ADD COLUMN tags_json TEXT");
     if (!sessionColumns.has("client_type"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN client_type TEXT NOT NULL DEFAULT 'codex'");
+    if (!sessionColumns.has("runtime_home"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN runtime_home TEXT");
     if (!sessionColumns.has("kind"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
     const projectColumns = new Set(
@@ -992,7 +995,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,runtime_home as runtimeHome,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -1023,7 +1026,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.runtime_home as runtimeHome,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -1140,7 +1143,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,runtime_home as runtimeHome,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -1159,6 +1162,7 @@ export class Store {
     }
     return {
       ...session,
+      runtimeHome: session.runtimeHome ?? null,
       tagsJson: tagsJson ?? null,
       tags,
       color: session.color ?? null,
@@ -1175,6 +1179,12 @@ export class Store {
     parentSessionId?: string | null;
     continuationMode?: string | null;
   }): SessionRow {
+    const provider = input.providerId ? this.getProvider(input.providerId) : undefined;
+    const clientType =
+      input.clientType ?? (provider?.kind === "claude-code" ? "claude-code" : "codex");
+    if (provider && provider.kind !== clientType) throw new Error("供应商与会话客户端不匹配");
+    if (input.parentSessionId && this.getSession(input.parentSessionId)?.clientType !== clientType)
+      throw new Error("不同客户端不能互相续接对话，请新建全新对话");
     const now = Date.now(),
       id = nanoid();
     this.db
@@ -1187,10 +1197,7 @@ export class Store {
         input.title ?? DEFAULT_SESSION_TITLE,
         "idle",
         input.kind ?? "chat",
-        input.clientType ??
-          (this.getProvider(input.providerId ?? "")?.kind === "claude-code"
-            ? "claude-code"
-            : "codex"),
+        clientType,
         input.providerId ?? null,
         input.parentSessionId ?? null,
         input.continuationMode ?? null,
@@ -1200,6 +1207,14 @@ export class Store {
         now
       );
     return this.getSession(id)!;
+  }
+  listSessionRuntimeBindings(sessionId: string) {
+    const providers = this.db
+      .prepare("SELECT provider_id FROM session_runtime_bindings WHERE session_id=?")
+      .all(sessionId) as Array<{ provider_id: string }>;
+    return providers.map((provider) =>
+      this.getSessionRuntimeBinding(sessionId, provider.provider_id)!
+    );
   }
   getSessionRuntimeBinding(sessionId: string, providerId: string) {
     return this.db
@@ -1383,7 +1398,7 @@ export class Store {
       Pick<
         SessionRow,
         | "threadId"
-        | "clientType"
+        | "runtimeHome"
         | "status"
         | "providerId"
         | "title"
@@ -1395,6 +1410,13 @@ export class Store {
       >
     >
   ) {
+    if ("clientType" in input) throw new Error("对话客户端不能更换，请新建全新对话");
+    if (input.providerId) {
+      const session = this.getSession(id);
+      const provider = this.getProvider(input.providerId);
+      if (session && provider && session.clientType !== provider.kind)
+        throw new Error("供应商与会话客户端不匹配");
+    }
     const now = Date.now();
     const fields = Object.keys(input)
       .map((k) => `${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}=@${k}`)

@@ -137,7 +137,10 @@ export function claudeQueryOptions(request: BridgeRequest): Options {
           : {}),
         ...(request.baseUrl
           ? { ANTHROPIC_BASE_URL: request.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "") }
-          : {})
+          : {}),
+        // CLI settings env is applied after the inherited process env. Keep
+        // both layers on the native home recorded by the server.
+        CLAUDE_CONFIG_DIR: request.runtimeHome ?? request.codexHome
       }
     },
     mcpServers,

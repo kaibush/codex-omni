@@ -3,6 +3,7 @@ import { listClaudeResources } from "./claude-resources.js";
 import { CLIENTS, clientTypeSchema, claudeOptionsSchema } from "@codex-omni/protocol";
 import {
   claudeProviderFiles,
+  providerRuntimeHome,
   resolveClientHome,
   claudeMcpList,
   updateClaudeMcp
@@ -165,6 +166,7 @@ const queryValue = (req: { query: unknown }, name: string) => {
 const providerHome = (provider: ProviderRow) => resolveClientHome(provider, providersRoot);
 const sessionThreadGoal = async (session: {
   threadId: string | null;
+  runtimeHome?: string | null;
   providerId: string | null;
   projectId: string;
   clientType?: string;
@@ -174,7 +176,7 @@ const sessionThreadGoal = async (session: {
   const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
   if (!provider) return null;
   try {
-    return readThreadGoal(await providerHome(provider), session.threadId);
+    return readThreadGoal(session.runtimeHome ?? (await providerHome(provider)), session.threadId);
   } catch {
     return null;
   }
@@ -1259,7 +1261,7 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
         sessionId: session.id,
         threadId: session.threadId,
         providerId: session.providerId,
-        codexHome: await providerHome(provider)
+        codexHome: session.runtimeHome ?? (await providerHome(provider))
       });
     } catch {
       // Rollout files are optional; keep the session readable if Codex home is missing.
@@ -1394,18 +1396,31 @@ app.post("/api/sessions/bulk-delete", { preHandler: auth }, async (req) => {
     const terminalSession = store.getTerminalSessionBySession(id);
     if (terminalSession) terminalChats.remove(terminalSession.id);
     const providerId = session.providerId ?? store.getProject(session.projectId)?.providerId ?? "";
+    if (body.purgeSource && session.clientType === "codex") {
+      const addThread = (home: string | null, threadId: string | null) => {
+        if (!home || !threadId || !isCodexThreadId(threadId)) return;
+        const bucket = threads.get(home) ?? new Set<string>();
+        bucket.add(threadId);
+        threads.set(home, bucket);
+      };
+      const provider = store.getProvider(providerId);
+      addThread(
+        session.runtimeHome ?? (provider ? providerRuntimeHome(provider, providersRoot) : null),
+        session.threadId
+      );
+      for (const binding of store.listSessionRuntimeBindings(id)) {
+        const previous = store.getProvider(binding.providerId);
+        if (binding.clientType === "codex" && previous?.kind === "codex")
+          addThread(providerRuntimeHome(previous, providersRoot), binding.threadId);
+      }
+    }
     store.deleteSession(id);
     deleted.push(id);
-    if (body.purgeSource && session.threadId && isCodexThreadId(session.threadId) && providerId) {
-      const bucket = threads.get(providerId) ?? new Set<string>();
-      bucket.add(session.threadId);
-      threads.set(providerId, bucket);
-    }
   }
   let purgedFiles = 0;
   let purgedBytes = 0;
   let skippedSharedThreads = 0;
-  for (const [providerId, threadIds] of threads) {
+  for (const [home, threadIds] of threads) {
     const removable: string[] = [];
     for (const threadId of threadIds) {
       if (store.hasSessionWithThread(threadId)) {
@@ -1415,10 +1430,7 @@ app.post("/api/sessions/bulk-delete", { preHandler: auth }, async (req) => {
       removable.push(threadId);
     }
     if (!removable.length) continue;
-    const provider = store.getProvider(providerId);
-    if (!provider || provider.kind === "claude-code") continue;
     try {
-      const home = await providerHome(provider);
       const purged = await purgeProviderThreads(home, removable);
       purgedFiles += purged.files;
       purgedBytes += purged.bytes;
@@ -1440,11 +1452,11 @@ app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
 });
 app.put("/api/sessions/:id/provider", { preHandler: auth }, async (req) => {
   const body = z.object({ providerId: z.string().min(1) }).parse(req.body);
-  return switchSessionProvider(store, routeId(req), body.providerId);
+  return switchSessionProvider(store, routeId(req), body.providerId, providersRoot);
 });
 app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
   const source = store.getSession(routeId(req));
-  if (!source) throw new Error("Source session not found");
+  if (!source) throw httpError(404, "Source session not found");
   const body = z
     .object({
       providerId: z.string().nullable().optional(),
@@ -1453,14 +1465,14 @@ app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
       model: z.string().optional()
     })
     .parse(req.body ?? {});
+  if (body.clientType && body.clientType !== source.clientType)
+    throw httpError(400, "不同客户端不能互相续接对话，请新建全新对话");
   const selection = selectSessionProvider(store, {
     projectId: source.projectId,
-    ...(body.providerId
-      ? { providerId: body.providerId }
-      : !body.clientType && source.providerId
-        ? { providerId: source.providerId }
-        : {}),
-    ...(body.clientType ? { clientType: body.clientType } : {})
+    ...((body.providerId ?? source.providerId)
+      ? { providerId: (body.providerId ?? source.providerId)! }
+      : {}),
+    clientType: source.clientType
   });
   const { providerId } = selection;
   const target = store.createSession({
@@ -1519,7 +1531,7 @@ app.post("/api/sessions/:id/clear-goal", { preHandler: auth }, async (req, reply
   if (!provider) return reply.code(400).send({ error: "当前会话没有可用的供应商" });
   let home: string;
   try {
-    home = await providerHome(provider);
+    home = session.runtimeHome ?? (await providerHome(provider));
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法打开 Codex 目录";
     return reply.code(400).send({ error: message });

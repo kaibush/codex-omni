@@ -1,6 +1,7 @@
 import type { Store } from "@codex-omni/db";
 import { clientName, clientType, type ClientType } from "@codex-omni/protocol";
 import { buildForkContext } from "./session-context.js";
+import { providerRuntimeHome } from "./client-provider.js";
 
 const fail = (message: string, statusCode = 400): never => {
   throw Object.assign(new Error(message), { statusCode });
@@ -40,12 +41,19 @@ export function saveRuntimeCursor(store: Store, sessionId: string) {
   });
 }
 
-export function switchSessionProvider(store: Store, sessionId: string, providerId: string) {
+export function switchSessionProvider(
+  store: Store,
+  sessionId: string,
+  providerId: string,
+  providersRoot: string
+) {
   const session = store.getSession(sessionId);
   if (!session) return fail("Session not found", 404);
   if (session.kind !== "chat") return fail("终端会话不能切换 SDK 供应商");
   const provider = store.getProvider(providerId);
   if (!provider) return fail("Provider not found", 404);
+  if (clientType(provider.kind) !== session.clientType)
+    return fail("对话客户端不能更换，Codex 与 Claude Code 请分别新建对话");
   if (session.providerId === providerId) return session;
   if (session.status === "running" || store.getLatestRun(sessionId)?.status === "running")
     return fail("请等待当前任务结束后切换供应商", 409);
@@ -57,11 +65,15 @@ export function switchSessionProvider(store: Store, sessionId: string, providerI
     !store.getSessionRuntimeBinding(sessionId, session.providerId)
   )
     saveRuntimeCursor(store, sessionId);
-  const binding = store.getSessionRuntimeBinding(sessionId, providerId);
+  let runtimeHome = session.runtimeHome;
+  if (session.threadId && !runtimeHome) {
+    const previous = session.providerId ? store.getProvider(session.providerId) : undefined;
+    if (!previous) return fail("无法定位原生会话目录，请选择新建续接对话", 409);
+    runtimeHome = providerRuntimeHome(previous, providersRoot);
+  }
   const updated = store.updateSession(sessionId, {
     providerId,
-    clientType: clientType(provider.kind),
-    threadId: binding?.threadId ?? null
+    runtimeHome
   });
   if (store.hasMessageRole(sessionId, "user"))
     store.addMessage({
@@ -74,7 +86,8 @@ export function switchSessionProvider(store: Store, sessionId: string, providerI
         previousProviderId: session.providerId,
         providerId,
         clientType: provider.kind,
-        resumed: Boolean(binding)
+        threadId: session.threadId,
+        resumeMode: "native"
       })
     });
   return updated;
@@ -82,27 +95,10 @@ export function switchSessionProvider(store: Store, sessionId: string, providerI
 
 export function runtimeHistoryContext(store: Store, sessionId: string, providerId: string) {
   const session = store.getSession(sessionId);
-  if (!session) return null;
-  // Legacy threads already contain their conversation. Their migration creates
-  // a binding, but keep this fallback for sessions imported by older clients.
-  const binding = store.getSessionRuntimeBinding(sessionId, providerId);
-  if (!binding && session.threadId) return null;
-  const cursor =
-    binding?.lastMessageAt != null && binding.lastMessageId
-      ? { createdAt: binding.lastMessageAt, id: binding.lastMessageId }
-      : undefined;
-  const messages = store.conversationSince(sessionId, cursor);
-  if (!messages.length) return null;
-  if (session.continuationMode === "fork" && !session.threadId)
-    return buildForkContext(session.parentSessionId ?? sessionId, messages);
-  if (
-    !binding &&
-    !store.findMessageByEventType(sessionId, "runtime.switched") &&
-    !messages.some((message) => message.providerId && message.providerId !== providerId)
-  )
-    return null;
-  return buildForkContext(sessionId, messages)
-    .replace(/^此会话从 .*? 分叉。/, "这是同一对话在其他客户端或供应商执行期间产生的历史补充。")
-    .replaceAll("分叉点之前", "切换期间")
-    .replaceAll("fork-history", "provider-history");
+  if (!session || session.threadId || session.continuationMode !== "fork") return null;
+  const provider = store.getProvider(providerId);
+  if (!provider || clientType(provider.kind) !== session.clientType) return null;
+  // Text snapshots are reserved for explicitly created forks/continuations.
+  // Provider switches resume the current native thread, including tool history.
+  return buildForkContext(session.parentSessionId ?? sessionId, store.conversationSince(sessionId));
 }

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -304,14 +305,28 @@ describe("provider runtime settings HTTP contract", () => {
         })
       ).response.status
     ).toBe(400);
-    const inPlace = await call(`/api/sessions/${sessionId}/provider`, "PUT", {
+    const rejectedSwitch = await call(`/api/sessions/${sessionId}/provider`, "PUT", {
       providerId: claudeId
+    });
+    expect(rejectedSwitch.response.status).toBe(400);
+    for (const invalid of [
+      { providerId: claudeId },
+      { clientType: "claude-code" },
+      { providerId: claudeId, clientType: "claude-code" }
+    ]) {
+      expect(
+        (await call(`/api/sessions/${sessionId}/continue`, "POST", invalid)).response.status
+      ).toBe(400);
+    }
+    expect((await call(`/api/projects/${projectId}/sessions`)).body).toHaveLength(1);
+    const inPlace = await call(`/api/sessions/${sessionId}/provider`, "PUT", {
+      providerId: cloned.body.id
     });
     expect(inPlace.response.status).toBe(200);
     expect(inPlace.body).toMatchObject({
       id: sessionId,
-      clientType: "claude-code",
-      providerId: claudeId
+      clientType: "codex",
+      providerId: cloned.body.id
     });
     const continuation = await call(`/api/sessions/${sessionId}/continue`, "POST", {
       providerId: id,
@@ -323,6 +338,27 @@ describe("provider runtime settings HTTP contract", () => {
       continuationMode: "portable-context"
     });
     expect(continuation.body.id).not.toBe(sessionId);
+    const claudeSession = await call(`/api/projects/${projectId}/sessions`, "POST", {
+      providerId: claudeId,
+      clientType: "claude-code"
+    });
+    const claudeSessionId = String(claudeSession.body.id);
+    expect(claudeSession.body.clientType).toBe("claude-code");
+    expect(
+      (await call(`/api/sessions/${claudeSessionId}/provider`, "PUT", { providerId: id })).response
+        .status
+    ).toBe(400);
+    expect(
+      (await call(`/api/sessions/${claudeSessionId}/continue`, "POST", { providerId: id })).response
+        .status
+    ).toBe(400);
+    expect(
+      (await call(`/api/sessions/${claudeSessionId}/continue`, "POST", {})).body
+    ).toMatchObject({
+      clientType: "claude-code",
+      providerId: claudeId,
+      parentSessionId: claudeSessionId
+    });
     expect(
       (
         await call(`/api/projects/${projectId}/agents-md`, "PUT", {
@@ -337,6 +373,34 @@ describe("provider runtime settings HTTP contract", () => {
     expect((await call(`/api/projects/${projectId}/agents-md`)).body.content).not.toBe(
       "# Claude rules"
     );
+    const threadId = randomUUID();
+    const nativeHomes = [id, String(cloned.body.id)].map((providerId) =>
+      path.join(dir!, "runtime", "providers", providerId)
+    );
+    const nativeFiles: string[] = [];
+    for (const home of nativeHomes) {
+      const file = path.join(home, "sessions", `rollout-fixture-${threadId}.jsonl`);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, "native-session-fixture");
+      nativeFiles.push(file);
+    }
+    const seed = new Store(database);
+    try {
+      // Selected provider B, but A still owns the latest native history.
+      seed.updateSession(sessionId, { threadId, runtimeHome: nativeHomes[0]! });
+      for (const providerId of [id, String(cloned.body.id)])
+        seed.saveSessionRuntimeBinding({ sessionId, providerId, clientType: "codex", threadId });
+    } finally {
+      seed.db.close();
+    }
+    const purged = await call("/api/sessions/bulk-delete", "POST", {
+      ids: [sessionId],
+      purgeSource: true
+    });
+    expect(purged.response.status).toBe(200);
+    expect(purged.body.purgedFiles).toBe(2);
+    for (const file of nativeFiles)
+      await expect(readFile(file)).rejects.toMatchObject({ code: "ENOENT" });
     await stopServer();
     const store = new Store(database);
     try {

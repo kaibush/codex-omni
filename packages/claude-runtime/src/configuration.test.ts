@@ -59,6 +59,16 @@ describe("Claude SDK configuration", () => {
     expect(inherited.ANTHROPIC_API_KEY).toBe("unrelated-key");
   });
 
+  it("keeps provider settings and message env from redirecting native session storage", () => {
+    const options = claudeQueryOptions({
+      ...request,
+      settingsJson: '{"env":{"CLAUDE_CONFIG_DIR":"/tmp/wrong-settings"}}',
+      messageEnvVars: { CLAUDE_CONFIG_DIR: "/tmp/wrong-env" }
+    });
+    expect(options.env?.CLAUDE_CONFIG_DIR).toBe("/tmp/isolated");
+    expect(options.settings).toMatchObject({ env: { CLAUDE_CONFIG_DIR: "/tmp/isolated" } });
+  });
+
   it("uses native planning, resume, project settings, budget and subagent options", () => {
     const options = claudeQueryOptions({
       ...request,

@@ -1,4 +1,6 @@
 import type { ProviderRow } from "@codex-omni/db";
+import path from "node:path";
+import os from "node:os";
 import { resolveProviderHome } from "@codex-omni/codex-runtime";
 import {
   parseClaudeMcpServers,
@@ -6,6 +8,23 @@ import {
   resolveClaudeHome
 } from "@codex-omni/claude-runtime";
 import type { ProviderInput } from "@codex-omni/protocol";
+
+// Resolve existing native state without rewriting the provider's configuration.
+export function providerRuntimeHome(provider: ProviderRow, providersRoot: string) {
+  if (provider.homeMode === "external") {
+    const home =
+      provider.kind === "claude-code"
+        ? provider.claudeHomePath ||
+          process.env.CLAUDE_CONFIG_DIR ||
+          path.join(os.homedir(), ".claude")
+        : provider.codexHomePath;
+    if (!home) throw new Error("无法定位供应商的原生会话目录");
+    return path.resolve(home);
+  }
+  return provider.kind === "claude-code"
+    ? path.resolve(providersRoot, provider.id, "claude")
+    : path.resolve(providersRoot, provider.id);
+}
 
 export function resolveClientHome(provider: ProviderRow, providersRoot: string) {
   return provider.kind === "claude-code"

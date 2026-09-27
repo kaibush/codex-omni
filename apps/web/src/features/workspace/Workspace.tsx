@@ -1510,6 +1510,8 @@ export function Workspace() {
   );
   const applyCurrentProvider = async (target: Provider) => {
     if (activeSession) {
+      if (clientType(target.kind) !== clientType(activeSession.clientType))
+        throw new Error("对话客户端不能更换，请新建全新对话");
       const updated = await api<Session>(`/api/sessions/${activeSession.id}/provider`, {
         method: "PUT",
         body: JSON.stringify({ providerId: target.id })
@@ -1528,6 +1530,10 @@ export function Workspace() {
   const chooseProvider = (id: string) => {
     const target = providers.data?.find((entry) => entry.id === id);
     if (!target || (id === activeSession?.providerId && id === providerId)) return;
+    if (activeSession && clientType(target.kind) !== clientType(activeSession.clientType)) {
+      setSendNotice("对话客户端不能更换，请新建全新对话");
+      return;
+    }
     if (runState?.status === "running" || switchingProvider) {
       setSendNotice("请等待当前任务结束后切换供应商");
       return;
@@ -1553,6 +1559,10 @@ export function Workspace() {
   };
   const chooseClient = (kind: ClientType) => {
     if (runState?.status === "running") return;
+    if (activeSession && kind !== clientType(activeSession.clientType)) {
+      setSendNotice("切换客户端请新建对话");
+      return;
+    }
     const compatible = providers.data?.filter((entry) => clientType(entry.kind) === kind) ?? [];
     const target = compatible.find((entry) => entry.isDefault) ?? compatible[0];
     if (target) chooseProvider(target.id);
@@ -1571,6 +1581,8 @@ export function Workspace() {
         compatible[0];
       if (sourceId) {
         const source = (sessions.data ?? []).find((session) => session.id === sourceId);
+        if (source && clientType(source.clientType) !== client)
+          throw new Error("不同客户端不能互相续接对话，请新建全新对话");
         return api<Session>(`/api/sessions/${sourceId}/continue`, {
           method: "POST",
           body: JSON.stringify({
@@ -2000,6 +2012,14 @@ export function Workspace() {
       return;
     }
     if (!activeSession) return;
+    const chosenProvider = providers.data?.find((entry) => entry.id === chosenProviderId);
+    if (
+      chosenProvider &&
+      clientType(chosenProvider.kind) !== clientType(activeSession.clientType)
+    ) {
+      setSendNotice("供应商与会话客户端不匹配，请选择同一客户端的供应商");
+      return;
+    }
     if (
       !options?.skipPrompt &&
       shouldContinueWithProvider({
@@ -2048,11 +2068,7 @@ export function Workspace() {
     setSending(true);
     try {
       const targetProvider = providers.data?.find((entry) => entry.id === chosenProviderId);
-      if (
-        targetProvider &&
-        (activeSession.providerId !== targetProvider.id ||
-          clientType(activeSession.clientType) !== clientType(targetProvider.kind))
-      )
+      if (targetProvider && activeSession.providerId !== targetProvider.id)
         await applyCurrentProvider(targetProvider);
       const composed = usingOverride
         ? {
