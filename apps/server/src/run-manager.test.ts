@@ -116,6 +116,43 @@ function fixture(root = "/tmp/project") {
   return { provider, project, session, socket, sent };
 }
 
+it("does not advance transferred-history cursors when the runtime fails", async () => {
+  const { provider, project, session, socket } = fixture();
+  const previous = store!.addMessage({
+    sessionId: session.id,
+    providerId: provider.id,
+    role: "assistant",
+    content: "Last confirmed context",
+    eventType: null
+  });
+  store!.updateSession(session.id, { threadId: "existing-thread" });
+  store!.saveSessionRuntimeBinding({
+    sessionId: session.id,
+    providerId: provider.id,
+    clientType: "codex",
+    threadId: "existing-thread",
+    lastMessageId: previous.id,
+    lastMessageAt: previous.createdAt
+  });
+  const other = store!.upsertProvider({ name: "Other provider" });
+  store!.addMessage({
+    sessionId: session.id,
+    providerId: other.id,
+    role: "assistant",
+    content: "Unseen context from another provider",
+    eventType: null
+  });
+  runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+    onEvent(bridgeEvent({ seq: 1, type: "run.failed", payload: { message: "401 Unauthorized" } }));
+  });
+  manager = new RunManager(store!, "/tmp/runtime");
+  await manager.handle(
+    { type: "turn.start", sessionId: session.id, projectId: project.id, message: "Continue" },
+    socket
+  );
+  expect(store!.getSessionRuntimeBinding(session.id, provider.id)?.lastMessageId).toBe(previous.id);
+});
+
 function attachmentFixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "omni-attachment-run-"));
   tempDirs.push(dir);

@@ -1,4 +1,6 @@
-import { z } from "zod";
+import { z } from "zod/v3";
+import { approvalResponseFields, claudeOptionsSchema, clientTypeSchema } from "./clients.js";
+export * from "./clients.js";
 
 export const sandboxSchema = z.enum(["read-only", "workspace-write", "danger-full-access"]);
 export const approvalPolicySchema = z.enum(["untrusted", "on-request", "never"]);
@@ -158,7 +160,11 @@ export const providerSchema = z.object({
   isDefault: z.boolean(),
   homeMode: providerHomeModeSchema,
   codexHomePath: z.string().nullable(),
-  codexHome: z.string().optional()
+  codexHome: z.string().optional(),
+  claudeHomePath: z.string().nullable().optional(),
+  settingsJson: z.string().nullable().optional(),
+  mcpServersJson: z.string().nullable().optional(),
+  runtimeHome: z.string().optional()
 });
 export type Provider = z.infer<typeof providerSchema>;
 
@@ -166,7 +172,7 @@ export const providerInputSchema = z
   .object({
     id: z.string().optional(),
     name: z.string().min(1),
-    kind: z.string().optional(),
+    kind: clientTypeSchema.optional(),
     model: z.string().nullable().optional(),
     ...modelRuntimeSettingsFields,
     models: z.array(z.string().min(1)).optional(),
@@ -177,7 +183,10 @@ export const providerInputSchema = z
     messageEnvVars: z.record(z.string(), z.string()).optional(),
     isDefault: z.boolean().optional(),
     homeMode: providerHomeModeSchema.optional(),
-    codexHomePath: z.string().nullable().optional()
+    codexHomePath: z.string().nullable().optional(),
+    claudeHomePath: z.string().nullable().optional(),
+    settingsJson: z.string().nullable().optional(),
+    mcpServersJson: z.string().nullable().optional()
   })
   .superRefine(validateModelRuntimeSettings);
 export type ProviderInput = z.infer<typeof providerInputSchema>;
@@ -195,6 +204,7 @@ export type Project = z.infer<typeof projectSchema>;
 export const sessionSchema = z.object({
   id: z.string(),
   projectId: z.string(),
+  clientType: clientTypeSchema.optional(),
   threadId: z.string().nullable(),
   title: z.string(),
   status: z.enum(["idle", "running", "failed", "cancelled", "interrupted"]),
@@ -260,6 +270,7 @@ export const turnOptionsSchema = z.object({
   approvalPolicy: approvalPolicySchema.optional(),
   networkAccessEnabled: z.boolean().optional(),
   mode: z.enum(["plan", "execute"]).optional(),
+  claude: claudeOptionsSchema.optional(),
   attachments: z.array(turnAttachmentSchema).max(8).optional()
 });
 
@@ -318,7 +329,12 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("approval.respond"),
     sessionId: z.string(),
     requestId: z.string(),
-    decision: z.enum(["accept", "acceptForSession", "decline", "cancel"])
+    ...approvalResponseFields
+  }),
+  z.object({
+    type: z.literal("task.stop"),
+    sessionId: z.string(),
+    taskId: z.string().min(1).max(200)
   }),
   z.object({
     type: z.literal("run.retry"),
@@ -360,6 +376,8 @@ export const queuedTurnSchema = z.object({
 export type QueuedTurn = z.infer<typeof queuedTurnSchema>;
 
 export const activeRunSchema = z.object({
+  clientType: clientTypeSchema.optional(),
+  clientPid: z.number().nullable().optional(),
   id: z.string(),
   sessionId: z.string(),
   sessionTitle: z.string(),
@@ -392,10 +410,18 @@ export const bridgeRequestSchema = z
     projectId: z.string(),
     sessionId: z.string(),
     threadId: z.string().optional(),
+    clientType: clientTypeSchema.optional(),
     cwd: z.string(),
     runtimeKey: z.string(),
     codexHome: z.string(),
+    runtimeHome: z.string().optional(),
+    settingsJson: z.string().optional(),
+    mcpServersJson: z.string().optional(),
+    homeMode: providerHomeModeSchema.optional(),
+    mode: z.enum(["plan", "execute"]).optional(),
+    claude: claudeOptionsSchema.optional(),
     message: z.string(),
+    conversationContext: z.string().max(200_000).optional(),
     model: z.string().optional(),
     ...modelRuntimeSettingsFields,
     baseUrl: z.string().optional(),

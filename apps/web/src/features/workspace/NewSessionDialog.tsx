@@ -1,3 +1,4 @@
+import { CLIENTS, clientName, type ClientType } from "@codex-omni/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { MessageSquarePlus, MessageSquareText, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ const formatSessionTime = (timestamp: number) => {
 
 export function NewSessionDialog({
   open,
+  initialClient = "codex",
   onOpenChange,
   sessions,
   providerNames,
@@ -22,12 +24,14 @@ export function NewSessionDialog({
   onConfirm
 }: {
   open: boolean;
+  initialClient?: ClientType;
   onOpenChange: (open: boolean) => void;
   sessions: Session[];
   providerNames: Map<string, string>;
   busy: boolean;
-  onConfirm: (sourceId: string | null) => void;
+  onConfirm: (sourceId: string | null, client: ClientType) => void;
 }) {
+  const [client, setClient] = useState<ClientType>(initialClient);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const history = useMemo(() => sortSessionsByLatest(listHistoricalSessions(sessions)), [sessions]);
@@ -42,9 +46,10 @@ export function NewSessionDialog({
 
   useEffect(() => {
     if (!open) return;
+    setClient(initialClient);
     setSelectedId(null);
     setQuery("");
-  }, [open]);
+  }, [open, initialClient]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -53,11 +58,27 @@ export function NewSessionDialog({
           <MessageSquarePlus className="size-5" />
           新建对话
         </DialogTitle>
-        <DialogDescription>选择本项目里的一段历史对话带入上下文，或从空白开始。</DialogDescription>
+        <DialogDescription>选择客户端；可从空白开始，或带入本项目的历史对话。</DialogDescription>
+        <div className="mt-3 grid grid-cols-2 gap-2" aria-label="对话客户端">
+          {CLIENTS.map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              aria-pressed={client === entry.id}
+              className={`rounded-lg border p-3 text-left ${client === entry.id ? "border-primary bg-accent" : "hover:bg-muted"}`}
+              onClick={() => setClient(entry.id)}
+            >
+              <span className="block text-sm font-medium">{entry.name}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {entry.id === "claude-code" ? "原生计划、提问与子智能体" : "Codex 工作流与目标管理"}
+              </span>
+            </button>
+          ))}
+        </div>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            className="h-9 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm outline-none transition focus:border-blue-200 focus:ring-4 focus:ring-blue-100/60"
+            className="h-8 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-sm outline-none transition focus:border-blue-200 focus:ring-4 focus:ring-blue-100/60"
             placeholder="搜索历史对话"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -68,7 +89,7 @@ export function NewSessionDialog({
             type="button"
             aria-pressed={selectedId === null}
             onClick={() => setSelectedId(null)}
-            className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
+            className={`flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition ${
               selectedId === null
                 ? "border-blue-200 bg-accent"
                 : "border-border bg-card hover:bg-muted"
@@ -90,7 +111,7 @@ export function NewSessionDialog({
               type="button"
               aria-pressed={selectedId === session.id}
               onClick={() => setSelectedId(session.id)}
-              className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
+              className={`flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition ${
                 selectedId === session.id
                   ? "border-blue-200 bg-accent"
                   : "border-border bg-card hover:bg-muted"
@@ -103,6 +124,7 @@ export function NewSessionDialog({
                 <span className="block truncate text-sm font-medium">{session.title}</span>
                 <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                   {[
+                    clientName(session.clientType),
                     session.providerId ? providerNames.get(session.providerId) : null,
                     formatSessionTime(session.updatedAt)
                   ]
@@ -113,7 +135,7 @@ export function NewSessionDialog({
             </button>
           ))}
           {!filtered.length && (
-            <div className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
+            <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
               没有匹配的历史对话
             </div>
           )}
@@ -122,7 +144,7 @@ export function NewSessionDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             取消
           </Button>
-          <Button disabled={busy} onClick={() => onConfirm(selectedId)}>
+          <Button disabled={busy} onClick={() => onConfirm(selectedId, client)}>
             {selectedId ? "带入上下文并开始" : "开始全新对话"}
           </Button>
         </div>

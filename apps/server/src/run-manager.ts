@@ -1,9 +1,10 @@
+import { RuntimeRouter } from "./runtime-router.js";
+import { resolveClientHome } from "./client-provider.js";
+import { runtimeHistoryContext, saveRuntimeCursor } from "./session-runtime.js";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import {
-  BridgeWorkerAdapter,
   INCOMPLETE_TURN_MESSAGE,
-  resolveProviderHome,
   runtimeKey,
   sanitizeCodexAttachments,
   terminateRecordedWorker,
@@ -19,6 +20,8 @@ import {
 } from "@codex-omni/db";
 import {
   applyTextPatch,
+  clientName,
+  clientType,
   compactStreamEvent,
   firstUsefulFailureMessage,
   isGenericCodexExecError,
@@ -26,6 +29,7 @@ import {
   turnOptionsSchema,
   truncateToolText,
   type BridgeEvent,
+  type BridgeRequest,
   type RunCommand,
   type TurnAttachment
 } from "@codex-omni/protocol";
@@ -75,6 +79,7 @@ const isDroppableStreamEvent = (type: string) =>
   type === "assistant.delta" || type === "reasoning.delta" || type === "tool.output";
 
 const runtimeDefaults = {
+  claude: {} as NonNullable<BridgeRequest["claude"]>,
   sandbox: "workspace-write" as const,
   approvalPolicy: "on-request" as const,
   networkAccessEnabled: true,
@@ -187,7 +192,7 @@ function resolveFailureMessage(
 ) {
   const run = store.getRun(requestId);
   const reconnecting = parseJson<Record<string, unknown>>(run?.reconnectingJson, {});
-  return sanitizeCodexExecError(
+  const message = sanitizeCodexExecError(
     incoming,
     firstUsefulFailureMessage(
       previous,
@@ -196,10 +201,14 @@ function resolveFailureMessage(
       failureMessageFromRunEvents(store, requestId)
     )
   );
+  const provider = run?.providerId ? store.getProvider(run.providerId) : undefined;
+  return provider?.kind === "claude-code"
+    ? message.replace(/^Codex (?=进程异常退出|运行失败)/, "Claude Code ")
+    : message;
 }
 
 export class RunManager {
-  private worker = new BridgeWorkerAdapter();
+  private worker = new RuntimeRouter();
   private subscribers = new Map<string, Set<WebSocket>>();
   private cancelling = new Set<string>();
   private reconnecting = new Set<string>();
@@ -266,7 +275,7 @@ export class RunManager {
   private sessionThreadGoal(sessionId: string) {
     try {
       const session = this.store.getSession(sessionId);
-      if (!session?.threadId) return null;
+      if (session?.clientType === "claude-code" || !session?.threadId) return null;
       const project = this.store.getProject(session.projectId);
       const provider = this.store.getProvider(session.providerId ?? project?.providerId ?? "");
       if (!provider) return null;
@@ -348,6 +357,9 @@ export class RunManager {
     if (!run) return null;
     return {
       ...run,
+      clientType: clientType(
+        run.providerId ? this.store.getProvider(run.providerId)?.kind : undefined
+      ),
       usage: parseJson<Record<string, number> | null>(run.usageJson, null),
       reconnecting: parseJson<Record<string, unknown> | null>(run.reconnectingJson, null),
       runtimeAlive: this.worker.isActive(run.sessionId)
@@ -599,6 +611,7 @@ export class RunManager {
       ...(command.model ? { model: command.model } : {}),
       ...(command.sandbox ? { sandbox: command.sandbox } : {}),
       ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+      ...(command.claude ? { claude: command.claude } : {}),
       ...(typeof command.networkAccessEnabled === "boolean"
         ? { networkAccessEnabled: command.networkAccessEnabled }
         : {}),
@@ -846,7 +859,7 @@ export class RunManager {
     return this.queueCommand(command);
   }
 
-  private steerTurn(command: SteerCommand) {
+  private async steerTurn(command: SteerCommand) {
     const session = this.store.getSession(command.sessionId);
     const project = this.store.getProject(command.projectId);
     if (!session || !project || session.projectId !== project.id)
@@ -874,6 +887,7 @@ export class RunManager {
         ...(command.model ? { model: command.model } : {}),
         ...(command.sandbox ? { sandbox: command.sandbox } : {}),
         ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+        ...(command.claude ? { claude: command.claude } : {}),
         ...(typeof command.networkAccessEnabled === "boolean"
           ? { networkAccessEnabled: command.networkAccessEnabled }
           : {}),
@@ -882,13 +896,16 @@ export class RunManager {
       });
       return;
     }
-    if (!this.worker.steer(command.sessionId, command.message, attachments))
-      throw new Error("当前运行无法插入消息");
+    if (!(await this.worker.steer(command.sessionId, command.message, attachments))) {
+      this.queueCommand({ ...command, type: "turn.enqueue", attachments });
+      return;
+    }
     const providerId = this.store.getRun(active.runId)?.providerId ?? session.providerId;
     const turnOptions = {
       ...(command.model ? { model: command.model } : {}),
       ...(command.sandbox ? { sandbox: command.sandbox } : {}),
       ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+      ...(command.claude ? { claude: command.claude } : {}),
       ...(typeof command.networkAccessEnabled === "boolean"
         ? { networkAccessEnabled: command.networkAccessEnabled }
         : {}),
@@ -954,6 +971,7 @@ export class RunManager {
         ...(command.model ? { model: command.model } : {}),
         ...(command.sandbox ? { sandbox: command.sandbox } : {}),
         ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
+        ...(command.claude ? { claude: command.claude } : {}),
         ...(typeof command.networkAccessEnabled === "boolean"
           ? { networkAccessEnabled: command.networkAccessEnabled }
           : {}),
@@ -982,6 +1000,7 @@ export class RunManager {
       ...(options.model ? { model: String(options.model) } : {}),
       ...(options.sandbox ? { sandbox: options.sandbox } : {}),
       ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
+      ...(options.claude ? { claude: options.claude } : {}),
       ...(typeof options.networkAccessEnabled === "boolean"
         ? { networkAccessEnabled: options.networkAccessEnabled }
         : {}),
@@ -1058,15 +1077,19 @@ export class RunManager {
     }
     const provider = this.store.getProvider(requestedProvider);
     if (!provider) throw new Error("Provider not found");
-    const portableContext = session.threadId
-      ? null
-      : (this.store.findMessageByEventType(session.id, "provider.continuation")?.content ??
-        (session.continuationMode === "fork"
-          ? buildForkContext(
-              session.parentSessionId ?? session.id,
-              this.forkContextMessages(session.id)
-            )
-          : null));
+    if (provider.kind !== session.clientType)
+      throw new Error("供应商与会话客户端不匹配，请先切换客户端");
+    const portableContext =
+      runtimeHistoryContext(this.store, session.id, provider.id) ??
+      (session.threadId
+        ? null
+        : (this.store.findMessageByEventType(session.id, "provider.continuation")?.content ??
+          (session.continuationMode === "fork"
+            ? buildForkContext(
+                session.parentSessionId ?? session.id,
+                this.forkContextMessages(session.id)
+              )
+            : null)));
     const continuationRetry = command.continuationRetry === true;
     const failureRetry = command.failureRetry === true;
     const failureRetryAttempt = command.failureRetryAttempt ?? 0;
@@ -1075,7 +1098,7 @@ export class RunManager {
       ? "自动复核：继续执行上一轮未完成的工作"
       : failureRetry
         ? FAILURE_RETRY_USER_MESSAGE
-        : planMode
+        : planMode && session.clientType === "codex"
           ? applyPlanMode(command.message)
           : command.message;
     const settings = this.store.getSettings(runtimeDefaults);
@@ -1102,9 +1125,13 @@ export class RunManager {
     const runtimeBody = projectRules
       ? `${projectRules}\n\n${userMessageText}${continuationDirective}`
       : `${userMessageText}${continuationDirective}`;
-    const runtimeMessage = portableContext
-      ? `${portableContext}\n\nContinue from that context and answer this new user request:\n\n${runtimeBody}`
-      : runtimeBody;
+    const claudeOptions =
+      session.clientType === "claude-code" ? { ...settings.claude, ...command.claude } : undefined;
+    const runtimeMessage = claudeOptions
+      ? `${userMessageText}${continuationDirective}`
+      : portableContext
+        ? `${portableContext}\n\nContinue from that context and answer this new user request:\n\n${runtimeBody}`
+        : runtimeBody;
     this.cancelling.delete(session.id);
     this.reconnecting.delete(session.id);
     const startedAt = Date.now();
@@ -1129,7 +1156,8 @@ export class RunManager {
       sandbox: planMode ? ("read-only" as const) : (command.sandbox ?? settings.sandbox),
       approvalPolicy: command.approvalPolicy ?? settings.approvalPolicy,
       networkAccessEnabled: command.networkAccessEnabled ?? settings.networkAccessEnabled,
-      mode: planMode ? ("plan" as const) : ("execute" as const)
+      mode: planMode ? ("plan" as const) : ("execute" as const),
+      ...(claudeOptions ? { claude: claudeOptions } : {})
     };
     this.store.createRun({
       id: requestId,
@@ -1157,7 +1185,7 @@ export class RunManager {
       sessionId: session.id,
       seq: 0,
       type: "run.started",
-      payload: { status: "running", startedAt }
+      payload: { status: "running", startedAt, clientType: session.clientType }
     };
     this.broadcast(session.id, this.persistEvent(session.id, provider.id, initialEvent));
     const isFirstUserMessage = !this.store.hasMessageRole(session.id, "user");
@@ -1212,7 +1240,11 @@ export class RunManager {
         ...rawEvent,
         requestId,
         projectId: project.id,
-        sessionId: session.id
+        sessionId: session.id,
+        payload: {
+          ...(rawEvent.payload as Record<string, unknown>),
+          clientType: session.clientType
+        }
       });
       if (event.type === "turn.completed") {
         // Completion is provisional until the worker has drained and exited cleanly.
@@ -1264,7 +1296,8 @@ export class RunManager {
           "tool.output",
           "file.change",
           "approval.requested"
-        ].includes(event.type)
+        ].includes(event.type) &&
+        payload.tool !== "client_capabilities"
       ) {
         const run = this.store.getRun(requestId);
         if (run && !run.firstResponseAt) {
@@ -1283,6 +1316,12 @@ export class RunManager {
         if (threadId) {
           this.store.updateSession(session.id, { threadId });
           this.store.updateRun(requestId, { threadId });
+          this.store.saveSessionRuntimeBinding({
+            sessionId: session.id,
+            providerId: provider.id,
+            clientType: session.clientType,
+            threadId
+          });
         }
       }
       if (event.type === "run.failed") {
@@ -1336,17 +1375,14 @@ export class RunManager {
           onEvent: onRuntimeEvent
         });
       } else {
-        const codexHome = await resolveProviderHome({
-          providersRoot: path.join(this.runtimeRoot, "providers"),
-          providerId: provider.id,
-          homeMode: provider.homeMode,
-          codexHomePath: provider.codexHomePath,
-          configToml: provider.configToml,
-          authJson: provider.authJson
-        });
+        const codexHome = await resolveClientHome(
+          provider,
+          path.join(this.runtimeRoot, "providers")
+        );
         await this.worker.run(
           {
             protocolVersion: 1,
+            clientType: session.clientType,
             requestId,
             projectId: project.id,
             sessionId: session.id,
@@ -1354,6 +1390,27 @@ export class RunManager {
             cwd: project.realPath,
             runtimeKey: runtimeKey(project.id, provider.id),
             codexHome,
+            runtimeHome: codexHome,
+            homeMode:
+              provider.homeMode === "external"
+                ? "external"
+                : provider.homeMode === "api-key"
+                  ? "api-key"
+                  : "managed",
+            ...(provider.settingsJson ? { settingsJson: provider.settingsJson } : {}),
+            ...(provider.mcpServersJson ? { mcpServersJson: provider.mcpServersJson } : {}),
+            ...(claudeOptions
+              ? {
+                  claude: {
+                    ...claudeOptions,
+                    systemPrompt: [claudeOptions.systemPrompt, projectRules]
+                      .filter(Boolean)
+                      .join("\n\n")
+                  }
+                }
+              : {}),
+            ...(claudeOptions && portableContext ? { conversationContext: portableContext } : {}),
+            mode: turnOptions.mode,
             message: runtimeMessage,
             ...(selectedModel ? { model: selectedModel } : {}),
             ...(provider.contextWindow != null ? { contextWindow: provider.contextWindow } : {}),
@@ -1376,15 +1433,19 @@ export class RunManager {
           (runtime) => this.updateRuntime(requestId, runtime)
         );
         const latest = this.store.getSession(session.id);
-        this.publishRolloutBackfill({
-          sessionId: session.id,
-          projectId: project.id,
-          providerId: provider.id,
-          threadId: latest?.threadId ?? session.threadId,
-          codexHome
-        });
+        if (session.clientType === "codex")
+          this.publishRolloutBackfill({
+            sessionId: session.id,
+            projectId: project.id,
+            providerId: provider.id,
+            threadId: latest?.threadId ?? session.threadId,
+            codexHome
+          });
         try {
-          const currentGoal = readThreadGoal(codexHome, latest?.threadId ?? session.threadId);
+          const currentGoal =
+            session.clientType === "codex"
+              ? readThreadGoal(codexHome, latest?.threadId ?? session.threadId)
+              : null;
           if (currentGoal && isThreadGoalLocked(currentGoal)) lockedGoal = currentGoal;
         } catch {
           lockedGoal = null;
@@ -1392,7 +1453,12 @@ export class RunManager {
       }
       const currentRun = this.store.getRun(requestId);
       if (currentRun?.status !== "running") return;
-      if (!completionEvent) throw new Error(INCOMPLETE_TURN_MESSAGE);
+      if (!completionEvent)
+        throw new Error(
+          session.clientType === "codex"
+            ? INCOMPLETE_TURN_MESSAGE
+            : `${clientName(session.clientType)} 事件流在返回结果前结束，任务未完成`
+        );
       // Rollout/tool events can arrive after the SDK completion event. Publish the
       // terminal event last so replay cursors never skip it.
       const terminal = {
@@ -1402,20 +1468,21 @@ export class RunManager {
       const terminalPayload = (terminal.payload ?? {}) as Record<string, unknown>;
       const assistantText = [...assistantTextByItem.values()].join("\n");
       const latestAssistantText = [...assistantTextByItem.values()].at(-1) ?? "";
-      const incompleteReason = lockedGoal
-        ? undefined
-        : continuationRetry && !hasExecutionEvidence
-          ? (command.continuationRetryReason ?? "continuation")
-          : incompleteTurnReason({
-              message: command.message,
-              planMode,
-              continuationApplied,
-              assistantText,
-              latestAssistantText,
-              hasExecutionEvidence,
-              compactedThisTurn,
-              hasPostCompactionExecution
-            });
+      const incompleteReason =
+        lockedGoal || session.clientType === "claude-code"
+          ? undefined
+          : continuationRetry && !hasExecutionEvidence
+            ? (command.continuationRetryReason ?? "continuation")
+            : incompleteTurnReason({
+                message: command.message,
+                planMode,
+                continuationApplied,
+                assistantText,
+                latestAssistantText,
+                hasExecutionEvidence,
+                compactedThisTurn,
+                hasPostCompactionExecution
+              });
       if (incompleteReason) {
         const retry = !continuationRetry && settings.continuationEnabled === true;
         const reason = continuationRetry
@@ -1521,6 +1588,9 @@ export class RunManager {
         this.finishRun(session.id, "failed", { startedAt, reason });
       }
     } finally {
+      // Failed startup or cancellation may leave the transferred history unread.
+      // Keep the old cursor so a subsequent attempt cannot silently skip it.
+      if (completed) saveRuntimeCursor(this.store, session.id);
       clearTimeout(timeout);
       const cancelled =
         this.cancelling.has(session.id) || this.store.getRun(requestId)?.status === "cancelled";
@@ -1674,11 +1744,21 @@ export class RunManager {
     ) {
       this.subscribe(command.sessionId, socket);
     }
+    if (command.type === "task.stop") {
+      if (!(await this.worker.stopTask(command.sessionId, command.taskId)))
+        throw new Error("当前会话没有可停止的 Claude 子任务");
+      return;
+    }
     if (command.type === "approval.respond") {
       const approval = this.store.getApproval(command.requestId);
       if (!approval || approval.sessionId !== command.sessionId || approval.status !== "pending")
         throw new Error("Approval request is no longer active");
-      if (!this.worker.respond(command.sessionId, command.requestId, command.decision))
+      if (
+        !this.worker.respond(command.sessionId, command.requestId, command.decision, {
+          ...(command.answers ? { answers: command.answers } : {}),
+          ...(command.updatedInput ? { updatedInput: command.updatedInput } : {})
+        })
+      )
         throw new Error("Approval request is no longer active");
       const status =
         command.decision === "decline"
@@ -1691,6 +1771,8 @@ export class RunManager {
       const payload = {
         ...parseJson<Record<string, unknown>>(approval.payloadJson, {}),
         approvalId: approval.id,
+        ...(command.answers ? { answers: command.answers } : {}),
+        ...(command.updatedInput ? { updatedInput: command.updatedInput } : {}),
         status,
         decision: command.decision,
         resolvedAt: resolved?.resolvedAt
@@ -1717,7 +1799,7 @@ export class RunManager {
       return;
     }
     if (command.type === "turn.steer") {
-      this.steerTurn(command);
+      await this.steerTurn(command);
       return;
     }
     if (command.type === "queue.remove") {
@@ -1770,12 +1852,14 @@ export class RunManager {
         projectName: project?.name ?? run.projectId,
         providerId: run.providerId,
         providerName: provider?.name ?? null,
+        clientType: clientType(provider?.kind),
         threadId: run.threadId,
         status: run.status,
         model: run.model,
         cwd: run.cwd,
         workerPid: runtime?.workerPid ?? run.workerPid,
         codexPid: runtime?.codexPid ?? run.codexPid,
+        clientPid: runtime?.clientPid ?? runtime?.codexPid ?? run.codexPid,
         serviceInstanceId: run.serviceInstanceId,
         startedAt: run.startedAt,
         firstResponseAt: run.firstResponseAt,

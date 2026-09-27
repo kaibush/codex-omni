@@ -65,9 +65,14 @@ export async function listProviderSkills(codexHome: string) {
   return listSkillDir(codexHome, "provider", "skills");
 }
 
-export async function listProjectSkills(projectRoot: string) {
+export async function listProjectSkills(
+  projectRoot: string,
+  client: "codex" | "claude-code" = "codex"
+) {
   const groups = await Promise.all(
-    SKILL_DIRS.map((directory) => listSkillDir(projectRoot, "project", directory))
+    (client === "claude-code" ? [".claude/skills"] : SKILL_DIRS).map((directory) =>
+      listSkillDir(projectRoot, "project", directory)
+    )
   );
   const seen = new Set<string>();
   const skills: SkillInfo[] = [];

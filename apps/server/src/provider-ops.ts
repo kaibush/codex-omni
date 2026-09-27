@@ -1,5 +1,7 @@
 import {
+  clientTypeSchema,
   modelRuntimeSettingsSchema,
+  type ClientType,
   normalizeProviderHomeMode,
   type ProviderHomeMode
 } from "@codex-omni/protocol";
@@ -16,7 +18,7 @@ export function parseProviderRuntimeSettings(value: unknown) {
 
 export type ProviderExport = {
   name: string;
-  kind: string;
+  kind: ClientType;
   model: string | null;
   contextWindow: number | null;
   autoCompactTokenLimit: number | null;
@@ -28,6 +30,9 @@ export type ProviderExport = {
   messageEnvVars: Record<string, string>;
   homeMode: ProviderHomeMode;
   codexHomePath: string | null;
+  claudeHomePath?: string | null;
+  settingsJson?: string | null;
+  mcpServersJson?: string | null;
 };
 
 export function serializeProviderExport(input: {
@@ -44,11 +49,21 @@ export function serializeProviderExport(input: {
   messageEnvVars?: Record<string, string>;
   homeMode?: string | null;
   codexHomePath?: string | null;
+  claudeHomePath?: string | null;
+  settingsJson?: string | null;
+  mcpServersJson?: string | null;
 }): ProviderExport {
   const homeMode = normalizeProviderHomeMode(input.homeMode);
   return {
     name: input.name,
-    kind: input.kind || "codex",
+    kind: clientTypeSchema.parse(input.kind || "codex"),
+    ...(input.kind === "claude-code"
+      ? {
+          claudeHomePath: input.claudeHomePath ?? null,
+          settingsJson: input.settingsJson ?? null,
+          mcpServersJson: input.mcpServersJson ?? null
+        }
+      : {}),
     model: input.model ?? null,
     contextWindow: input.contextWindow ?? null,
     autoCompactTokenLimit: input.autoCompactTokenLimit ?? null,
@@ -67,6 +82,7 @@ export function parseProviderImport(value: unknown): ProviderExport {
   if (typeof value !== "object" || !value)
     throw Object.assign(new Error("导入内容必须是 JSON 对象"), { statusCode: 400 });
   const record = value as Record<string, unknown>;
+  const kind = clientTypeSchema.parse(record.kind || "codex");
   const runtimeSettings = parseProviderRuntimeSettings(record);
   const name = typeof record.name === "string" ? record.name.trim() : "";
   if (!name) throw Object.assign(new Error("导入配置缺少供应商名称"), { statusCode: 400 });
@@ -80,7 +96,9 @@ export function parseProviderImport(value: unknown): ProviderExport {
     typeof record.codexHomePath === "string" && record.codexHomePath.trim()
       ? record.codexHomePath.trim()
       : null;
-  if (homeMode === "api-key") {
+  if (kind === "claude-code") {
+    // Claude native settings and external login are validated by its adapter.
+  } else if (homeMode === "api-key") {
     if (!apiKey && !authJson.trim())
       throw Object.assign(new Error("导入配置缺少 API Key"), { statusCode: 400 });
   } else if (homeMode === "external") {
@@ -106,7 +124,14 @@ export function parseProviderImport(value: unknown): ProviderExport {
       : {};
   return {
     name,
-    kind: typeof record.kind === "string" && record.kind.trim() ? record.kind : "codex",
+    kind,
+    ...(kind === "claude-code"
+      ? {
+          claudeHomePath: typeof record.claudeHomePath === "string" ? record.claudeHomePath : null,
+          settingsJson: typeof record.settingsJson === "string" ? record.settingsJson : null,
+          mcpServersJson: typeof record.mcpServersJson === "string" ? record.mcpServersJson : null
+        }
+      : {}),
     model: typeof record.model === "string" && record.model.trim() ? record.model : null,
     contextWindow: runtimeSettings.contextWindow ?? null,
     autoCompactTokenLimit: runtimeSettings.autoCompactTokenLimit ?? null,
@@ -125,7 +150,55 @@ export function cloneProviderName(name: string) {
   return name.endsWith(" 副本") ? `${name} 2` : `${name} 副本`;
 }
 
+export function providerHttpConnection(input: {
+  kind?: string;
+  settingsJson?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  configToml?: string | null;
+  authJson?: string | null;
+  messageEnvVars?: Record<string, string>;
+}) {
+  if (input.kind !== "claude-code") {
+    const connection = parseProviderConnection(input);
+    return {
+      ...connection,
+      headers: {
+        accept: "application/json",
+        ...(connection.apiKey ? { authorization: `Bearer ${connection.apiKey}` } : {})
+      } as Record<string, string>
+    };
+  }
+  const settings = input.settingsJson
+    ? (JSON.parse(input.settingsJson) as { env?: Record<string, string> })
+    : {};
+  const env = { ...settings.env, ...input.messageEnvVars };
+  const raw = (input.baseUrl || env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(
+    /\/+$/,
+    ""
+  );
+  const baseUrl = /\/v1(?:\/|$)/.test(raw) ? raw : `${raw}/v1`;
+  const apiKey = input.apiKey || env.ANTHROPIC_API_KEY || null;
+  return {
+    baseUrl,
+    apiKey,
+    headers: {
+      accept: "application/json",
+      "anthropic-version": "2023-06-01",
+      ...(apiKey
+        ? { "x-api-key": apiKey }
+        : env.ANTHROPIC_AUTH_TOKEN
+          ? { authorization: `Bearer ${env.ANTHROPIC_AUTH_TOKEN}` }
+          : {})
+    } as Record<string, string>
+  };
+}
+
 export async function testProviderConnection(input: {
+  kind?: string;
+  settingsJson?: string | null;
+  messageEnvVars?: Record<string, string>;
+  homeMode?: string | null;
   baseUrl?: string | null;
   apiKey?: string | null;
   configToml?: string | null;
@@ -143,7 +216,7 @@ export async function testProviderConnection(input: {
       error: "auth.json 不是有效 JSON"
     };
   }
-  const { baseUrl, apiKey } = parseProviderConnection(input);
+  const { baseUrl, apiKey, headers } = providerHttpConnection(input);
   if (!baseUrl) {
     return {
       ok: models.length > 0,
@@ -156,11 +229,17 @@ export async function testProviderConnection(input: {
     };
   }
   try {
+    if (input.kind === "claude-code" && !apiKey && !headers.authorization)
+      return {
+        ok: false,
+        durationMs: Date.now() - started,
+        models,
+        reachable: false,
+        error:
+          "此供应商使用本地 Claude 登录；可直接发起 SDK 对话。HTTP 模型探测需要 API Key 或 Auth Token。"
+      };
     const response = await fetch(`${baseUrl}/models`, {
-      headers: {
-        accept: "application/json",
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
-      },
+      headers,
       signal: AbortSignal.timeout(8000)
     });
     const durationMs = Date.now() - started;
@@ -238,6 +317,11 @@ function completionText(payload: unknown) {
 }
 
 export async function enhancePrompt(input: {
+  kind?: string;
+  settingsJson?: string | null;
+  models?: string[];
+  messageEnvVars?: Record<string, string>;
+  homeMode?: string | null;
   baseUrl?: string | null;
   apiKey?: string | null;
   configToml?: string | null;
@@ -247,33 +331,59 @@ export async function enhancePrompt(input: {
 }) {
   const text = input.text.trim();
   if (!text) throw Object.assign(new Error("请先输入要强化的提示词"), { statusCode: 400 });
-  const { baseUrl, apiKey } = parseProviderConnection(input);
+  const { baseUrl, headers } = providerHttpConnection(input);
   if (!baseUrl)
     throw Object.assign(new Error("当前供应商未配置 Base URL，无法强化提示词"), {
       statusCode: 400
     });
-  const model =
-    input.model?.trim() || parseModelsFromConfigToml(input.configToml)[0] || "gpt-4o-mini";
+  let model =
+    input.model?.trim() ||
+    parseModelsFromConfigToml(input.configToml)[0] ||
+    (input.kind === "claude-code" ? "sonnet" : "gpt-4o-mini");
+  if (input.kind === "claude-code" && ["sonnet", "opus", "haiku"].includes(model)) {
+    const settings = input.settingsJson
+      ? (JSON.parse(input.settingsJson) as { env?: Record<string, string> })
+      : {};
+    const env = { ...settings.env, ...input.messageEnvVars };
+    const mapped = env[`ANTHROPIC_DEFAULT_${model.toUpperCase()}_MODEL`];
+    const family = new RegExp(`^claude-${model}-`, "i");
+    const catalog = input.models?.some((id) => family.test(id))
+      ? input.models
+      : (await testProviderConnection(input)).models;
+    model = mapped || catalog.find((id) => family.test(id)) || model;
+  }
   const started = Date.now();
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: PROMPT_ENHANCE_INSTRUCTION },
-          { role: "user", content: text }
-        ]
-      }),
-      signal: AbortSignal.timeout(PROMPT_ENHANCE_TIMEOUT_MS)
-    });
+    response = await fetch(
+      `${baseUrl}/${input.kind === "claude-code" ? "messages" : "chat/completions"}`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          ...headers
+        },
+        body: JSON.stringify(
+          input.kind === "claude-code"
+            ? {
+                model,
+                max_tokens: 4096,
+                system: PROMPT_ENHANCE_INSTRUCTION,
+                messages: [{ role: "user", content: text }]
+              }
+            : {
+                model,
+                temperature: 0.2,
+                messages: [
+                  { role: "system", content: PROMPT_ENHANCE_INSTRUCTION },
+                  { role: "user", content: text }
+                ]
+              }
+        ),
+        signal: AbortSignal.timeout(PROMPT_ENHANCE_TIMEOUT_MS)
+      }
+    );
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw Object.assign(
@@ -289,7 +399,19 @@ export async function enhancePrompt(input: {
   if (!response.ok) {
     throw Object.assign(new Error(`强化接口返回 HTTP ${response.status}`), { statusCode: 502 });
   }
-  const enhanced = completionText(await response.json().catch(() => null));
+  const payload = (await response.json().catch(() => null)) as {
+    content?: Array<{ type?: string; text?: string }>;
+  } | null;
+  const enhanced =
+    input.kind === "claude-code"
+      ? Array.isArray(payload?.content)
+        ? payload.content
+            .filter((block: { type?: string }) => block.type === "text")
+            .map((block: { text?: string }) => block.text ?? "")
+            .join("\n")
+            .trim()
+        : ""
+      : completionText(payload);
   if (!enhanced) throw Object.assign(new Error("强化结果为空"), { statusCode: 502 });
   return { text: enhanced, model, durationMs };
 }

@@ -1,3 +1,4 @@
+import { clientType, type ClientType } from "@codex-omni/protocol";
 import {
   lazy,
   Suspense,
@@ -10,7 +11,12 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { applyTextPatch, compactTimelineItem, numberedDuplicateTitles, type TurnAttachment } from "@codex-omni/protocol";
+import {
+  applyTextPatch,
+  compactTimelineItem,
+  numberedDuplicateTitles,
+  type TurnAttachment
+} from "@codex-omni/protocol";
 import { useNavigate, useParams } from "react-router";
 import { FolderPlus, LoaderCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,7 +59,6 @@ import {
 } from "@/lib/composer-selection";
 import {
   isPlaceholderSessionTitle,
-  listHistoricalSessions,
   sortSessionsByLatest,
   titleFromFirstMessage
 } from "@/lib/session-title";
@@ -186,6 +191,13 @@ export function Workspace() {
   const params = useParams<{ projectId?: string; sessionId?: string; section?: string }>();
   const projectId = params.projectId ?? "";
   const sessionId = params.sessionId ?? "";
+  const [composerClient, setComposerClient] = useState<ClientType>("codex");
+  const [switchingProvider, setSwitchingProvider] = useState(false);
+  const pendingProviderSend = useRef<{
+    text: string | null | undefined;
+    attachments: TurnAttachment[];
+    model: string;
+  } | null>(null);
   const [providerId, setProviderId] = useState(() => loadComposerProviderId());
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -331,10 +343,15 @@ export function Workspace() {
   const replayCursors = useRef(new Map<string, ReplayCursor>());
   const reconnectAttempts = useRef(0);
   const draftSessionKey = useRef("");
+  const continuedDraft = useRef<{
+    sessionId: string;
+    value: ReturnType<typeof parseComposerDraft>;
+  } | null>(null);
   const cachedProjectId = useRef(projectId);
   const pendingContinuationSend = useRef<{
     sessionId: string;
-    message: string;
+    message: string | null;
+    retryAttachments: TurnAttachment[];
     providerId: string;
   } | null>(null);
   const chatScroll = useRef<HTMLDivElement | null>(null);
@@ -472,7 +489,10 @@ export function Workspace() {
     [projectSessions]
   );
   const sessionDisplayTitles = useMemo(
-    () => numberedDuplicateTitles(projectSessions.filter((session) => session.kind === "terminal-chat")),
+    () =>
+      numberedDuplicateTitles(
+        projectSessions.filter((session) => session.kind === "terminal-chat")
+      ),
     [projectSessions]
   );
   const sessionGroups = useMemo(
@@ -592,7 +612,9 @@ export function Workspace() {
   useEffect(() => {
     const key = sessionId ? `codex-omni:draft:${projectId}:${sessionId}` : "";
     draftSessionKey.current = key;
-    const draft = parseComposerDraft(key ? localStorage.getItem(key) : null);
+    const pending = continuedDraft.current?.sessionId === sessionId ? continuedDraft.current : null;
+    const draft = pending?.value ?? parseComposerDraft(key ? localStorage.getItem(key) : null);
+    if (pending) continuedDraft.current = null;
     setInput(draft.text);
     setAttachments(draft.attachments);
     setAttachError("");
@@ -620,6 +642,7 @@ export function Workspace() {
       return;
     }
     hydratedComposerSessionId.current = sessionId;
+    setComposerClient(clientType(selected.clientType));
     setProviderId((current) => {
       const next = resolveComposerProviderId({
         sessionProviderId: selected.providerId,
@@ -627,7 +650,9 @@ export function Workspace() {
           projects.data?.find((project) => project.id === selected.projectId)?.providerId ?? null,
         currentProviderId: current,
         lastUsedProviderId: loadComposerProviderId(),
-        providers: providers.data,
+        providers: providers.data?.filter(
+          (provider) => clientType(provider.kind) === clientType(selected.clientType)
+        ),
         keepCurrentOnEmptySession: isUnstartedComposerSession({
           threadId: selected.threadId
         })
@@ -872,10 +897,10 @@ export function Workspace() {
         const snapshot = payload as SessionSnapshot;
         settledTurn = Boolean(
           (snapshot.run && snapshot.run.status !== "running") ||
-            (!snapshot.run &&
-              snapshot.session?.status &&
-              snapshot.session.status !== "idle" &&
-              snapshot.session.status !== "running")
+          (!snapshot.run &&
+            snapshot.session?.status &&
+            snapshot.session.status !== "idle" &&
+            snapshot.session.status !== "running")
         );
         if (snapshot.session) {
           qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
@@ -1252,8 +1277,8 @@ export function Workspace() {
   useEffect(() => {
     const pending = pendingContinuationSend.current;
     if (pending && pending.sessionId === sessionId) {
-      const message = pending.message.trim();
-      if (!message) {
+      const message = pending.message?.trim() ?? null;
+      if (message === "" && !pending.retryAttachments.length) {
         pendingContinuationSend.current = null;
         return;
       }
@@ -1261,7 +1286,7 @@ export function Workspace() {
         sessionId,
         kind: "continue",
         overrideText: message,
-        retryAttachments: [],
+        retryAttachments: pending.retryAttachments,
         providerId: pending.providerId,
         model: ""
       });
@@ -1362,7 +1387,8 @@ export function Workspace() {
         const page = await api<SessionDetailPage>(
           `/api/sessions/${sessionId}?limit=${SESSION_PAGE_SIZE}&aroundId=${encodeURIComponent(messageId)}`
         );
-        if (currentSessionId.current !== sessionId || historyRequestId.current !== requestId) return;
+        if (currentSessionId.current !== sessionId || historyRequestId.current !== requestId)
+          return;
         const next = page.messages
           .filter(isVisibleTimelineMessage)
           .map((message) => fromMessage(message));
@@ -1400,9 +1426,12 @@ export function Workspace() {
   }, []);
   useEffect(() => {
     if (!providers.data?.length) return;
-    const next = fallbackProviderId(providers.data, providerId || loadComposerProviderId());
+    const next = fallbackProviderId(
+      providers.data.filter((provider) => clientType(provider.kind) === composerClient),
+      providerId || loadComposerProviderId()
+    );
     if (next && next !== providerId) setProviderId(next);
-  }, [providers.data, providerId]);
+  }, [providers.data, providerId, composerClient]);
   const pendingApprovals = useMemo(
     () =>
       events.filter(
@@ -1418,17 +1447,46 @@ export function Workspace() {
   });
   const approvalNotice = approvalSummary(pendingApprovals.length);
   const contextEstimate = formatContextEstimate(input, attachments);
-  const extraSlashCommands = useMemo<SlashCommand[]>(
-    () =>
-      (templates.data ?? [])
-        .filter((item) => item.command)
-        .map((item) => ({
-          name: item.command as string,
-          title: item.name,
-          prompt: item.content
-        })),
-    [templates.data]
-  );
+  const clientResources = useQuery({
+    queryKey: ["client-resources", projectId, providerId],
+    queryFn: () =>
+      api<{ resources: Array<{ name: string; description: string; kind: string }> }>(
+        `/api/projects/${projectId}/client-resources?providerId=${encodeURIComponent(providerId)}`
+      ),
+    enabled: Boolean(projectId && providerId && composerClient === "claude-code")
+  });
+  const extraSlashCommands = useMemo<SlashCommand[]>(() => {
+    const templatesList = (templates.data ?? [])
+      .filter((item) => item.command)
+      .map((item) => ({ name: item.command as string, title: item.name, prompt: item.content }));
+    if (composerClient !== "claude-code") return templatesList;
+    const capabilities = [...events]
+      .reverse()
+      .find(
+        (item) => item.data?.tool === "client_capabilities" && item.providerId === providerId
+      )?.data;
+    const unavailable = new Set(capabilities?.terminalCommands ?? []);
+    const commands = [
+      ...new Set([
+        "compact",
+        "context",
+        "usage",
+        ...(capabilities?.commands ?? []),
+        ...(clientResources.data?.resources ?? [])
+          .filter((entry) => entry.kind === "command")
+          .map((entry) => entry.name)
+      ])
+    ].filter((name): name is string => typeof name === "string" && !unavailable.has(name));
+    return [
+      ...commands.map((name) => ({
+        name: `/${name.replace(/^\//, "")}`,
+        title: `Claude · ${name}`,
+        prompt: `/${name.replace(/^\//, "")}`,
+        native: true
+      })),
+      ...templatesList
+    ];
+  }, [templates.data, composerClient, events, providerId, clientResources.data]);
   const lastAssistantText =
     [...events].reverse().find((item) => item.kind === "assistant")?.text ?? "";
   const availableModels = useMemo(() => selectedProvider?.models ?? [], [selectedProvider?.models]);
@@ -1450,14 +1508,74 @@ export function Workspace() {
     () => new Map(providers.data?.map((p) => [p.id, p.name]) ?? []),
     [providers.data]
   );
+  const applyCurrentProvider = async (target: Provider) => {
+    if (activeSession) {
+      const updated = await api<Session>(`/api/sessions/${activeSession.id}/provider`, {
+        method: "PUT",
+        body: JSON.stringify({ providerId: target.id })
+      });
+      qc.setQueryData<SessionDetailPage>(["session", activeSession.id], (current) =>
+        current ? { ...current, session: updated } : current
+      );
+      qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
+        (current ?? []).map((entry) => (entry.id === updated.id ? updated : entry))
+      );
+      await qc.invalidateQueries({ queryKey: ["session", activeSession.id] });
+    }
+    setComposerClient(clientType(target.kind));
+    setProviderId(target.id);
+  };
+  const chooseProvider = (id: string) => {
+    const target = providers.data?.find((entry) => entry.id === id);
+    if (!target || (id === activeSession?.providerId && id === providerId)) return;
+    if (runState?.status === "running" || switchingProvider) {
+      setSendNotice("请等待当前任务结束后切换供应商");
+      return;
+    }
+    pendingProviderSend.current = null;
+    if (
+      activeSession &&
+      shouldContinueWithProvider({
+        sessionProviderId: activeSession.providerId,
+        selectedProviderId: id,
+        hasConversation: timelineHasConversation(events),
+        continuationMode: activeSession.continuationMode,
+        threadId: activeSession.threadId
+      })
+    ) {
+      setContinuation(target);
+      return;
+    }
+    setSwitchingProvider(true);
+    void applyCurrentProvider(target)
+      .catch((error) => setSendNotice(error instanceof Error ? error.message : "切换失败"))
+      .finally(() => setSwitchingProvider(false));
+  };
+  const chooseClient = (kind: ClientType) => {
+    if (runState?.status === "running") return;
+    const compatible = providers.data?.filter((entry) => clientType(entry.kind) === kind) ?? [];
+    const target = compatible.find((entry) => entry.isDefault) ?? compatible[0];
+    if (target) chooseProvider(target.id);
+    else {
+      setComposerClient(kind);
+      setProviderId("");
+      setProviderManager(true);
+    }
+  };
   const startSession = useMutation({
-    mutationFn: async (sourceId: string | null) => {
+    mutationFn: async ({ sourceId, client }: { sourceId: string | null; client: ClientType }) => {
+      const compatible = providers.data?.filter((entry) => clientType(entry.kind) === client) ?? [];
+      const targetProvider =
+        compatible.find((entry) => entry.id === providerId) ??
+        compatible.find((entry) => entry.isDefault) ??
+        compatible[0];
       if (sourceId) {
         const source = (sessions.data ?? []).find((session) => session.id === sourceId);
         return api<Session>(`/api/sessions/${sourceId}/continue`, {
           method: "POST",
           body: JSON.stringify({
-            ...(providerId ? { providerId } : {}),
+            clientType: client,
+            ...(targetProvider ? { providerId: targetProvider.id } : {}),
             ...(source?.title ? { title: source.title } : {})
           })
         });
@@ -1465,11 +1583,14 @@ export function Workspace() {
       return api<Session>(`/api/projects/${projectId}/sessions`, {
         method: "POST",
         body: JSON.stringify({
-          providerId: providerId || activeProject?.providerId || providers.data?.[0]?.id || null
+          clientType: client,
+          providerId: targetProvider?.id ?? null
         })
       });
     },
     onSuccess: (s) => {
+      setComposerClient(clientType(s.clientType));
+      setProviderId(s.providerId ?? "");
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) => [
         s,
         ...(current ?? []).filter((session) => session.id !== s.id)
@@ -1483,9 +1604,7 @@ export function Workspace() {
     }
   });
   const beginNewSession = () => {
-    const history = listHistoricalSessions(projectSessions);
-    if (!history.length) startSession.mutate(null);
-    else setNewSessionOpen(true);
+    setNewSessionOpen(true);
   };
   const changeWorkspaceView = (view: WorkspaceView) => {
     if (view === "chat" && activeSession?.kind === "terminal-chat") {
@@ -1614,8 +1733,10 @@ export function Workspace() {
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
         (current ?? []).filter((session) => session.id !== id)
       );
-      qc.setQueryData<{ items: TerminalChatSession[] }>(["terminal-chat-sessions", projectId], (current) =>
-        current ? { items: current.items.filter((item) => item.sessionId !== id) } : current
+      qc.setQueryData<{ items: TerminalChatSession[] }>(
+        ["terminal-chat-sessions", projectId],
+        (current) =>
+          current ? { items: current.items.filter((item) => item.sessionId !== id) } : current
       );
       if (sessionId === id) {
         const deleted = (sessions.data ?? []).find((session) => session.id === id);
@@ -1624,7 +1745,12 @@ export function Workspace() {
           openWorkspace(projectId, next?.id ?? "", true, "terminal-chat");
         } else {
           const next = remaining[0];
-          openWorkspace(projectId, next?.id ?? "", true, next?.kind === "terminal-chat" ? "terminal-chat" : "chat");
+          openWorkspace(
+            projectId,
+            next?.id ?? "",
+            true,
+            next?.kind === "terminal-chat" ? "terminal-chat" : "chat"
+          );
         }
       }
       void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
@@ -1647,8 +1773,12 @@ export function Workspace() {
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
         (current ?? []).filter((session) => !removed.has(session.id))
       );
-      qc.setQueryData<{ items: TerminalChatSession[] }>(["terminal-chat-sessions", projectId], (current) =>
-        current ? { items: current.items.filter((item) => !removed.has(item.sessionId)) } : current
+      qc.setQueryData<{ items: TerminalChatSession[] }>(
+        ["terminal-chat-sessions", projectId],
+        (current) =>
+          current
+            ? { items: current.items.filter((item) => !removed.has(item.sessionId)) }
+            : current
       );
       if (removed.has(sessionId)) {
         const next = remaining[0];
@@ -1656,7 +1786,9 @@ export function Workspace() {
           projectId,
           next?.id ?? "",
           true,
-          next?.kind === "terminal-chat" || workspaceView === "terminal-chat" ? "terminal-chat" : "chat"
+          next?.kind === "terminal-chat" || workspaceView === "terminal-chat"
+            ? "terminal-chat"
+            : "chat"
         );
       }
       for (const id of result.deleted) void qc.removeQueries({ queryKey: ["session", id] });
@@ -1728,7 +1860,9 @@ export function Workspace() {
       }),
     onSuccess: (updated, variables) => {
       if (!updated) return;
-      const previous = qc.getQueryData<Project[]>(["projects"])?.find((item) => item.id === updated.id);
+      const previous = qc
+        .getQueryData<Project[]>(["projects"])
+        ?.find((item) => item.id === updated.id);
       qc.setQueryData<Project[]>(["projects"], (current) =>
         current?.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
       );
@@ -1876,7 +2010,12 @@ export function Workspace() {
         threadId: activeSession.threadId
       })
     ) {
-      setContinuation(selectedProvider);
+      pendingProviderSend.current = {
+        text: overrideText,
+        attachments: retryAttachments,
+        model: chosenModel
+      };
+      setContinuation(providers.data?.find((entry) => entry.id === chosenProviderId) ?? null);
       return;
     }
     const promptKind = options?.skipPrompt
@@ -1908,6 +2047,13 @@ export function Workspace() {
     }
     setSending(true);
     try {
+      const targetProvider = providers.data?.find((entry) => entry.id === chosenProviderId);
+      if (
+        targetProvider &&
+        (activeSession.providerId !== targetProvider.id ||
+          clientType(activeSession.clientType) !== clientType(targetProvider.kind))
+      )
+        await applyCurrentProvider(targetProvider);
       const composed = usingOverride
         ? {
             message: raw,
@@ -1946,7 +2092,11 @@ export function Workspace() {
         sandbox: workspaceSettings.sandbox,
         approvalPolicy: workspaceSettings.approvalPolicy,
         networkAccessEnabled: workspaceSettings.networkAccessEnabled,
-        mode: workspaceSettings.executionMode
+        mode: workspaceSettings.executionMode,
+        ...(clientType(providers.data?.find((entry) => entry.id === chosenProviderId)?.kind) ===
+        "claude-code"
+          ? { claude: workspaceSettings.claude ?? {} }
+          : {})
       });
       if (!steering) {
         queuedCommands.current = boundOutboundCommands([
@@ -1968,6 +2118,11 @@ export function Workspace() {
               approvalPolicy: workspaceSettings.approvalPolicy,
               networkAccessEnabled: workspaceSettings.networkAccessEnabled,
               mode: workspaceSettings.executionMode,
+              ...(clientType(
+                providers.data?.find((entry) => entry.id === chosenProviderId)?.kind
+              ) === "claude-code"
+                ? { claude: workspaceSettings.claude ?? {} }
+                : {}),
               displayMessage: composed.displayMessage,
               ...(composed.attachments.length ? { attachments: composed.attachments } : {})
             },
@@ -2262,7 +2417,9 @@ export function Workspace() {
         ?.filter(
           (message) =>
             message.content.trim() &&
-            (message.role === "user" || message.role === "assistant" || message.role === "reasoning")
+            (message.role === "user" ||
+              message.role === "assistant" ||
+              message.role === "reasoning")
         )
         .map((message) => {
           const heading =
@@ -2469,7 +2626,11 @@ export function Workspace() {
               setSidebar={setSidebar}
               activeProject={activeProject}
               activeSession={activeSession ?? undefined}
-              sessionDisplayTitle={activeSession ? (sessionDisplayTitles.get(activeSession.id) ?? activeSession.title) : undefined}
+              sessionDisplayTitle={
+                activeSession
+                  ? (sessionDisplayTitles.get(activeSession.id) ?? activeSession.title)
+                  : undefined
+              }
               renamingSessionId={renamingSessionId}
               setRenamingSessionId={setRenamingSessionId}
               renameDraft={renameDraft}
@@ -2498,185 +2659,213 @@ export function Workspace() {
               deleteSession={deleteSession}
             />
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            {workspaceView !== "terminal-chat" && <WorkspaceTimeline
-              key={`${projectId}:${sessionId}`}
-              workspaceView={workspaceView}
-              messageHits={messageHits}
-              highlightMessageId={highlightMessageId}
-              jumpMessageHit={jumpMessageHit}
-              setMessageHits={setMessageHits}
-              events={events}
-              setHighlightMessageId={setHighlightMessageId}
-              chatScroll={chatScroll}
-              stickToBottom={stickToBottom}
-              followingLive={followingLive}
-              hasDeferredLiveEvents={hasDeferredLiveEvents}
-              pauseLiveTimeline={pauseLiveTimeline}
-              resumeLiveTimeline={resumeLiveTimeline}
-              loadOlderMessages={loadOlderMessages}
-              hasOlderMessages={hasOlderMessages}
-              historyLoading={historyLoading}
-              historyExpanded={historyExpanded.current}
-              timelineLockId={timelineLockId}
-              onTimelineLockHandled={handleTimelineLockHandled}
-              activeSession={activeSession ?? undefined}
-              projectPath={activeProject?.realPath}
-              projectDisplayPath={activeProject?.displayPath}
-              sessionLoading={sessionLoading}
-              detailError={detail.isError}
-              refetchDetail={() => void detail.refetch()}
-              workspaceSettings={workspaceSettings}
-              providerNames={providerNames}
-              forkSessionFrom={forkSessionFrom}
-              setWorkspaceView={setWorkspaceView}
-              setOpenFileRequest={requestOpenFile}
-              setInput={setInput}
-              setAttachments={setAttachments}
-              inputRef={inputRef}
-              submitMessage={submitMessage}
-              retryMessage={retryMessage}
-              quoteToInput={quoteToInput}
-              copyMessageLink={copyMessageLink}
-              setCreateFile={setCreateFile}
-              setCreateFilePath={setCreateFilePath}
-              socket={socket}
-              sessionId={sessionId}
-              setSendNotice={setSendNotice}
-              setEvents={setEvents}
-              beginNewSession={beginNewSession}
-              startSessionPending={startSession.isPending}
-              recentSessions={projectSessions.filter((session) => !session.archivedAt).slice(0, 12)}
-              sessionsPending={sessions.isPending}
-              onOpenSession={(id) => openWorkspace(projectId, id, false, projectSessions.find((session) => session.id === id)?.kind === "terminal-chat" ? "terminal-chat" : "chat")}
-              onOpenRecentSession={(nextProjectId, nextSessionId) => {
-                openWorkspace(nextProjectId, nextSessionId, false, "chat");
-                if (isMobile) setSidebar(false);
-              }}
-              runState={runState}
-              connection={connection}
-              sendNotice={sendNotice}
-              saveWorkspaceSettings={saveWorkspaceSettings}
-              loadFullMessage={loadFullMessage}
-              threadGoal={detail.data?.threadGoal ?? null}
-              clearingGoal={clearingGoal}
-              onClearThreadGoal={() => void clearThreadGoal()}
-              outlineItems={mergeSessionOutline(outlineQuery.data?.items ?? [], events)}
-              onJumpOutline={(id) => void jumpToOutlineMessage(id)}
-            />}
-            {workspaceView !== "terminal-chat" && <WorkspaceComposer
-              workspaceView={workspaceView}
-              activeSession={activeSession ?? undefined}
-              dragActive={dragActive}
-              setDragActive={setDragActive}
-              addAttachments={addAttachments}
-              queuedTurns={queuedTurns}
-              runState={runState}
-              editingQueueId={editingQueueId}
-              queueDraft={queueDraft}
-              setQueueDraft={setQueueDraft}
-              setEditingQueueId={setEditingQueueId}
-              updateQueuedTurn={updateQueuedTurn}
-              removeQueuedTurn={removeQueuedTurn}
-              moveQueuedTurn={moveQueuedTurn}
-              startNextQueuedTurn={startNextQueuedTurn}
-              selectedProvider={selectedProvider ?? undefined}
-              mentionRange={mentionRange}
-              slashOpen={slashOpen}
-              extraSlashCommands={extraSlashCommands}
-              input={input}
-              setInput={setInput}
-              inputRef={inputRef}
-              mentionItems={mentionItems}
-              setMentionRange={setMentionRange}
-              setMentionItems={setMentionItems}
-              setSlashOpen={setSlashOpen}
-              attachments={attachments}
-              setAttachments={setAttachments}
-              attachError={attachError}
-              attachInputRef={attachInputRef}
-              projectId={projectId}
-              providerId={providerId}
-              setProviderId={setProviderId}
-              providers={providers.data}
-              connection={connection}
-              reconnectAttempt={reconnectAttempts.current}
-              runtimeCodexHome={runtime.data?.defaultCodexHome}
-              workspaceSettings={workspaceSettings}
-              approvalNotice={approvalNotice}
-              pendingApprovalsCount={pendingApprovals.length}
-              contextEstimate={contextEstimate}
-              runtimeOptionsOpen={runtimeOptionsOpen}
-              setRuntimeOptionsOpen={setRuntimeOptionsOpen}
-              saveWorkspaceSettings={saveWorkspaceSettings}
-              model={model}
-              setModel={setModel}
-              availableModels={availableModels}
-              cancelTurn={cancelTurn}
-              blockReason={blockReason}
-              send={send}
-              sendNotice={sendNotice}
-              activeProject={activeProject}
-              enhanceNonce={enhanceNonce}
-            />}
-            {activeProject && filesVisited ? (
-              <div
-                className={terminalKeepaliveClassName(workspaceView === "files" || workspaceView === "git")}
-                aria-hidden={workspaceView !== "files" && workspaceView !== "git"}
-                {...(workspaceView === "files" || workspaceView === "git" ? {} : { inert: true })}
-              >
-                <ProjectFilesPanel
-                  key={`${activeProject.id}:${activeProject.realPath}`}
-                  project={activeProject}
-                  view={workspaceView === "git" ? "git" : "files"}
-                  onViewChange={setWorkspaceView}
-                  openFileRequest={openFileRequest}
-                  onOpenFileHandled={() => setOpenFileRequest(null)}
-                  editorCommand={editorCommand}
-                  onCommandHandled={() => setEditorCommand(null)}
-                  focusCommit={focusCommit}
-                  onOpenCommit={openGitCommit}
-                  onDirtyCount={setDirtyCount}
-                  onGitCount={setGitCount}
-                />
-              </div>
-            ) : null}
-            {activeProject && workspaceView === "terminal" && (
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <Suspense
-                  fallback={
-                    <div className="grid h-full place-items-center text-sm text-muted-foreground">
-                      <span className="flex items-center gap-2">
-                        <LoaderCircle className="size-4 animate-spin" /> 正在加载终端
-                      </span>
-                    </div>
+              {workspaceView !== "terminal-chat" && (
+                <WorkspaceTimeline
+                  key={`${projectId}:${sessionId}`}
+                  workspaceView={workspaceView}
+                  messageHits={messageHits}
+                  highlightMessageId={highlightMessageId}
+                  jumpMessageHit={jumpMessageHit}
+                  setMessageHits={setMessageHits}
+                  events={events}
+                  setHighlightMessageId={setHighlightMessageId}
+                  chatScroll={chatScroll}
+                  stickToBottom={stickToBottom}
+                  followingLive={followingLive}
+                  hasDeferredLiveEvents={hasDeferredLiveEvents}
+                  pauseLiveTimeline={pauseLiveTimeline}
+                  resumeLiveTimeline={resumeLiveTimeline}
+                  loadOlderMessages={loadOlderMessages}
+                  hasOlderMessages={hasOlderMessages}
+                  historyLoading={historyLoading}
+                  historyExpanded={historyExpanded.current}
+                  timelineLockId={timelineLockId}
+                  onTimelineLockHandled={handleTimelineLockHandled}
+                  activeSession={activeSession ?? undefined}
+                  projectPath={activeProject?.realPath}
+                  projectDisplayPath={activeProject?.displayPath}
+                  sessionLoading={sessionLoading}
+                  detailError={detail.isError}
+                  refetchDetail={() => void detail.refetch()}
+                  workspaceSettings={workspaceSettings}
+                  providerNames={providerNames}
+                  forkSessionFrom={forkSessionFrom}
+                  setWorkspaceView={setWorkspaceView}
+                  setOpenFileRequest={requestOpenFile}
+                  setInput={setInput}
+                  setAttachments={setAttachments}
+                  inputRef={inputRef}
+                  submitMessage={submitMessage}
+                  retryMessage={retryMessage}
+                  quoteToInput={quoteToInput}
+                  copyMessageLink={copyMessageLink}
+                  setCreateFile={setCreateFile}
+                  setCreateFilePath={setCreateFilePath}
+                  socket={socket}
+                  sessionId={sessionId}
+                  setSendNotice={setSendNotice}
+                  setEvents={setEvents}
+                  beginNewSession={beginNewSession}
+                  startSessionPending={startSession.isPending}
+                  recentSessions={projectSessions
+                    .filter((session) => !session.archivedAt)
+                    .slice(0, 12)}
+                  sessionsPending={sessions.isPending}
+                  onOpenSession={(id) =>
+                    openWorkspace(
+                      projectId,
+                      id,
+                      false,
+                      projectSessions.find((session) => session.id === id)?.kind === "terminal-chat"
+                        ? "terminal-chat"
+                        : "chat"
+                    )
                   }
+                  onOpenRecentSession={(nextProjectId, nextSessionId) => {
+                    openWorkspace(nextProjectId, nextSessionId, false, "chat");
+                    if (isMobile) setSidebar(false);
+                  }}
+                  runState={runState}
+                  connection={connection}
+                  sendNotice={sendNotice}
+                  saveWorkspaceSettings={saveWorkspaceSettings}
+                  loadFullMessage={loadFullMessage}
+                  threadGoal={detail.data?.threadGoal ?? null}
+                  clearingGoal={clearingGoal}
+                  onClearThreadGoal={() => void clearThreadGoal()}
+                  outlineItems={mergeSessionOutline(outlineQuery.data?.items ?? [], events)}
+                  onJumpOutline={(id) => void jumpToOutlineMessage(id)}
+                />
+              )}
+              {workspaceView !== "terminal-chat" && (
+                <WorkspaceComposer
+                  workspaceView={workspaceView}
+                  activeSession={activeSession ?? undefined}
+                  dragActive={dragActive}
+                  setDragActive={setDragActive}
+                  addAttachments={addAttachments}
+                  queuedTurns={queuedTurns}
+                  runState={runState}
+                  editingQueueId={editingQueueId}
+                  queueDraft={queueDraft}
+                  setQueueDraft={setQueueDraft}
+                  setEditingQueueId={setEditingQueueId}
+                  updateQueuedTurn={updateQueuedTurn}
+                  removeQueuedTurn={removeQueuedTurn}
+                  moveQueuedTurn={moveQueuedTurn}
+                  startNextQueuedTurn={startNextQueuedTurn}
+                  selectedProvider={selectedProvider ?? undefined}
+                  mentionRange={mentionRange}
+                  slashOpen={slashOpen}
+                  extraSlashCommands={extraSlashCommands}
+                  input={input}
+                  setInput={setInput}
+                  inputRef={inputRef}
+                  mentionItems={mentionItems}
+                  setMentionRange={setMentionRange}
+                  setMentionItems={setMentionItems}
+                  setSlashOpen={setSlashOpen}
+                  attachments={attachments}
+                  setAttachments={setAttachments}
+                  attachError={attachError}
+                  attachInputRef={attachInputRef}
+                  projectId={projectId}
+                  providerId={providerId}
+                  setProviderId={chooseProvider}
+                  clientType={composerClient}
+                  onClientChange={chooseClient}
+                  providers={providers.data?.filter(
+                    (entry) => clientType(entry.kind) === composerClient
+                  )}
+                  connection={connection}
+                  reconnectAttempt={reconnectAttempts.current}
+                  runtimeCodexHome={runtime.data?.defaultCodexHome}
+                  workspaceSettings={workspaceSettings}
+                  approvalNotice={approvalNotice}
+                  pendingApprovalsCount={pendingApprovals.length}
+                  contextEstimate={contextEstimate}
+                  runtimeOptionsOpen={runtimeOptionsOpen}
+                  setRuntimeOptionsOpen={setRuntimeOptionsOpen}
+                  saveWorkspaceSettings={saveWorkspaceSettings}
+                  model={model}
+                  setModel={setModel}
+                  availableModels={availableModels}
+                  cancelTurn={cancelTurn}
+                  blockReason={blockReason}
+                  send={send}
+                  sendNotice={sendNotice}
+                  activeProject={activeProject}
+                  enhanceNonce={enhanceNonce}
+                />
+              )}
+              {activeProject && filesVisited ? (
+                <div
+                  className={terminalKeepaliveClassName(
+                    workspaceView === "files" || workspaceView === "git"
+                  )}
+                  aria-hidden={workspaceView !== "files" && workspaceView !== "git"}
+                  {...(workspaceView === "files" || workspaceView === "git" ? {} : { inert: true })}
                 >
-                  <TerminalPanel
+                  <ProjectFilesPanel
                     key={`${activeProject.id}:${activeProject.realPath}`}
                     project={activeProject}
+                    view={workspaceView === "git" ? "git" : "files"}
+                    onViewChange={setWorkspaceView}
+                    openFileRequest={openFileRequest}
+                    onOpenFileHandled={() => setOpenFileRequest(null)}
+                    editorCommand={editorCommand}
+                    onCommandHandled={() => setEditorCommand(null)}
+                    focusCommit={focusCommit}
+                    onOpenCommit={openGitCommit}
+                    onDirtyCount={setDirtyCount}
+                    onGitCount={setGitCount}
                   />
-                </Suspense>
-              </div>
-            )}
-            {activeProject && terminalChatVisited ? (
-              <div
-                className={terminalKeepaliveClassName(workspaceView === "terminal-chat")}
-                aria-hidden={workspaceView !== "terminal-chat"}
-                {...(workspaceView === "terminal-chat" ? {} : { inert: true })}
-              >
-                <Suspense
-                  fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在加载终端对话</div>}
+                </div>
+              ) : null}
+              {activeProject && workspaceView === "terminal" && (
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <Suspense
+                    fallback={
+                      <div className="grid h-full place-items-center text-sm text-muted-foreground">
+                        <span className="flex items-center gap-2">
+                          <LoaderCircle className="size-4 animate-spin" /> 正在加载终端
+                        </span>
+                      </div>
+                    }
+                  >
+                    <TerminalPanel
+                      key={`${activeProject.id}:${activeProject.realPath}`}
+                      project={activeProject}
+                    />
+                  </Suspense>
+                </div>
+              )}
+              {activeProject && terminalChatVisited ? (
+                <div
+                  className={terminalKeepaliveClassName(workspaceView === "terminal-chat")}
+                  aria-hidden={workspaceView !== "terminal-chat"}
+                  {...(workspaceView === "terminal-chat" ? {} : { inert: true })}
                 >
-                  <TerminalChatPanel
-                    key={`${activeProject.id}:${activeProject.realPath}`}
-                    project={activeProject}
-                    sessionId={sessionId}
-                    active={workspaceView === "terminal-chat"}
-                    onOpenSession={(nextSessionId) => openWorkspace(projectId, nextSessionId, false, "terminal-chat")}
-                  />
-                </Suspense>
-              </div>
-            ) : null}
+                  <Suspense
+                    fallback={
+                      <div className="grid h-full place-items-center text-sm text-muted-foreground">
+                        <LoaderCircle className="size-4 animate-spin" />
+                        正在加载终端对话
+                      </div>
+                    }
+                  >
+                    <TerminalChatPanel
+                      key={`${activeProject.id}:${activeProject.realPath}`}
+                      project={activeProject}
+                      sessionId={sessionId}
+                      active={workspaceView === "terminal-chat"}
+                      onOpenSession={(nextSessionId) =>
+                        openWorkspace(projectId, nextSessionId, false, "terminal-chat")
+                      }
+                    />
+                  </Suspense>
+                </div>
+              ) : null}
             </div>
           </>
         ) : (
@@ -2718,12 +2907,13 @@ export function Workspace() {
         )}
       </main>
       <NewSessionDialog
+        initialClient={composerClient}
         open={newSessionOpen}
         onOpenChange={setNewSessionOpen}
         sessions={projectSessions}
         providerNames={providerNames}
         busy={startSession.isPending}
-        onConfirm={(sourceId) => startSession.mutate(sourceId)}
+        onConfirm={(sourceId, client) => startSession.mutate({ sourceId, client })}
       />
       <CommandPalette
         open={paletteOpen}
@@ -2786,10 +2976,11 @@ export function Workspace() {
         }}
       />
       <ProviderDialog
+        initialClient={composerClient}
         open={providerManager}
         onOpenChange={setProviderManager}
         providers={providers.data ?? []}
-        onSelect={(id) => setProviderId(id)}
+        onSelect={chooseProvider}
         onDelete={async (id) => {
           const result = await api<{ ok: boolean }>(`/api/providers/${id}`, { method: "DELETE" });
           if (!result.ok) throw new Error("Provider 不存在或已删除");
@@ -2804,10 +2995,13 @@ export function Workspace() {
           await qc.invalidateQueries({ queryKey: ["projects"] });
         }}
         onSave={async (body) => {
-          const result = await api<Provider>(body.id ? `/api/providers/${body.id}` : "/api/providers", {
-            method: body.id ? "PUT" : "POST",
-            body: JSON.stringify(body)
-          });
+          const result = await api<Provider>(
+            body.id ? `/api/providers/${body.id}` : "/api/providers",
+            {
+              method: body.id ? "PUT" : "POST",
+              body: JSON.stringify(body)
+            }
+          );
           await qc.invalidateQueries({ queryKey: ["providers"] });
           return result;
         }}
@@ -2904,14 +3098,17 @@ export function Workspace() {
       <FirstTurnModelDialog
         open={firstTurnPrompt?.sessionId === sessionId}
         kind={firstTurnPrompt?.kind ?? null}
-        providers={providers.data ?? []}
+        providers={(providers.data ?? []).filter(
+          (entry) => clientType(entry.kind) === composerClient
+        )}
         providerId={firstTurnPrompt?.providerId || providerId}
         model={firstTurnPrompt?.model || model}
         busy={sending}
         onOpenChange={(open) => {
           if (open) return;
           pendingContinuationSend.current = null;
-          if (firstTurnPrompt?.overrideText && !input.trim()) setInput(firstTurnPrompt.overrideText);
+          if (firstTurnPrompt?.overrideText && !input.trim())
+            setInput(firstTurnPrompt.overrideText);
           setFirstTurnPrompt(null);
         }}
         onConfirm={(nextProviderId, nextModel) => {
@@ -2931,25 +3128,64 @@ export function Workspace() {
       />
       <ProviderContinuationDialog
         open={Boolean(continuation)}
-        onOpenChange={(v) => !v && setContinuation(null)}
+        onOpenChange={(open) => {
+          if (!open && !switchingProvider) {
+            setContinuation(null);
+            pendingProviderSend.current = null;
+          }
+        }}
         source={activeSession}
         target={continuation}
-        busy={false}
-        onConfirm={async () => {
-          if (!activeSession || !continuation) return;
-          const target = await api<Session & { bootstrapPrompt: string }>(
-            `/api/sessions/${activeSession.id}/continue`,
-            { method: "POST", body: JSON.stringify({ providerId: continuation.id }) }
-          );
-          pendingContinuationSend.current = {
-            sessionId: target.id,
-            message: input.trim(),
-            providerId: continuation.id
-          };
-          await qc.invalidateQueries({ queryKey: ["sessions", projectId] });
-          openWorkspace(target.projectId || projectId, target.id, false, "chat");
-          setProviderId(continuation.id);
-          setContinuation(null);
+        busy={switchingProvider}
+        onConfirm={async (mode) => {
+          if (!activeSession || !continuation || switchingProvider) return;
+          setSwitchingProvider(true);
+          try {
+            if (mode === "same-session") {
+              const target = continuation;
+              const pending = pendingProviderSend.current;
+              await applyCurrentProvider(target);
+              setContinuation(null);
+              pendingProviderSend.current = null;
+              if (pending)
+                await submitMessage(pending.text, pending.attachments, {
+                  skipPrompt: true,
+                  providerId: target.id,
+                  model: pending.model
+                });
+            } else {
+              const target = await api<Session>(`/api/sessions/${activeSession.id}/continue`, {
+                method: "POST",
+                body: JSON.stringify({ providerId: continuation.id })
+              });
+              const pending = pendingProviderSend.current;
+              continuedDraft.current = {
+                sessionId: target.id,
+                value: {
+                  text: pending?.text ?? input,
+                  attachments: pending?.text != null ? [] : attachments
+                }
+              };
+              pendingContinuationSend.current = pending
+                ? {
+                    sessionId: target.id,
+                    message: pending.text ?? null,
+                    retryAttachments: pending.attachments,
+                    providerId: continuation.id
+                  }
+                : null;
+              await qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+              openWorkspace(target.projectId || projectId, target.id, false, "chat");
+              setComposerClient(clientType(target.clientType));
+              setProviderId(continuation.id);
+              setContinuation(null);
+              pendingProviderSend.current = null;
+            }
+          } catch (error) {
+            setSendNotice(error instanceof Error ? error.message : "切换供应商失败");
+          } finally {
+            setSwitchingProvider(false);
+          }
         }}
       />
     </div>

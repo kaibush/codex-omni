@@ -1,6 +1,6 @@
 # Codex Omni
 
-> 面向远程服务器的 Codex 工作台：打开浏览器即可对话、改文件、看 Diff、开终端并提交。
+> 面向远程服务器的 Codex / Claude Code 工作台：在同一工程与对话中使用不同客户端和供应商。
 
 ![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111827)
@@ -9,7 +9,7 @@
 
 ## 一眼了解
 
-Codex Omni 把 Codex 跑在远程服务器上，用浏览器完成「打开工程 → 提问 → 改文件 → 看 Diff → 终端验证 → 提交」的闭环。前端是 React + Vite + Tailwind + shadcn/ui，后端是 Fastify + WebSocket + SQLite；每个 turn 由独立的 Bridge Worker（`@openai/codex-sdk`）执行。生产入口是一条命令：`codex-omni`。
+Codex Omni 把 Codex 和 Claude Code 跑在远程服务器上，用浏览器完成「打开工程 → 提问 → 改文件 → 看 Diff → 终端验证 → 提交」的闭环。前端是 React + Vite + Tailwind + shadcn/ui，后端是 Fastify + WebSocket + SQLite；两种客户端分别通过官方 `@openai/codex-sdk`、`@anthropic-ai/claude-agent-sdk` 在独立 Bridge Worker 中执行。生产入口是一条命令：`codex-omni`。
 
 这是单机自用、高权限的工作台：Worker 能按设置读写项目文件并打开终端。不要把开发端口直接暴露到公网。
 
@@ -17,18 +17,20 @@ Codex Omni 把 Codex 跑在远程服务器上，用浏览器完成「打开工�
 
 - **对话工作台**：多工程、多 Session；流式回复、工具调用、审批、草稿和消息队列。
 - **工程与会话**：浏览服务器目录创建工程；会话支持搜索、重命名、置顶、归档和导出。
-- **供应商与模型**：每个 Provider 独立 `CODEX_HOME`，可配 API Key、Base URL 和模型目录。
+- **供应商与模型**：按客户端管理供应商和默认模型；独立配置目录与凭据，支持 API Key、兼容 Base URL、原生配置和模型目录。
+- **跨供应商续聊**：切换时选择在当前对话继续或新建续接对话；切回已有供应商会恢复其原生线程，并补入切换期间的历史。
+- **Claude Code**：原生计划审批、提问表单、工具审批、子智能体与后台任务、单独停止子任务、思考强度、预算、原生命令、Skills / MCP 和 Hooks。
 - **文件工作区**：文件树、搜索、CodeMirror 编辑、Markdown 预览和冲突提示。
 - **Git**：分支状态、staged / working-tree Diff、暂存、提交和历史。
 - **内置终端**：xterm.js + node-pty，多 Tab，刷新或短暂断线后可重订阅。
-- **运行中心**：查看真实 Run、Worker / Codex PID、心跳和事件序号。
+- **运行中心**：查看真实 Run、Worker 状态、心跳和事件序号。
 - **系统设置**：运行权限、界面、Prompt 模板，以及项目规则、Skills、MCP 和定时任务。
 
 ## 快速开始
 
 ### 别人安装
 
-机器需要 Node.js 20+，以及能跑 Codex 的环境（已登录 CLI，或稍后在网页里配置 Provider）。Linux 上 `node-pty` / `better-sqlite3` 如需编译，请准备 Python 3、`make` 和 C/C++ 编译器。
+机器需要 Node.js 20+。安装包包含两种客户端的 SDK；可在网页中配置供应商 API Key，也可复用服务器上已有的客户端登录。Linux 上 `node-pty` / `better-sqlite3` 如需编译，请准备 Python 3、`make` 和 C/C++ 编译器。
 
 ```bash
 npm i -g @kaibush/codex-omni
@@ -84,7 +86,17 @@ pnpm user:create --username admin --password 'change-this-password'
 - Web：`http://localhost:5173`
 - API：`http://localhost:8790`
 
-创建项目时可通过文件夹弹框浏览服务器目录。服务端运行账号需要能访问项目目录，并且需要已经完成 Codex 登录，或在供应商里配置相应的 `CODEX_HOME` / API Key。
+创建项目时可通过文件夹弹框浏览服务器目录。服务端运行账号需要能访问项目目录，并在供应商中配置相应客户端的 API Key 或已有登录目录。
+
+## 使用 Claude Code 与跨供应商续聊
+
+1. 在「供应商」选择 Claude Code，添加 Anthropic Messages 兼容供应商的 Base URL、API Key 和模型。也可选择已有 Claude 配置目录，或通过原生 `settings.json` 和环境变量配置网关。
+2. 新建对话时选择 Codex 或 Claude Code。输入区的供应商、模型与权限选项会跟随客户端切换，两种客户端各自保留默认供应商。
+3. 已有对话切换客户端或供应商时，弹框默认选择「在当前对话继续」，也可选择「新建续接对话」。运行中或仍有待发送队列时，先结束任务或处理队列再切换。
+
+Claude 使用原生计划模式；计划卡片可审阅正文并批准执行，提问卡片支持选项与自由回答。子智能体和后台任务显示执行状态，运行中的子任务可单独停止。输入区支持 SDK 可用的原生命令、项目 `.claude/commands`，并自动加载 `CLAUDE.md`、`.claude/agents`、`.claude/skills`、MCP 和 Hooks。系统设置中可分别管理 Codex 与 Claude 的权限、思考强度、轮次、预算和自定义子智能体。
+
+跨客户端传递的是最近用户与助手消息的有限快照（最多 40 条、约 48,000 字符），长消息保留首尾，并携带附件路径；原生工具状态、完整思考过程不跨客户端复制。同一工程的文件始终共享。CLI 专属交互以 SDK 提供的能力为准，长期定时任务使用工作台的「定时任务」页面。
 
 ## 版本检查与更新
 
@@ -138,6 +150,8 @@ pnpm ci:check
 - `packages/protocol`：HTTP / WS / Bridge 的 Zod 协议（`@codex-omni/protocol`）
 - `packages/db`：SQLite schema 与 repository（`@codex-omni/db`）
 - `packages/codex-runtime`：Codex SDK Bridge Worker（`@codex-omni/codex-runtime`）
+- `packages/claude-runtime`：Claude Agent SDK Bridge Worker（`@codex-omni/claude-runtime`）
+- `packages/agent-runtime`：客户端共用的进程桥接与生命周期管理（`@codex-omni/agent-runtime`）
 
 ## 许可
 

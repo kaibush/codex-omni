@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import type { ClientType } from "@codex-omni/protocol";
+import { ClaudeRuntimeFields } from "./ClaudeRuntimeFields";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -91,14 +93,19 @@ function NumberField({
 export function RuntimeSettingsTabs({
   settings,
   onChange,
-  compact = false
+  compact = false,
+  clientType = "codex"
 }: {
   settings: WorkspaceSettings;
   onChange: (settings: WorkspaceSettings) => void;
   compact?: boolean;
+  clientType?: ClientType;
 }) {
   const patch = (next: Partial<WorkspaceSettings>) => onChange({ ...settings, ...next });
-  const delaySeconds = secondsFromMs(settings.failureRetryDelayMs, DEFAULT_FAILURE_RETRY_DELAY_SECONDS);
+  const delaySeconds = secondsFromMs(
+    settings.failureRetryDelayMs,
+    DEFAULT_FAILURE_RETRY_DELAY_SECONDS
+  );
   const maxDelaySeconds = secondsFromMs(
     settings.failureRetryMaxDelayMs,
     DEFAULT_FAILURE_RETRY_MAX_DELAY_SECONDS
@@ -334,7 +341,7 @@ export function RuntimeSettingsTabs({
     <SettingsFormGrid>
       <SettingsSwitchField
         label="失败后自动重试"
-        description="遇到限流、超时等可恢复错误时，自动发送继续执行请求，直到 Codex 成功响应或你手动停止。"
+        description="遇到限流、超时等可恢复错误时，自动发送继续执行请求，直到成功响应或你手动停止。"
         checked={settings.failureRetryEnabled}
         onCheckedChange={(checked) => patch({ failureRetryEnabled: checked })}
       />
@@ -379,7 +386,11 @@ export function RuntimeSettingsTabs({
         </TabsTrigger>
       </TabsList>
       <TabsContent value="permissions" className="mt-3">
-        {permissionFields}
+        {clientType === "claude-code" ? (
+          <ClaudeRuntimeFields settings={settings} onChange={onChange} />
+        ) : (
+          permissionFields
+        )}
       </TabsContent>
       <TabsContent value="send" className="mt-3">
         {sendFields}

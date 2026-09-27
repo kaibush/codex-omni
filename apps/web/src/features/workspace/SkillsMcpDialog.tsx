@@ -1,3 +1,4 @@
+import { clientName } from "@codex-omni/protocol";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,9 +27,11 @@ export function SkillsMcpDialog({
   const [args, setArgs] = useState("");
   const selected = providerId || providers[0]?.id || "";
   const skills = useQuery({
-    queryKey: ["skills", projectId],
+    queryKey: ["skills", projectId, selected],
     queryFn: () =>
-      api<{ project: SkillInfo[]; provider: SkillInfo[] }>(`/api/projects/${projectId}/skills`),
+      api<{ project: SkillInfo[]; provider: SkillInfo[] }>(
+        `/api/projects/${projectId}/skills?providerId=${encodeURIComponent(selected)}`
+      ),
     enabled: open && Boolean(projectId)
   });
   const mcp = useQuery({
@@ -77,7 +80,7 @@ export function SkillsMcpDialog({
           <Blocks className="size-4" /> Skills / MCP
         </DialogTitle>
         <DialogDescription>
-          管理当前工程可见的 Skills，以及 Provider config.toml 中的 MCP 服务器。
+          按供应商管理当前客户端可见的 Skills 与 MCP 服务器。Claude Code 还会读取项目 .mcp.json。
         </DialogDescription>
         <section className="mt-4 space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -98,7 +101,8 @@ export function SkillsMcpDialog({
           ))}
           {(skills.data?.project.length ?? 0) + (skills.data?.provider.length ?? 0) === 0 ? (
             <p className="text-xs text-muted-foreground">
-              未发现 SKILL.md。可放在项目 `.codex/skills` 或 Provider CODEX_HOME/skills。
+              未发现 SKILL.md。Codex 使用 .codex/skills，Claude Code 使用
+              .claude/skills；供应商配置目录下的 skills 也会加载。
             </p>
           ) : null}
         </section>
@@ -113,7 +117,7 @@ export function SkillsMcpDialog({
           >
             {providers.map((provider) => (
               <option key={provider.id} value={provider.id}>
-                {provider.name}
+                {clientName(provider.kind)} · {provider.name}
               </option>
             ))}
           </select>

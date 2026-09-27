@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { CLIENTS, clientName, type ClientType } from "@codex-omni/protocol";
+import { claudePermissionLabels } from "./ClaudeRuntimeFields";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction
+} from "react";
 import {
   Cpu,
   FileText,
@@ -57,6 +66,8 @@ import {
 } from "./composer-layout";
 
 export function WorkspaceComposer({
+  clientType = "codex",
+  onClientChange,
   workspaceView,
   activeSession,
   dragActive,
@@ -111,6 +122,8 @@ export function WorkspaceComposer({
   activeProject,
   enhanceNonce = 0
 }: {
+  clientType?: ClientType;
+  onClientChange?: (client: ClientType) => void;
   workspaceView: "chat" | "files" | "git" | "terminal" | "terminal-chat";
   activeSession: { id: string } | undefined;
   dragActive: boolean;
@@ -276,9 +289,7 @@ export function WorkspaceComposer({
                 onStartNext={startNextQueuedTurn}
               />
             )}
-            {runState && runState.status !== "running" && (
-              <RunSummary state={runState} />
-            )}
+            {runState && runState.status !== "running" && <RunSummary state={runState} />}
             {(mentionRange || slashOpen) && (
               <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-border bg-background p-1 text-xs shadow-sm">
                 {slashOpen &&
@@ -406,12 +417,36 @@ export function WorkspaceComposer({
                   ? "Enter 发送，Shift+Enter 换行"
                   : "Ctrl/Cmd+Enter 发送"
               }
-              placeholder={`在 ${activeProject?.name ?? "当前工程"} 中询问 Codex...`}
+              placeholder={`在 ${activeProject?.name ?? "当前工程"} 中询问 ${clientName(clientType)}...`}
             />
             <div className="composer-toolbar">
               <div className="composer-context">
-                <Select value={providerId} onValueChange={setProviderId}>
+                <Select
+                  value={clientType}
+                  onValueChange={(value) => onClientChange?.(value as ClientType)}
+                  disabled={runState?.status === "running"}
+                >
                   <SelectTrigger
+                    className="composer-select h-8 w-auto min-w-0 rounded-lg"
+                    aria-label="客户端"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLIENTS.map((client) => (
+                      <SelectItem key={client.id} value={client.id}>
+                        {client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={providerId}
+                  onValueChange={setProviderId}
+                  disabled={runState?.status === "running"}
+                >
+                  <SelectTrigger
+                    aria-label="供应商"
                     className="composer-select w-auto min-w-0 max-w-[7.5rem] overflow-hidden sm:max-w-[11rem]"
                     title={
                       selectedProvider?.name ? `供应商：${selectedProvider.name}` : "选择供应商"
@@ -430,6 +465,7 @@ export function WorkspaceComposer({
                 </Select>
                 <Select value={model} onValueChange={setModel} disabled={!availableModels.length}>
                   <SelectTrigger
+                    aria-label="模型"
                     className="composer-select w-auto min-w-0 max-w-[8.5rem] overflow-hidden sm:max-w-[13rem]"
                     title={model ? `模型：${model}` : "选择模型"}
                   >
@@ -437,7 +473,10 @@ export function WorkspaceComposer({
                     <SelectValue placeholder={selectedProvider?.model || "模型"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(model && !availableModels.includes(model) ? [model, ...availableModels] : availableModels).map((item) => (
+                    {(model && !availableModels.includes(model)
+                      ? [model, ...availableModels]
+                      : availableModels
+                    ).map((item) => (
                       <SelectItem key={item} value={item}>
                         {item}
                       </SelectItem>
@@ -536,10 +575,11 @@ export function WorkspaceComposer({
                 <div className="relative z-10 shrink-0">
                   <Button
                     ref={runtimeButtonRef}
+                    aria-label="运行设置"
                     type="button"
                     variant="outline"
                     className="composer-runtime-btn h-8 rounded-lg px-2.5"
-                    title={`${workspaceSettings.executionMode === "plan" ? "Plan：只读规划" : "Execute：按当前权限执行"} · ${sandbox.label}`}
+                    title={`${workspaceSettings.executionMode === "plan" ? "Plan：只读规划" : "Execute：按当前权限执行"} · ${clientType === "claude-code" ? claudePermissionLabels[workspaceSettings.claude?.permissionMode ?? "default"] : sandbox.label}`}
                     aria-haspopup="dialog"
                     aria-expanded={runtimeOptionsOpen}
                     onClick={() => setRuntimeOptionsOpen((value) => !value)}
@@ -547,15 +587,28 @@ export function WorkspaceComposer({
                     <SandboxIcon className="size-3.5" />
                     <span className="composer-runtime-label">
                       {workspaceSettings.executionMode === "plan" ? "Plan" : "Execute"}
-                      <span className="text-muted-foreground"> · {sandbox.label}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        ·{" "}
+                        {clientType === "claude-code"
+                          ? claudePermissionLabels[
+                              workspaceSettings.claude?.permissionMode ?? "default"
+                            ]
+                          : sandbox.label}
+                      </span>
                     </span>
                   </Button>
                   {runtimeOptionsOpen && (
                     <RuntimeOptionsPanel
+                      clientType={clientType}
                       settings={workspaceSettings}
                       onChange={saveWorkspaceSettings}
                       onClose={() => setRuntimeOptionsOpen(false)}
-                      homePath={selectedProvider?.codexHome || runtimeCodexHome}
+                      homePath={
+                        selectedProvider?.runtimeHome ||
+                        selectedProvider?.codexHome ||
+                        runtimeCodexHome
+                      }
                       anchorRef={runtimeButtonRef}
                     />
                   )}
@@ -590,9 +643,17 @@ export function WorkspaceComposer({
                         className="size-8 rounded-lg"
                         onClick={send}
                         disabled={Boolean(blockReason)}
-                        aria-label={blockReason ?? (runState?.status === "running" && workspaceSettings.sendMode === "steer" ? "直接插入消息" : runState?.status === "running" || pendingApprovals.length ? "加入消息队列" : "发送消息")}
+                        aria-label={
+                          blockReason ??
+                          (runState?.status === "running" && workspaceSettings.sendMode === "steer"
+                            ? "直接插入消息"
+                            : runState?.status === "running" || pendingApprovals.length
+                              ? "加入消息队列"
+                              : "发送消息")
+                        }
                       >
-                        {runState?.status === "running" && workspaceSettings.sendMode === "steer" ? (
+                        {runState?.status === "running" &&
+                        workspaceSettings.sendMode === "steer" ? (
                           <Send className="size-4" />
                         ) : runState?.status === "running" || pendingApprovals.length ? (
                           <ListPlus className="size-4" />
@@ -608,7 +669,7 @@ export function WorkspaceComposer({
                         ? "直接插入消息"
                         : runState?.status === "running" || pendingApprovals.length
                           ? "加入消息队列"
-                        : "发送消息")}
+                          : "发送消息")}
                   </TooltipContent>
                 </Tooltip>
               </div>

@@ -1,3 +1,4 @@
+import type { ClaudeOptions } from "@codex-omni/protocol";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import { normalizeTemplateCommand } from "./prompt-templates";
 import { defaultProviderTemplates } from "./provider-templates";
 
 export type WorkspaceSettings = {
+  claude?: ClaudeOptions;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy: "untrusted" | "on-request" | "never";
   networkAccessEnabled: boolean;
@@ -34,6 +36,7 @@ export type WorkspaceSettings = {
 };
 
 export const defaultWorkspaceSettings: WorkspaceSettings = {
+  claude: { permissionMode: "default", effort: "high", thinking: "adaptive" },
   sandbox: "workspace-write",
   approvalPolicy: "on-request",
   networkAccessEnabled: true,
@@ -106,7 +109,10 @@ export function SettingsDialog({
         content: templateContent.trim()
       };
       return editingTemplateId
-        ? api(`/api/templates/${editingTemplateId}`, { method: "PUT", body: JSON.stringify(payload) })
+        ? api(`/api/templates/${editingTemplateId}`, {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          })
         : api("/api/templates", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: async () => {
@@ -136,7 +142,7 @@ export function SettingsDialog({
   };
   const toggle = (
     key: {
-      [K in keyof WorkspaceSettings]: WorkspaceSettings[K] extends boolean ? K : never;
+      [K in keyof WorkspaceSettings]-?: WorkspaceSettings[K] extends boolean ? K : never;
     }[keyof WorkspaceSettings]
   ) => setDraft((current) => ({ ...current, [key]: !current[key] }));
   const save = async () => {

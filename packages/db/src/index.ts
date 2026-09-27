@@ -32,6 +32,9 @@ export type ProviderRow = {
   isDefault: number;
   homeMode: string | null;
   codexHomePath: string | null;
+  claudeHomePath?: string | null;
+  settingsJson?: string | null;
+  mcpServersJson?: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -50,6 +53,7 @@ export type SessionRow = {
   id: string;
   projectId: string;
   kind: "chat" | "terminal-chat";
+  clientType: "codex" | "claude-code";
   threadId: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
@@ -75,7 +79,8 @@ export type TerminalSessionRow = {
   title: string;
   cwd: string;
   desiredState: "running" | "stopped";
-  state: "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
+  state:
+    "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
   restartPolicy: "manual" | "on-unexpected-exit";
   pid: number | null;
   lastSeq: number;
@@ -174,7 +179,20 @@ export type RunRow = {
   createdAt: number;
   updatedAt: number;
 };
-export type RecentRunSessionRow = Pick<RunRow, "id" | "sessionId" | "projectId" | "providerId" | "threadId" | "status" | "model" | "cwd" | "startedAt" | "endedAt" | "reason"> & {
+export type RecentRunSessionRow = Pick<
+  RunRow,
+  | "id"
+  | "sessionId"
+  | "projectId"
+  | "providerId"
+  | "threadId"
+  | "status"
+  | "model"
+  | "cwd"
+  | "startedAt"
+  | "endedAt"
+  | "reason"
+> & {
   sessionTitle: string;
   projectName: string;
   providerName: string | null;
@@ -232,7 +250,9 @@ export type TerminalProfileRow = {
   createdAt: number;
   updatedAt: number;
 };
-export const DEFAULT_TERMINAL_PROFILES: Array<Pick<TerminalProfileRow, "id" | "name" | "command" | "sortOrder">> = [
+export const DEFAULT_TERMINAL_PROFILES: Array<
+  Pick<TerminalProfileRow, "id" | "name" | "command" | "sortOrder">
+> = [
   { id: "codex", name: "Codex", command: "codex", sortOrder: 0 },
   { id: "claude-code", name: "Claude Code", command: "claude", sortOrder: 1 },
   { id: "shell", name: "Shell", command: "", sortOrder: 2 }
@@ -411,6 +431,8 @@ export class Store {
     if (!sessionColumns.has("icon")) this.db.exec("ALTER TABLE sessions ADD COLUMN icon TEXT");
     if (!sessionColumns.has("tags_json"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN tags_json TEXT");
+    if (!sessionColumns.has("client_type"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN client_type TEXT NOT NULL DEFAULT 'codex'");
     if (!sessionColumns.has("kind"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'");
     const projectColumns = new Set(
@@ -451,6 +473,27 @@ export class Store {
         (column) => column.name
       )
     );
+    for (const column of ["claude_home_path", "settings_json", "mcp_servers_json"]) {
+      if (!providerColumns.has(column))
+        this.db.exec(`ALTER TABLE providers ADD COLUMN ${column} TEXT`);
+    }
+    this.db.exec(`CREATE TABLE IF NOT EXISTS session_runtime_bindings (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+      client_type TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      last_message_id TEXT,
+      last_message_at INTEGER,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY(session_id,provider_id)
+    );
+    INSERT OR IGNORE INTO session_runtime_bindings(session_id,provider_id,client_type,thread_id,last_message_id,last_message_at,updated_at)
+      SELECT s.id,s.provider_id,s.client_type,s.thread_id,
+        (SELECT id FROM messages WHERE session_id=s.id AND role IN ('user','assistant') ORDER BY rowid DESC LIMIT 1),
+        (SELECT created_at FROM messages WHERE session_id=s.id AND role IN ('user','assistant') ORDER BY rowid DESC LIMIT 1),
+        s.updated_at
+      FROM sessions s WHERE s.thread_id IS NOT NULL AND s.provider_id IS NOT NULL;
+    `);
     if (!providerColumns.has("models_json"))
       this.db.exec("ALTER TABLE providers ADD COLUMN models_json TEXT");
     if (!providerColumns.has("env_json"))
@@ -589,9 +632,9 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_terminal_events_created ON terminal_events(terminal_id,created_at);
     `);
     const terminalSessionColumns = new Set(
-      (this.db.prepare("PRAGMA table_info(terminal_sessions)").all() as Array<{ name: string }>).map(
-        (column) => column.name
-      )
+      (
+        this.db.prepare("PRAGMA table_info(terminal_sessions)").all() as Array<{ name: string }>
+      ).map((column) => column.name)
     );
     if (!terminalSessionColumns.has("command")) {
       this.db.exec("ALTER TABLE terminal_sessions ADD COLUMN command TEXT NOT NULL DEFAULT ''");
@@ -762,14 +805,14 @@ export class Store {
   listProviders(): ProviderRow[] {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,claude_home_path as claudeHomePath,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
       )
       .all() as ProviderRow[];
   }
   getProvider(id: string) {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,codex_home_path as codexHomePath,claude_home_path as claudeHomePath,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers WHERE id=?"
       )
       .get(id) as ProviderRow | undefined;
   }
@@ -779,16 +822,28 @@ export class Store {
       id = input.id ?? nanoid();
     const transaction = this.db.transaction(() => {
       if (input.isDefault) {
-        this.db.prepare("UPDATE providers SET is_default=0,updated_at=?").run(now);
+        this.db
+          .prepare("UPDATE providers SET is_default=0,updated_at=? WHERE kind=?")
+          .run(now, input.kind ?? current?.kind ?? "codex");
       }
       this.db
         .prepare(
-          `INSERT INTO providers(id,name,kind,model,context_window,auto_compact_token_limit,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,codex_home_path,created_at,updated_at) VALUES(@id,@name,@kind,@model,@contextWindow,@autoCompactTokenLimit,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@codexHomePath,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,context_window=@contextWindow,auto_compact_token_limit=@autoCompactTokenLimit,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,codex_home_path=@codexHomePath,updated_at=@now`
+          `INSERT INTO providers(id,name,kind,model,context_window,auto_compact_token_limit,models_json,base_url,api_key,config_toml,auth_json,env_json,is_default,home_mode,codex_home_path,claude_home_path,settings_json,mcp_servers_json,created_at,updated_at) VALUES(@id,@name,@kind,@model,@contextWindow,@autoCompactTokenLimit,@modelsJson,@baseUrl,@apiKey,@configToml,@authJson,@envJson,@isDefault,@homeMode,@codexHomePath,@claudeHomePath,@settingsJson,@mcpServersJson,@now,@now) ON CONFLICT(id) DO UPDATE SET name=@name,kind=@kind,model=@model,context_window=@contextWindow,auto_compact_token_limit=@autoCompactTokenLimit,models_json=@modelsJson,base_url=@baseUrl,api_key=@apiKey,config_toml=@configToml,auth_json=@authJson,env_json=@envJson,is_default=@isDefault,home_mode=@homeMode,codex_home_path=@codexHomePath,claude_home_path=@claudeHomePath,settings_json=@settingsJson,mcp_servers_json=@mcpServersJson,updated_at=@now`
         )
         .run({
           id,
           name: input.name,
-          kind: input.kind ?? "codex",
+          claudeHomePath:
+            input.claudeHomePath === undefined
+              ? (current?.claudeHomePath ?? null)
+              : input.claudeHomePath,
+          settingsJson:
+            input.settingsJson === undefined ? (current?.settingsJson ?? null) : input.settingsJson,
+          mcpServersJson:
+            input.mcpServersJson === undefined
+              ? (current?.mcpServersJson ?? null)
+              : input.mcpServersJson,
+          kind: input.kind ?? current?.kind ?? "codex",
           model: input.model ?? null,
           contextWindow:
             input.contextWindow === undefined
@@ -814,13 +869,20 @@ export class Store {
     return this.getProvider(id)!;
   }
   deleteProvider(id: string) {
+    const current = this.getProvider(id);
+    if (!current) return false;
     const deleted = this.db.prepare("DELETE FROM providers WHERE id=?").run(id).changes > 0;
-    if (deleted && !this.db.prepare("SELECT 1 FROM providers WHERE is_default=1 LIMIT 1").get()) {
+    if (
+      deleted &&
+      !this.db
+        .prepare("SELECT 1 FROM providers WHERE kind=? AND is_default=1 LIMIT 1")
+        .get(current.kind)
+    ) {
       this.db
         .prepare(
-          "UPDATE providers SET is_default=1 WHERE id=(SELECT id FROM providers ORDER BY name LIMIT 1)"
+          "UPDATE providers SET is_default=1 WHERE id=(SELECT id FROM providers WHERE kind=? ORDER BY name LIMIT 1)"
         )
-        .run();
+        .run(current.kind);
     }
     return deleted;
   }
@@ -887,7 +949,12 @@ export class Store {
   }
   updateProject(
     id: string,
-    input: Partial<Pick<ProjectRow, "name" | "displayPath" | "realPath" | "providerId" | "pinnedAt" | "lastOpenedAt">>
+    input: Partial<
+      Pick<
+        ProjectRow,
+        "name" | "displayPath" | "realPath" | "providerId" | "pinnedAt" | "lastOpenedAt"
+      >
+    >
   ) {
     const now = Date.now();
     const fields = Object.keys(input)
@@ -925,7 +992,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -956,7 +1023,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -1073,7 +1140,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -1103,6 +1170,7 @@ export class Store {
     projectId: string;
     title?: string;
     kind?: "chat" | "terminal-chat";
+    clientType?: "codex" | "claude-code";
     providerId?: string | null;
     parentSessionId?: string | null;
     continuationMode?: string | null;
@@ -1111,7 +1179,7 @@ export class Store {
       id = nanoid();
     this.db
       .prepare(
-        "INSERT INTO sessions(id,project_id,title,status,kind,provider_id,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+        "INSERT INTO sessions(id,project_id,title,status,kind,client_type,provider_id,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
       )
       .run(
         id,
@@ -1119,6 +1187,10 @@ export class Store {
         input.title ?? DEFAULT_SESSION_TITLE,
         "idle",
         input.kind ?? "chat",
+        input.clientType ??
+          (this.getProvider(input.providerId ?? "")?.kind === "claude-code"
+            ? "claude-code"
+            : "codex"),
         input.providerId ?? null,
         input.parentSessionId ?? null,
         input.continuationMode ?? null,
@@ -1128,6 +1200,70 @@ export class Store {
         now
       );
     return this.getSession(id)!;
+  }
+  getSessionRuntimeBinding(sessionId: string, providerId: string) {
+    return this.db
+      .prepare(
+        `SELECT session_id as sessionId,provider_id as providerId,client_type as clientType,thread_id as threadId,last_message_id as lastMessageId,last_message_at as lastMessageAt
+      FROM session_runtime_bindings WHERE session_id=? AND provider_id=?`
+      )
+      .get(sessionId, providerId) as
+      | {
+          sessionId: string;
+          providerId: string;
+          clientType: "codex" | "claude-code";
+          threadId: string;
+          lastMessageId: string | null;
+          lastMessageAt: number | null;
+        }
+      | undefined;
+  }
+  saveSessionRuntimeBinding(input: {
+    sessionId: string;
+    providerId: string;
+    clientType: "codex" | "claude-code";
+    threadId: string;
+    lastMessageId?: string | null;
+    lastMessageAt?: number | null;
+  }) {
+    const previous = this.getSessionRuntimeBinding(input.sessionId, input.providerId);
+    this.db
+      .prepare(
+        `INSERT INTO session_runtime_bindings(session_id,provider_id,client_type,thread_id,last_message_id,last_message_at,updated_at)
+      VALUES(@sessionId,@providerId,@clientType,@threadId,@lastMessageId,@lastMessageAt,@now)
+      ON CONFLICT(session_id,provider_id) DO UPDATE SET client_type=excluded.client_type,thread_id=excluded.thread_id,last_message_id=excluded.last_message_id,last_message_at=excluded.last_message_at,updated_at=excluded.updated_at`
+      )
+      .run({
+        ...input,
+        lastMessageId:
+          input.lastMessageId === undefined
+            ? (previous?.lastMessageId ?? null)
+            : input.lastMessageId,
+        lastMessageAt:
+          input.lastMessageAt === undefined
+            ? (previous?.lastMessageAt ?? null)
+            : input.lastMessageAt,
+        now: Date.now()
+      });
+  }
+  conversationSince(
+    sessionId: string,
+    cursor?: { id: string; createdAt: number },
+    limit = 80
+  ): MessageRow[] {
+    return this.db
+      .prepare(
+        `SELECT id,session_id as sessionId,role,content,provider_id as providerId,event_type as eventType,item_id as itemId,data_json as dataJson,created_at as createdAt,updated_at as updatedAt
+      FROM (SELECT *,rowid as _position FROM messages WHERE session_id=@sessionId AND role IN ('user','assistant')
+        AND (@createdAt IS NULL OR rowid>COALESCE((SELECT rowid FROM messages WHERE id=@id),0))
+        ORDER BY rowid DESC LIMIT @limit) ORDER BY _position`
+      )
+      .all({
+        sessionId,
+        createdAt: cursor?.createdAt ?? null,
+        id: cursor?.id ?? "",
+        limit
+      }) as MessageRow[];
   }
   createTerminalSession(input: {
     projectId: string;
@@ -1163,35 +1299,83 @@ export class Store {
       .get(id) as TerminalSessionRow | undefined;
   }
   getTerminalSessionBySession(sessionId: string) {
-    return this.db
-      .prepare("SELECT id FROM terminal_sessions WHERE session_id=?")
-      .get(sessionId) as { id: string } | undefined;
+    return this.db.prepare("SELECT id FROM terminal_sessions WHERE session_id=?").get(sessionId) as
+      { id: string } | undefined;
   }
   listTerminalSessions(projectId?: string) {
     const query = `SELECT id,session_id as sessionId,project_id as projectId,profile_id as profileId,command,title,cwd,desired_state as desiredState,state,restart_policy as restartPolicy,pid,last_seq as lastSeq,last_output_at as lastOutputAt,last_exit_code as lastExitCode,last_signal as lastSignal,restart_count as restartCount,restart_window_started_at as restartWindowStartedAt,next_restart_at as nextRestartAt,last_error as lastError,created_at as createdAt,updated_at as updatedAt,stopped_at as stoppedAt FROM terminal_sessions ${projectId ? "WHERE project_id=?" : ""} ORDER BY updated_at DESC,id DESC`;
-    return (projectId ? this.db.prepare(query).all(projectId) : this.db.prepare(query).all()) as TerminalSessionRow[];
+    return (
+      projectId ? this.db.prepare(query).all(projectId) : this.db.prepare(query).all()
+    ) as TerminalSessionRow[];
   }
-  updateTerminalSession(id: string, input: Partial<Pick<TerminalSessionRow, "title" | "cwd" | "desiredState" | "state" | "restartPolicy" | "pid" | "lastSeq" | "lastOutputAt" | "lastExitCode" | "lastSignal" | "restartCount" | "restartWindowStartedAt" | "nextRestartAt" | "lastError" | "stoppedAt">>) {
-    const fields = Object.keys(input).map((key) => `${key.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}=@${key}`).join(",");
+  updateTerminalSession(
+    id: string,
+    input: Partial<
+      Pick<
+        TerminalSessionRow,
+        | "title"
+        | "cwd"
+        | "desiredState"
+        | "state"
+        | "restartPolicy"
+        | "pid"
+        | "lastSeq"
+        | "lastOutputAt"
+        | "lastExitCode"
+        | "lastSignal"
+        | "restartCount"
+        | "restartWindowStartedAt"
+        | "nextRestartAt"
+        | "lastError"
+        | "stoppedAt"
+      >
+    >
+  ) {
+    const fields = Object.keys(input)
+      .map((key) => `${key.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}=@${key}`)
+      .join(",");
     if (!fields) return this.getTerminalSession(id);
-    this.db.prepare(`UPDATE terminal_sessions SET ${fields},updated_at=@now WHERE id=@id`).run({ ...input, id, now: Date.now() });
+    this.db
+      .prepare(`UPDATE terminal_sessions SET ${fields},updated_at=@now WHERE id=@id`)
+      .run({ ...input, id, now: Date.now() });
     return this.getTerminalSession(id);
   }
   addTerminalEvent(input: Omit<TerminalEventRow, "createdAt"> & { createdAt?: number }) {
-    this.db.prepare("INSERT OR REPLACE INTO terminal_events(terminal_id,seq,kind,data,created_at) VALUES(?,?,?,?,?)").run(input.terminalId, input.seq, input.kind, input.data, input.createdAt ?? Date.now());
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO terminal_events(terminal_id,seq,kind,data,created_at) VALUES(?,?,?,?,?)"
+      )
+      .run(input.terminalId, input.seq, input.kind, input.data, input.createdAt ?? Date.now());
   }
   listTerminalEvents(terminalId: string, afterSeq = 0, limit = 5000) {
-    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq>? ORDER BY seq LIMIT ?").all(terminalId, afterSeq, Math.min(Math.max(limit, 1), 20000)) as TerminalEventRow[];
+    return this.db
+      .prepare(
+        "SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq>? ORDER BY seq LIMIT ?"
+      )
+      .all(terminalId, afterSeq, Math.min(Math.max(limit, 1), 20000)) as TerminalEventRow[];
   }
   listTerminalEventsBefore(terminalId: string, beforeSeq: number, limit = 5000) {
-    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq<? ORDER BY seq DESC LIMIT ?").all(terminalId, beforeSeq, Math.min(Math.max(limit, 1), 20000)).reverse() as TerminalEventRow[];
+    return this.db
+      .prepare(
+        "SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND seq<? ORDER BY seq DESC LIMIT ?"
+      )
+      .all(terminalId, beforeSeq, Math.min(Math.max(limit, 1), 20000))
+      .reverse() as TerminalEventRow[];
   }
   searchTerminalEvents(terminalId: string, query: string, limit = 100) {
     const value = `%${query.replace(/[\\%_]/g, (part) => `\\${part}`)}%`;
-    return this.db.prepare("SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND data LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?").all(terminalId, value, Math.min(Math.max(limit, 1), 500)) as TerminalEventRow[];
+    return this.db
+      .prepare(
+        "SELECT terminal_id as terminalId,seq,kind,data,created_at as createdAt FROM terminal_events WHERE terminal_id=? AND data LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?"
+      )
+      .all(terminalId, value, Math.min(Math.max(limit, 1), 500)) as TerminalEventRow[];
   }
   pruneTerminalEvents(terminalId: string, keep = 100_000) {
-    this.db.prepare("DELETE FROM terminal_events WHERE terminal_id=? AND seq < COALESCE((SELECT MAX(seq) FROM terminal_events WHERE terminal_id=?) - ?, 0)").run(terminalId, terminalId, Math.max(1000, keep));
+    this.db
+      .prepare(
+        "DELETE FROM terminal_events WHERE terminal_id=? AND seq < COALESCE((SELECT MAX(seq) FROM terminal_events WHERE terminal_id=?) - ?, 0)"
+      )
+      .run(terminalId, terminalId, Math.max(1000, keep));
   }
   updateSession(
     id: string,
@@ -1199,6 +1383,7 @@ export class Store {
       Pick<
         SessionRow,
         | "threadId"
+        | "clientType"
         | "status"
         | "providerId"
         | "title"
@@ -1227,7 +1412,9 @@ export class Store {
     return this.db.prepare("DELETE FROM sessions WHERE id=?").run(id).changes > 0;
   }
   hasSessionWithThread(threadId: string) {
-    return Boolean(this.db.prepare("SELECT 1 FROM sessions WHERE thread_id=? LIMIT 1").get(threadId));
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM sessions WHERE thread_id=? LIMIT 1").get(threadId)
+    );
   }
   addMessage(
     input: Omit<MessageRow, "id" | "createdAt" | "updatedAt" | "itemId" | "dataJson"> & {
@@ -1620,6 +1807,7 @@ export class Store {
         projectId: source.projectId,
         title: `${source.title} (分叉)`,
         providerId: source.providerId,
+        clientType: source.clientType,
         parentSessionId: source.id,
         continuationMode: "fork"
       });
@@ -1894,17 +2082,14 @@ export class Store {
       )
       .get(id) as TerminalProfileRow | undefined;
   }
-  upsertTerminalProfile(input: {
-    id?: string;
-    name: string;
-    command: string;
-    sortOrder?: number;
-  }) {
+  upsertTerminalProfile(input: { id?: string; name: string; command: string; sortOrder?: number }) {
     const id = input.id ?? nanoid();
     const now = Date.now();
     const current = this.getTerminalProfile(id);
     const maxOrder = (
-      this.db.prepare("SELECT COALESCE(MAX(sort_order), -1) as value FROM terminal_profiles").get() as {
+      this.db
+        .prepare("SELECT COALESCE(MAX(sort_order), -1) as value FROM terminal_profiles")
+        .get() as {
         value: number;
       }
     ).value;

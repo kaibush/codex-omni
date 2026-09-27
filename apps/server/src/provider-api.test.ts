@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Store } from "@codex-omni/db";
+import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 let dir: string | undefined;
 let child: ChildProcess | undefined;
+let modelServer: Server | undefined;
 
 async function stopServer() {
   if (child && child.exitCode === null && child.signalCode === null) {
@@ -22,6 +24,8 @@ async function stopServer() {
 
 afterEach(async () => {
   await stopServer();
+  if (modelServer) await new Promise<void>((resolve) => modelServer!.close(() => resolve()));
+  modelServer = undefined;
   if (dir) await rm(dir, { recursive: true, force: true });
   dir = undefined;
 });
@@ -35,7 +39,7 @@ describe("provider runtime settings HTTP contract", () => {
     const offline = path.join(dir, "offline.mjs");
     await writeFile(
       offline,
-      "globalThis.fetch = async () => new Response('{}', { status: 404 });\n"
+      "const realFetch = globalThis.fetch; globalThis.fetch = (url, options) => new URL(String(url)).hostname === '127.0.0.1' ? realFetch(url, options) : Promise.resolve(new Response('{}', { status: 404 }));\n"
     );
     child = spawn(
       process.execPath,
@@ -91,7 +95,11 @@ describe("provider runtime settings HTTP contract", () => {
     const call = async (url: string, method = "GET", value?: unknown) => {
       const response = await fetch(`${baseUrl}${url}`, {
         method,
-        headers: { "content-type": "application/json", cookie, "x-csrf-token": csrf },
+        headers: {
+          ...(value !== undefined ? { "content-type": "application/json" } : {}),
+          cookie,
+          "x-csrf-token": csrf
+        },
         ...(value !== undefined ? { body: JSON.stringify(value) } : {})
       });
       return { response, body: (await response.json()) as Record<string, unknown> };
@@ -170,6 +178,165 @@ describe("provider runtime settings HTTP contract", () => {
       autoCompactTokenLimit: null
     });
     expect(cleared.body).toMatchObject({ contextWindow: null, autoCompactTokenLimit: null });
+
+    const modelRequests: Array<{ url: string; apiKey: string | undefined; body: any }> = [];
+    modelServer = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      modelRequests.push({
+        url: request.url ?? "",
+        apiKey: request.headers["x-api-key"] as string | undefined,
+        body: body ? JSON.parse(body) : null
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          request.url === "/v1/messages"
+            ? { content: [{ type: "text", text: "Clearer coding request" }] }
+            : { data: [{ id: "claude-sonnet-fixture" }, { id: "claude-opus-fixture" }] }
+        )
+      );
+    });
+    await new Promise<void>((resolve) => modelServer!.listen(0, "127.0.0.1", resolve));
+    const modelPort = (modelServer.address() as { port: number }).port;
+    const claudeConfig = {
+      name: "Claude fixture",
+      kind: "claude-code",
+      homeMode: "api-key",
+      model: "sonnet",
+      apiKey: "claude-fixture-key",
+      baseUrl: `http://127.0.0.1:${modelPort}`,
+      settingsJson: '{"env":{"CUSTOM":"value"}}',
+      mcpServersJson: '{"local":{"command":"node","args":["server.js"]}}',
+      isDefault: true
+    };
+    const claude = await call("/api/providers", "POST", claudeConfig);
+    expect(claude.response.status, JSON.stringify(claude.body)).toBe(200);
+    expect(claude.body).toMatchObject({
+      kind: "claude-code",
+      model: "sonnet",
+      configToml: null,
+      authJson: null,
+      isDefault: true
+    });
+    const claudeId = String(claude.body.id);
+    const connection = await call(`/api/providers/${claudeId}/test`, "POST", {});
+    expect(connection.body).toMatchObject({
+      ok: true,
+      models: ["claude-sonnet-fixture", "claude-opus-fixture"]
+    });
+    const catalog = await call(`/api/providers/${claudeId}/models`);
+    expect(catalog.body.models).toContain("claude-sonnet-fixture");
+    expect(modelRequests.every((request) => request.apiKey === "claude-fixture-key")).toBe(true);
+    const enhanced = await call(`/api/providers/${claudeId}/enhance`, "POST", {
+      text: "fix this",
+      model: "sonnet"
+    });
+    expect(enhanced.response.status).toBe(200);
+    expect(modelRequests.at(-1)?.body).toMatchObject({
+      model: "claude-sonnet-fixture",
+      messages: [{ role: "user", content: "fix this" }]
+    });
+    const renamed = await call(`/api/providers/${claudeId}`, "PUT", { name: "Claude renamed" });
+    expect(renamed.body).toMatchObject({
+      settingsJson: claudeConfig.settingsJson,
+      mcpServersJson: claudeConfig.mcpServersJson
+    });
+    expect(
+      (await call(`/api/providers/${claudeId}`, "PUT", { name: "Invalid", kind: "codex" })).response
+        .status
+    ).toBe(400);
+    const claudeExport = await call(`/api/providers/${claudeId}/export`);
+    expect(claudeExport.body).toMatchObject({
+      kind: "claude-code",
+      apiKey: "claude-fixture-key",
+      settingsJson: claudeConfig.settingsJson
+    });
+    for (const copy of [
+      await call(`/api/providers/${claudeId}/clone`, "POST", {}),
+      await call("/api/providers/import", "POST", claudeExport.body)
+    ]) {
+      expect(copy.response.status, JSON.stringify(copy.body)).toBe(200);
+      expect(copy.body).toMatchObject({
+        kind: "claude-code",
+        settingsJson: claudeConfig.settingsJson,
+        mcpServersJson: claudeConfig.mcpServersJson
+      });
+    }
+    const mcp = await call(`/api/providers/${claudeId}/mcp`, "POST", {
+      name: "remote",
+      url: "https://mcp.example.test/api"
+    });
+    expect(mcp.response.status).toBe(200);
+    expect(mcp.body.servers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "remote", type: "http", enabled: true })
+      ])
+    );
+    const disabled = await call(`/api/providers/${claudeId}/mcp/remote/toggle`, "POST", {
+      enabled: false
+    });
+    expect(disabled.body.servers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "remote", enabled: false })])
+    );
+    expect((await call(`/api/providers/${claudeId}/mcp/remote`, "DELETE")).response.status).toBe(
+      200
+    );
+    expect(
+      (await call("/api/providers", "POST", { ...claudeConfig, settingsJson: "[]" })).response
+        .status
+    ).toBe(400);
+
+    const project = await call("/api/projects", "POST", {
+      name: "Multi-client",
+      path: dir,
+      providerId: id
+    });
+    const projectId = String(project.body.id);
+    const session = await call(`/api/projects/${projectId}/sessions`, "POST", { providerId: id });
+    const sessionId = String(session.body.id);
+    expect(session.body.clientType).toBe("codex");
+    expect(
+      (
+        await call(`/api/projects/${projectId}/sessions`, "POST", {
+          providerId: id,
+          clientType: "claude-code"
+        })
+      ).response.status
+    ).toBe(400);
+    const inPlace = await call(`/api/sessions/${sessionId}/provider`, "PUT", {
+      providerId: claudeId
+    });
+    expect(inPlace.response.status).toBe(200);
+    expect(inPlace.body).toMatchObject({
+      id: sessionId,
+      clientType: "claude-code",
+      providerId: claudeId
+    });
+    const continuation = await call(`/api/sessions/${sessionId}/continue`, "POST", {
+      providerId: id,
+      clientType: "codex"
+    });
+    expect(continuation.body).toMatchObject({
+      clientType: "codex",
+      parentSessionId: sessionId,
+      continuationMode: "portable-context"
+    });
+    expect(continuation.body.id).not.toBe(sessionId);
+    expect(
+      (
+        await call(`/api/projects/${projectId}/agents-md`, "PUT", {
+          content: "# Claude rules",
+          clientType: "claude-code"
+        })
+      ).response.status
+    ).toBe(200);
+    expect(
+      (await call(`/api/projects/${projectId}/agents-md?clientType=claude-code`)).body.content
+    ).toBe("# Claude rules");
+    expect((await call(`/api/projects/${projectId}/agents-md`)).body.content).not.toBe(
+      "# Claude rules"
+    );
     await stopServer();
     const store = new Store(database);
     try {
@@ -179,6 +346,9 @@ describe("provider runtime settings HTTP contract", () => {
       });
       expect(store.getProvider(String(cloned.body.id))).toMatchObject(limits);
       expect(store.getProvider(String(imported.body.id))).toMatchObject(limits);
+      expect(JSON.parse(store.getProvider(claudeId)!.modelsJson!)).toContain(
+        "claude-sonnet-fixture"
+      );
     } finally {
       store.db.close();
     }

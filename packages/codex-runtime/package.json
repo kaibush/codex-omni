@@ -14,7 +14,7 @@
     "@codex-omni/protocol": "workspace:*",
     "@openai/codex-sdk": "0.156.1",
     "nanoid": "^5.1.5",
-    "zod": "^3.25.76"
+    "@codex-omni/agent-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",

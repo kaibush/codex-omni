@@ -1,3 +1,14 @@
+import { claudeRuntimeInfo } from "@codex-omni/claude-runtime";
+import { listClaudeResources } from "./claude-resources.js";
+import { CLIENTS, clientTypeSchema, claudeOptionsSchema } from "@codex-omni/protocol";
+import {
+  claudeProviderFiles,
+  resolveClientHome,
+  claudeMcpList,
+  updateClaudeMcp
+} from "./client-provider.js";
+import { selectSessionProvider, switchSessionProvider } from "./session-runtime.js";
+import { buildForkContext } from "./session-context.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import os from "node:os";
@@ -8,7 +19,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { Store, setProviderStreamIdleTimeout, type ProviderRow } from "@codex-omni/db";
 import {
   DEFAULT_PROVIDER_AUTH_TEMPLATE,
@@ -18,7 +29,7 @@ import {
   providerInputSchema,
   runCommandSchema
 } from "@codex-omni/protocol";
-import { assertExternalCodexHome, resolveProviderHome } from "@codex-omni/codex-runtime";
+import { assertExternalCodexHome } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
 import {
   browseDirectory,
@@ -151,19 +162,14 @@ const queryValue = (req: { query: unknown }, name: string) => {
   const value = z.record(z.string(), z.unknown()).parse(req.query ?? {})[name];
   return typeof value === "string" ? value : undefined;
 };
-const providerHome = (provider: ProviderRow) =>
-  resolveProviderHome({
-    providersRoot,
-    providerId: provider.id,
-    homeMode: provider.homeMode,
-    codexHomePath: provider.codexHomePath,
-    configToml: provider.configToml,
-    authJson: provider.authJson
-  });
-const sessionThreadGoal = async (
-  session: { threadId: string | null; providerId: string | null; projectId: string }
-) => {
-  if (!session.threadId) return null;
+const providerHome = (provider: ProviderRow) => resolveClientHome(provider, providersRoot);
+const sessionThreadGoal = async (session: {
+  threadId: string | null;
+  providerId: string | null;
+  projectId: string;
+  clientType?: string;
+}) => {
+  if (session.clientType === "claude-code" || !session.threadId) return null;
   const project = store.getProject(session.projectId);
   const provider = store.getProvider(session.providerId ?? project?.providerId ?? "");
   if (!provider) return null;
@@ -230,6 +236,9 @@ const publicProvider = (provider: ReturnType<typeof store.getProvider>) => {
     id: provider.id,
     name: provider.name,
     kind: provider.kind,
+    claudeHomePath: provider.claudeHomePath ?? null,
+    settingsJson: provider.settingsJson ?? null,
+    mcpServersJson: provider.mcpServersJson ?? null,
     model: provider.model,
     contextWindow: provider.contextWindow,
     autoCompactTokenLimit: provider.autoCompactTokenLimit,
@@ -242,6 +251,14 @@ const publicProvider = (provider: ReturnType<typeof store.getProvider>) => {
     isDefault: Boolean(provider.isDefault),
     homeMode,
     codexHomePath,
+    runtimeHome:
+      provider.kind === "claude-code"
+        ? homeMode === "external"
+          ? (provider.claudeHomePath ?? path.join(os.homedir(), ".claude"))
+          : path.join(providersRoot, provider.id, "claude")
+        : homeMode === "external"
+          ? (codexHomePath ?? "")
+          : path.join(providersRoot, provider.id),
     codexHome:
       homeMode === "external" && codexHomePath
         ? path.resolve(codexHomePath)
@@ -263,6 +280,15 @@ const providerFilesFromInput = async (
   input: ReturnType<typeof providerInputSchema.parse>,
   current?: ProviderRow
 ) => {
+  if (current && input.kind && input.kind !== current.kind)
+    throw httpError(400, "已有供应商不能更换客户端，请新建供应商");
+  if ((input.kind ?? current?.kind) === "claude-code") {
+    try {
+      return await claudeProviderFiles(input, current);
+    } catch (error) {
+      throw httpError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
   const homeMode =
     input.homeMode ??
     (current
@@ -347,16 +373,21 @@ const providerFilesFromInput = async (
     authJson,
     model: /^\s*model\s*=/.test(configToml)
       ? parseTomlStringValue(configToml, ["model"]) || null
-      : input.model ?? current?.model ?? null,
+      : (input.model ?? current?.model ?? null),
     baseUrl: /^\s*base_url\s*=/.test(configToml)
       ? parseTomlStringValue(configToml, ["base_url"]) || null
-      : input.baseUrl ?? current?.baseUrl ?? null,
+      : (input.baseUrl ?? current?.baseUrl ?? null),
     // Managed auth.json is the source of truth. Passing a separately stored
     // API key to the SDK would override a key edited in auth.json.
     apiKey: null
   };
 };
 const defaultSettings = {
+  claude: {
+    permissionMode: "default" as const,
+    effort: "high" as const,
+    thinking: "adaptive" as const
+  },
   sandbox: "workspace-write" as const,
   approvalPolicy: "on-request" as const,
   networkAccessEnabled: true,
@@ -448,7 +479,10 @@ app.post("/api/providers", { preHandler: auth }, async (req) => {
       envJson: JSON.stringify(input.messageEnvVars ?? {}),
       isDefault: input.isDefault ? 1 : 0,
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath
+      codexHomePath: files.codexHomePath,
+      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
+      settingsJson: "settingsJson" in files ? files.settingsJson : null,
+      mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
   );
 });
@@ -463,18 +497,22 @@ app.put("/api/providers/:id", { preHandler: auth }, async (req) => {
       id,
       name: input.name,
       kind: input.kind ?? current.kind,
-      model: files.model ?? input.model ?? current.model ?? null,
+      model: files.model,
       contextWindow: files.contextWindow ?? null,
       autoCompactTokenLimit: files.autoCompactTokenLimit ?? null,
-      modelsJson: JSON.stringify(input.models ?? []),
-      baseUrl: files.baseUrl ?? input.baseUrl ?? current.baseUrl ?? null,
+      modelsJson: input.models === undefined ? current.modelsJson : JSON.stringify(input.models),
+      baseUrl: files.baseUrl,
       apiKey: files.apiKey,
       configToml: files.configToml,
       authJson: files.authJson,
-      envJson: JSON.stringify(input.messageEnvVars ?? {}),
+      envJson:
+        input.messageEnvVars === undefined ? current.envJson : JSON.stringify(input.messageEnvVars),
       isDefault: (input.isDefault ?? Boolean(current.isDefault)) ? 1 : 0,
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath
+      codexHomePath: files.codexHomePath,
+      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
+      settingsJson: "settingsJson" in files ? files.settingsJson : null,
+      mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
   );
 });
@@ -490,6 +528,9 @@ app.get("/api/providers/:id/export", { preHandler: auth }, async (req, reply) =>
   return serializeProviderExport({
     name: provider.name,
     kind: provider.kind,
+    claudeHomePath: provider.claudeHomePath ?? null,
+    settingsJson: provider.settingsJson ?? null,
+    mcpServersJson: provider.mcpServersJson ?? null,
     model: provider.model,
     contextWindow: provider.contextWindow,
     autoCompactTokenLimit: provider.autoCompactTokenLimit,
@@ -520,7 +561,10 @@ app.post("/api/providers/import", { preHandler: auth }, async (req) => {
       authJson: files.authJson,
       envJson: JSON.stringify(input.messageEnvVars),
       homeMode: files.homeMode,
-      codexHomePath: files.codexHomePath
+      codexHomePath: files.codexHomePath,
+      claudeHomePath: "claudeHomePath" in files ? files.claudeHomePath : null,
+      settingsJson: "settingsJson" in files ? files.settingsJson : null,
+      mcpServersJson: "mcpServersJson" in files ? files.mcpServersJson : null
     })
   );
 });
@@ -531,6 +575,9 @@ app.post("/api/providers/:id/clone", { preHandler: auth }, async (req, reply) =>
     store.upsertProvider({
       name: cloneProviderName(provider.name),
       kind: provider.kind,
+      claudeHomePath: provider.claudeHomePath ?? null,
+      settingsJson: provider.settingsJson ?? null,
+      mcpServersJson: provider.mcpServersJson ?? null,
       model: provider.model,
       contextWindow: provider.contextWindow,
       autoCompactTokenLimit: provider.autoCompactTokenLimit,
@@ -550,6 +597,10 @@ app.post("/api/providers/:id/test", { preHandler: auth }, async (req, reply) => 
   const provider = store.getProvider(routeId(req));
   if (!provider) return reply.code(404).send({ error: "Provider not found" });
   const result = await testProviderConnection({
+    kind: provider.kind,
+    settingsJson: provider.settingsJson ?? null,
+    messageEnvVars: JSON.parse(provider.envJson ?? "{}"),
+    homeMode: provider.homeMode,
     baseUrl: provider.baseUrl,
     apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
@@ -573,6 +624,11 @@ app.post("/api/providers/:id/enhance", { preHandler: auth }, async (req, reply) 
     .object({ text: z.string().min(1).max(20_000), model: z.string().optional() })
     .parse(req.body);
   return enhancePrompt({
+    kind: provider.kind,
+    settingsJson: provider.settingsJson ?? null,
+    models: publicProvider(provider)?.models ?? [],
+    messageEnvVars: JSON.parse(provider.envJson ?? "{}"),
+    homeMode: provider.homeMode,
     baseUrl: provider.baseUrl,
     apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
@@ -587,21 +643,31 @@ app.get("/api/providers/:id/models", { preHandler: auth }, async (req, reply) =>
   const query = z.string().optional().parse(queryValue(req, "q"));
   const published = publicProvider(provider);
   const result = await testProviderConnection({
+    kind: provider.kind,
+    settingsJson: provider.settingsJson ?? null,
+    messageEnvVars: JSON.parse(provider.envJson ?? "{}"),
+    homeMode: provider.homeMode,
     baseUrl: provider.baseUrl,
     apiKey: provider.homeMode === "api-key" ? provider.apiKey : null,
     configToml: provider.configToml,
     authJson: provider.authJson
   });
+  if (result.models.length)
+    persistProvider(provider, { modelsJson: JSON.stringify(result.models) });
   const models = filterModels(
     result.models.length ? result.models : (published?.models ?? []),
     query
   );
   return { models, fetched: result.fetched ?? 0, error: result.ok ? undefined : result.error };
 });
+app.get("/api/clients", { preHandler: auth }, async () => CLIENTS);
 app.get("/api/runtime", { preHandler: auth }, async () => ({
   defaultCodexHome,
   providersRoot,
+  clients: CLIENTS,
+  defaultClaudeHome: process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"),
   host: await collectHostInfo(path.dirname(dataPath)),
+  claude: claudeRuntimeInfo(),
   codex: await collectCodexRuntimeInfo()
 }));
 app.get("/api/system/version", { preHandler: auth }, async () => updateCheck.snapshot());
@@ -610,6 +676,7 @@ app.get("/api/settings", { preHandler: auth }, async () => store.getSettings(def
 app.put("/api/settings", { preHandler: auth }, async (req) => {
   const settings = z
     .object({
+      claude: claudeOptionsSchema.optional(),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]),
       approvalPolicy: z.enum(["untrusted", "on-request", "never"]),
       networkAccessEnabled: z.boolean(),
@@ -623,7 +690,12 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       failureRetryEnabled: z.boolean().optional(),
       failureRetryMaxAttempts: z.number().int().min(1).max(100).optional(),
       failureRetryDelayMs: z.number().int().min(0).max(FAILURE_RETRY_HARD_MAX_DELAY_MS).optional(),
-      failureRetryMaxDelayMs: z.number().int().min(0).max(FAILURE_RETRY_HARD_MAX_DELAY_MS).optional(),
+      failureRetryMaxDelayMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(FAILURE_RETRY_HARD_MAX_DELAY_MS)
+        .optional(),
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),
@@ -1125,10 +1197,20 @@ app.get("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
 });
 app.post("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
   const body = z
-    .object({ title: z.string().optional(), providerId: z.string().nullable().optional(), kind: z.enum(["chat", "terminal-chat"]).optional() })
+    .object({
+      title: z.string().optional(),
+      providerId: z.string().nullable().optional(),
+      clientType: clientTypeSchema.optional(),
+      kind: z.enum(["chat", "terminal-chat"]).optional()
+    })
     .parse(req.body ?? {});
   return store.createSession({
     projectId: routeId(req),
+    ...selectSessionProvider(store, {
+      projectId: routeId(req),
+      ...(body.providerId ? { providerId: body.providerId } : {}),
+      ...(body.clientType ? { clientType: body.clientType } : {})
+    }),
     ...(body.title !== undefined ? { title: body.title } : {}),
     ...(body.providerId !== undefined ? { providerId: body.providerId } : {}),
     ...(body.kind !== undefined ? { kind: body.kind } : {})
@@ -1164,7 +1246,13 @@ app.get("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
     .parse(req.query ?? {});
   // Pagination should only read SQLite. Re-walking Codex rollout JSONL on every
   // "load older messages" request is what made history scrolling feel stuck.
-  if (provider && session.threadId && query.beforeCreatedAt == null && !query.aroundId) {
+  if (
+    session.clientType === "codex" &&
+    provider &&
+    session.threadId &&
+    query.beforeCreatedAt == null &&
+    !query.aroundId
+  ) {
     try {
       backfillSessionRolloutTools({
         store,
@@ -1328,7 +1416,7 @@ app.post("/api/sessions/bulk-delete", { preHandler: auth }, async (req) => {
     }
     if (!removable.length) continue;
     const provider = store.getProvider(providerId);
-    if (!provider) continue;
+    if (!provider || provider.kind === "claude-code") continue;
     try {
       const home = await providerHome(provider);
       const purged = await purgeProviderThreads(home, removable);
@@ -1350,28 +1438,43 @@ app.delete("/api/sessions/:id", { preHandler: auth }, async (req, reply) => {
   store.deleteSession(id);
   return { ok: true };
 });
+app.put("/api/sessions/:id/provider", { preHandler: auth }, async (req) => {
+  const body = z.object({ providerId: z.string().min(1) }).parse(req.body);
+  return switchSessionProvider(store, routeId(req), body.providerId);
+});
 app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
   const source = store.getSession(routeId(req));
   if (!source) throw new Error("Source session not found");
   const body = z
     .object({
       providerId: z.string().nullable().optional(),
+      clientType: clientTypeSchema.optional(),
       title: z.string().optional(),
       model: z.string().optional()
     })
     .parse(req.body ?? {});
-  const providerId = body.providerId ?? source.providerId ?? null;
+  const selection = selectSessionProvider(store, {
+    projectId: source.projectId,
+    ...(body.providerId
+      ? { providerId: body.providerId }
+      : !body.clientType && source.providerId
+        ? { providerId: source.providerId }
+        : {}),
+    ...(body.clientType ? { clientType: body.clientType } : {})
+  });
+  const { providerId } = selection;
   const target = store.createSession({
     projectId: source.projectId,
+    clientType: selection.clientType,
     title: body.title?.trim() || source.title,
     ...(providerId ? { providerId } : {}),
     parentSessionId: source.id,
     continuationMode: "portable-context"
   });
-  const context = store
-    .listRecentConversationMessages(source.id, 20)
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-    .join("\n\n");
+  const context = buildForkContext(source.id, store.conversationSince(source.id))
+    .replace(/^此会话从 .*? 分叉。/, `此会话续接自 ${source.id}。`)
+    .replaceAll("分叉点之前", "续接之前")
+    .replaceAll("fork-history", "continuation-history");
   store.addMessage({
     sessionId: target.id,
     role: "system",
@@ -1405,7 +1508,7 @@ app.post("/api/sessions/:id/clear-goal", { preHandler: auth }, async (req, reply
   const id = routeId(req);
   const session = store.getSession(id);
   if (!session) return reply.code(404).send({ error: "Session not found" });
-  if (!session.threadId) {
+  if (session.clientType === "claude-code" || !session.threadId) {
     return reply.code(400).send({ error: "当前会话还没有 Codex 线程，没有可清除的目标" });
   }
   if (session.status === "running") {
@@ -1463,7 +1566,9 @@ app.get("/api/approvals/stats", { preHandler: auth }, async (req) => {
 });
 app.get("/api/runs/active", { preHandler: auth }, async () => runs.listActiveRuns());
 app.get("/api/runs/recent-sessions", { preHandler: auth }, async (req) => {
-  const query = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }).parse(req.query ?? {});
+  const query = z
+    .object({ limit: z.coerce.number().int().min(1).max(200).default(50) })
+    .parse(req.query ?? {});
   return store.listRecentRunSessions(query.limit);
 });
 app.get("/api/stats", { preHandler: auth }, async (req) => {
@@ -1706,29 +1811,54 @@ app.put("/api/messages/:id/star", { preHandler: auth }, async (req, reply) => {
 });
 app.get("/api/projects/:id/agents-md", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));
-  return readAgentsMarkdown(rootPath);
+  const client = clientTypeSchema.parse(queryValue(req, "clientType") ?? "codex");
+  return readAgentsMarkdown(rootPath, client === "claude-code" ? "CLAUDE.md" : "AGENTS.md");
 });
 app.put("/api/projects/:id/agents-md", { preHandler: auth }, async (req) => {
   const { rootPath } = await getProjectRoot(routeId(req));
   const body = z
-    .object({ content: z.string().max(200_000), revision: z.string().optional() })
+    .object({
+      content: z.string().max(200_000),
+      revision: z.string().optional(),
+      clientType: clientTypeSchema.optional()
+    })
     .parse(req.body);
-  return writeAgentsMarkdown(rootPath, body.content, body.revision);
+  return writeAgentsMarkdown(
+    rootPath,
+    body.content,
+    body.revision,
+    body.clientType === "claude-code" ? "CLAUDE.md" : "AGENTS.md"
+  );
 });
 app.get("/api/projects/:id/skills", { preHandler: auth }, async (req) => {
   const { project, rootPath } = await getProjectRoot(routeId(req));
-  const provider = project.providerId ? store.getProvider(project.providerId) : undefined;
+  const selectedProviderId = queryValue(req, "providerId") ?? project.providerId;
+  const provider = selectedProviderId ? store.getProvider(selectedProviderId) : undefined;
+  if (selectedProviderId && !provider) throw httpError(404, "Provider not found");
+  const client = provider?.kind === "claude-code" ? "claude-code" : "codex";
   const home = provider ? await providerHome(provider) : defaultCodexHome;
   const [projectSkills, providerSkills] = await Promise.all([
-    listProjectSkills(rootPath),
+    listProjectSkills(rootPath, client),
     listProviderSkills(home)
   ]);
   return { project: projectSkills, provider: providerSkills };
 });
+app.get("/api/projects/:id/client-resources", { preHandler: auth }, async (req) => {
+  const { project, rootPath } = await getProjectRoot(routeId(req));
+  const provider = store.getProvider(queryValue(req, "providerId") ?? project.providerId ?? "");
+  if (!provider) throw httpError(404, "Provider not found");
+  if (provider.kind !== "claude-code") return { resources: [] };
+  return { resources: await listClaudeResources(rootPath, await providerHome(provider)) };
+});
 app.get("/api/providers/:id/mcp", { preHandler: auth }, async (req, reply) => {
   const provider = store.getProvider(routeId(req));
   if (!provider) return reply.code(404).send({ error: "Provider not found" });
-  return { servers: parseMcpServers(provider.configToml) };
+  return {
+    servers:
+      provider.kind === "claude-code"
+        ? claudeMcpList(provider)
+        : parseMcpServers(provider.configToml)
+  };
 });
 app.post("/api/providers/:id/mcp", { preHandler: auth }, async (req, reply) => {
   const provider = store.getProvider(routeId(req));
@@ -1748,6 +1878,10 @@ app.post("/api/providers/:id/mcp", { preHandler: auth }, async (req, reply) => {
       env: z.record(z.string(), z.string()).optional()
     })
     .parse(req.body);
+  if (provider.kind === "claude-code") {
+    const updated = persistProvider(provider, updateClaudeMcp(provider, body.name, body));
+    return { servers: claudeMcpList(updated) };
+  }
   const configToml = upsertMcpServer(provider.configToml ?? "", {
     name: body.name,
     enabled: body.enabled !== false,
@@ -1765,6 +1899,13 @@ app.post("/api/providers/:id/mcp/:name/toggle", { preHandler: auth }, async (req
   if (!provider) return reply.code(404).send({ error: "Provider not found" });
   const name = routeParam(req, "name");
   const body = z.object({ enabled: z.boolean() }).parse(req.body);
+  if (provider.kind === "claude-code") {
+    const updated = persistProvider(
+      provider,
+      updateClaudeMcp(provider, name, { enabled: body.enabled })
+    );
+    return { servers: claudeMcpList(updated) };
+  }
   const configToml = setMcpServerEnabled(provider.configToml ?? "", name, body.enabled);
   persistProvider(provider, { configToml });
   return { servers: parseMcpServers(configToml) };
@@ -1773,6 +1914,10 @@ app.delete("/api/providers/:id/mcp/:name", { preHandler: auth }, async (req, rep
   const provider = store.getProvider(routeId(req));
   if (!provider) return reply.code(404).send({ error: "Provider not found" });
   const name = routeParam(req, "name");
+  if (provider.kind === "claude-code") {
+    const updated = persistProvider(provider, updateClaudeMcp(provider, name, null));
+    return { servers: claudeMcpList(updated) };
+  }
   const configToml = removeMcpServer(provider.configToml ?? "", name);
   persistProvider(provider, { configToml });
   return { servers: parseMcpServers(configToml) };
@@ -1930,7 +2075,9 @@ app.delete("/api/terminals/:id", { preHandler: auth }, async (req, reply) => {
   if (!deleted) return reply.code(404).send({ error: "Terminal not found" });
   return { ok: true };
 });
-app.get("/api/terminal-profiles", { preHandler: auth }, async () => ({ profiles: store.listTerminalProfiles() }));
+app.get("/api/terminal-profiles", { preHandler: auth }, async () => ({
+  profiles: store.listTerminalProfiles()
+}));
 app.post("/api/terminal-profiles", { preHandler: auth }, async (req) => {
   const body = z
     .object({
@@ -1945,7 +2092,8 @@ app.post("/api/terminal-profiles", { preHandler: auth }, async (req) => {
 });
 app.put("/api/terminal-profiles/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
-  if (!store.getTerminalProfile(id)) return reply.code(404).send({ error: "Terminal profile not found" });
+  if (!store.getTerminalProfile(id))
+    return reply.code(404).send({ error: "Terminal profile not found" });
   const body = z
     .object({
       name: z.string().trim().min(1).max(80),
@@ -1971,18 +2119,27 @@ app.get("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req,
 app.post("/api/projects/:id/terminal-sessions", { preHandler: auth }, async (req, reply) => {
   const projectId = routeId(req);
   const { rootPath } = await getProjectRoot(projectId);
-  const body = z.object({
-    title: z.string().trim().max(120).optional(),
-    profileId: z.string().min(1).default("shell"),
-    restartPolicy: z.enum(["manual", "on-unexpected-exit"]).default("manual")
-  }).parse(req.body ?? {});
+  const body = z
+    .object({
+      title: z.string().trim().max(120).optional(),
+      profileId: z.string().min(1).default("shell"),
+      restartPolicy: z.enum(["manual", "on-unexpected-exit"]).default("manual")
+    })
+    .parse(req.body ?? {});
   const profile = store.getTerminalProfile(body.profileId);
   if (!profile) return reply.code(400).send({ error: "不支持的终端 profile" });
   const existingTitles = store.listTerminalSessions(projectId).map((item) => item.title);
   const title = body.title?.trim() || nextNumberedTitle(existingTitles, profile.name);
   const session = store.createSession({ projectId, title, kind: "terminal-chat" });
   try {
-    const terminal = terminalChats.create({ projectId, sessionId: session.id, title: session.title, cwd: rootPath, profileId: body.profileId, restartPolicy: body.restartPolicy });
+    const terminal = terminalChats.create({
+      projectId,
+      sessionId: session.id,
+      title: session.title,
+      cwd: rootPath,
+      profileId: body.profileId,
+      restartPolicy: body.restartPolicy
+    });
     return { session, terminal };
   } catch (error) {
     const created = store.getTerminalSessionBySession(session.id);
@@ -1997,10 +2154,16 @@ app.get("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) =
 });
 app.put("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
-  const body = z.object({
-    title: z.string().trim().min(1).max(120).optional(),
-    restartPolicy: z.enum(["manual", "on-unexpected-exit"]).optional()
-  }).refine((value) => value.title !== undefined || value.restartPolicy !== undefined, "No changes provided").parse(req.body ?? {});
+  const body = z
+    .object({
+      title: z.string().trim().min(1).max(120).optional(),
+      restartPolicy: z.enum(["manual", "on-unexpected-exit"]).optional()
+    })
+    .refine(
+      (value) => value.title !== undefined || value.restartPolicy !== undefined,
+      "No changes provided"
+    )
+    .parse(req.body ?? {});
   const patch: { title?: string; restartPolicy?: "manual" | "on-unexpected-exit" } = {};
   if (body.title !== undefined) patch.title = body.title;
   if (body.restartPolicy !== undefined) patch.restartPolicy = body.restartPolicy;
@@ -2009,7 +2172,8 @@ app.put("/api/terminal-sessions/:id", { preHandler: auth }, async (req, reply) =
 });
 app.post("/api/terminal-sessions/:id/restart", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
-  if (!terminalChats.restart(id)) return reply.code(404).send({ error: "Terminal session not found" });
+  if (!terminalChats.restart(id))
+    return reply.code(404).send({ error: "Terminal session not found" });
   return { ok: true, terminal: terminalChats.get(id) };
 });
 app.post("/api/terminal-sessions/:id/stop", { preHandler: auth }, async (req, reply) => {
@@ -2020,13 +2184,29 @@ app.post("/api/terminal-sessions/:id/stop", { preHandler: auth }, async (req, re
 app.get("/api/terminal-sessions/:id/history", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   if (!terminalChats.get(id)) return reply.code(404).send({ error: "Terminal session not found" });
-  const query = z.object({ afterSeq: z.coerce.number().int().min(0).default(0), beforeSeq: z.coerce.number().int().min(1).optional(), limit: z.coerce.number().int().min(1).max(20000).default(5000) }).parse(req.query ?? {});
-  return { items: query.beforeSeq === undefined ? store.listTerminalEvents(id, query.afterSeq, query.limit) : store.listTerminalEventsBefore(id, query.beforeSeq, query.limit) };
+  const query = z
+    .object({
+      afterSeq: z.coerce.number().int().min(0).default(0),
+      beforeSeq: z.coerce.number().int().min(1).optional(),
+      limit: z.coerce.number().int().min(1).max(20000).default(5000)
+    })
+    .parse(req.query ?? {});
+  return {
+    items:
+      query.beforeSeq === undefined
+        ? store.listTerminalEvents(id, query.afterSeq, query.limit)
+        : store.listTerminalEventsBefore(id, query.beforeSeq, query.limit)
+  };
 });
 app.get("/api/terminal-sessions/:id/transcript", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   if (!terminalChats.get(id)) return reply.code(404).send({ error: "Terminal session not found" });
-  const query = z.object({ q: z.string().trim().min(1).max(200), limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query ?? {});
+  const query = z
+    .object({
+      q: z.string().trim().min(1).max(200),
+      limit: z.coerce.number().int().min(1).max(500).default(100)
+    })
+    .parse(req.query ?? {});
   return { items: store.searchTerminalEvents(id, query.q, query.limit) };
 });
 app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
@@ -2082,9 +2262,22 @@ const terminalCommandSchema = z.discriminatedUnion("type", [
   })
 ]);
 const terminalChatCommandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("terminal.subscribe"), terminalId: z.string().min(1), lastSeq: z.number().int().min(0).optional() }),
-  z.object({ type: z.literal("terminal.input"), terminalId: z.string().min(1), data: z.string().max(256 * 1024) }),
-  z.object({ type: z.literal("terminal.resize"), terminalId: z.string().min(1), cols: z.number().int().min(20).max(400), rows: z.number().int().min(5).max(200) })
+  z.object({
+    type: z.literal("terminal.subscribe"),
+    terminalId: z.string().min(1),
+    lastSeq: z.number().int().min(0).optional()
+  }),
+  z.object({
+    type: z.literal("terminal.input"),
+    terminalId: z.string().min(1),
+    data: z.string().max(256 * 1024)
+  }),
+  z.object({
+    type: z.literal("terminal.resize"),
+    terminalId: z.string().min(1),
+    cols: z.number().int().min(20).max(400),
+    rows: z.number().int().min(5).max(200)
+  })
 ]);
 app.get("/api/terminal/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown) => {
@@ -2115,16 +2308,27 @@ app.get("/api/terminal/ws", { websocket: true, preValidation: auth }, (socket) =
 });
 app.get("/api/terminal-chat/ws", { websocket: true, preValidation: auth }, (socket) => {
   const sendError = (error: unknown) => {
-    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "terminal.error", payload: { message: error instanceof Error ? error.message : String(error) } }));
+    if (socket.readyState === socket.OPEN)
+      socket.send(
+        JSON.stringify({
+          type: "terminal.error",
+          payload: { message: error instanceof Error ? error.message : String(error) }
+        })
+      );
   };
   socket.on("message", (data: unknown) => {
     try {
       const command = terminalChatCommandSchema.parse(JSON.parse(String(data)));
-      if (command.type === "terminal.subscribe") terminalChats.subscribe(command.terminalId, socket, command.lastSeq ?? 0);
+      if (command.type === "terminal.subscribe")
+        terminalChats.subscribe(command.terminalId, socket, command.lastSeq ?? 0);
       else if (command.type === "terminal.input") {
-        if (!terminalChats.input(command.terminalId, command.data)) throw new Error("Terminal session is not running");
-      } else if (!terminalChats.resize(command.terminalId, command.cols, command.rows)) throw new Error("Terminal session is not running");
-    } catch (error) { sendError(error); }
+        if (!terminalChats.input(command.terminalId, command.data))
+          throw new Error("Terminal session is not running");
+      } else if (!terminalChats.resize(command.terminalId, command.cols, command.rows))
+        throw new Error("Terminal session is not running");
+    } catch (error) {
+      sendError(error);
+    }
   });
   socket.on("close", () => terminalChats.unsubscribeSocket(socket));
 });

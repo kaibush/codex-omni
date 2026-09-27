@@ -8,16 +8,25 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "release", "codex-omni");
 
 const serverPkg = JSON.parse(await readFile(path.join(root, "apps/server/package.json"), "utf8"));
-const runtimePkg = JSON.parse(await readFile(path.join(root, "packages/codex-runtime/package.json"), "utf8"));
-const dbPkg = JSON.parse(await readFile(path.join(root, "packages/db/package.json"), "utf8"));
-const protocolPkg = JSON.parse(await readFile(path.join(root, "packages/protocol/package.json"), "utf8"));
+const workspacePackages = await Promise.all(
+  ["protocol", "db", "agent-runtime", "codex-runtime", "claude-runtime"].map(async (directory) => ({
+    directory,
+    manifest: JSON.parse(
+      await readFile(path.join(root, "packages", directory, "package.json"), "utf8")
+    )
+  }))
+);
 const rootPkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
 function productionDeps(...pkgs) {
   const deps = {};
   for (const pkg of pkgs) {
     for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
-      if (name.startsWith("@codex-omni/") || name === "typescript") continue;
+      if (name.startsWith("@codex-omni/")) continue;
+      if (deps[name] && deps[name] !== version)
+        throw new Error(
+          `production dependency ${name} has conflicting versions: ${deps[name]} / ${version}`
+        );
       deps[name] = version;
     }
   }
@@ -28,92 +37,79 @@ function skipTestArtifacts(src) {
   return !/\.test\.(js|d\.ts|js\.map)$/.test(src);
 }
 
-function vendorManifest(pkg, extraDeps = {}) {
+function bundledManifest(pkg) {
   return {
     name: pkg.name,
     version: pkg.version,
     type: "module",
     main: pkg.main,
     types: pkg.types,
-    dependencies: extraDeps
+    dependencies: Object.fromEntries(
+      Object.entries(pkg.dependencies ?? {}).map(([name, version]) => {
+        const internal = workspacePackages.find((item) => item.manifest.name === name);
+        return [name, internal ? internal.manifest.version : version];
+      })
+    )
   };
 }
 
 console.log("building workspace packages...");
-execSync(
-  "pnpm --filter @codex-omni/protocol --filter @codex-omni/db --filter @codex-omni/codex-runtime --filter @codex-omni/server --filter @codex-omni/web build",
-  { cwd: root, stdio: "inherit" }
-);
+execSync("pnpm --filter @codex-omni/server... --filter @codex-omni/web... build", {
+  cwd: root,
+  stdio: "inherit"
+});
 
 const required = [
   path.join(root, "apps/server/dist/cli/codex-omni.js"),
   path.join(root, "apps/web/dist/index.html"),
-  path.join(root, "packages/codex-runtime/dist/worker-entry.js")
+  path.join(root, "packages/codex-runtime/dist/worker-entry.js"),
+  path.join(root, "packages/claude-runtime/dist/worker-entry.js"),
+  path.join(root, "packages/agent-runtime/dist/index.js")
 ];
 for (const file of required) {
   if (!existsSync(file)) throw new Error(`missing build output: ${file}`);
 }
 
 await rm(out, { recursive: true, force: true });
-await mkdir(path.join(out, "vendor/protocol/dist"), { recursive: true, filter: skipTestArtifacts });
-await mkdir(path.join(out, "vendor/db/dist"), { recursive: true, filter: skipTestArtifacts });
-await mkdir(path.join(out, "vendor/codex-runtime/dist"), { recursive: true, filter: skipTestArtifacts });
-
-await cp(path.join(root, "packages/protocol/dist"), path.join(out, "vendor/protocol/dist"), { recursive: true });
-await cp(path.join(root, "packages/db/dist"), path.join(out, "vendor/db/dist"), { recursive: true });
-await cp(path.join(root, "packages/codex-runtime/dist"), path.join(out, "vendor/codex-runtime/dist"), {
-  recursive: true
+for (const { directory, manifest } of workspacePackages) {
+  const destination = path.join(out, "node_modules", manifest.name);
+  await mkdir(destination, { recursive: true });
+  await cp(path.join(root, "packages", directory, "dist"), path.join(destination, "dist"), {
+    recursive: true,
+    filter: skipTestArtifacts
+  });
+  await writeFile(
+    path.join(destination, "package.json"),
+    `${JSON.stringify(bundledManifest(manifest), null, 2)}\n`
+  );
+}
+await cp(path.join(root, "apps/server/dist"), path.join(out, "dist"), {
+  recursive: true,
+  filter: skipTestArtifacts
 });
-await cp(path.join(root, "apps/server/dist"), path.join(out, "dist"), { recursive: true, filter: skipTestArtifacts });
 await cp(path.join(root, "apps/web/dist"), path.join(out, "public"), { recursive: true });
-
-await writeFile(
-  path.join(out, "vendor/protocol/package.json"),
-  `${JSON.stringify(vendorManifest(protocolPkg, { zod: protocolPkg.dependencies.zod }), null, 2)}\n`
-);
-await writeFile(
-  path.join(out, "vendor/db/package.json"),
-  `${JSON.stringify(
-    vendorManifest(dbPkg, {
-      "better-sqlite3": dbPkg.dependencies["better-sqlite3"],
-      nanoid: dbPkg.dependencies.nanoid
-    }),
-    null,
-    2
-  )}\n`
-);
-await writeFile(
-  path.join(out, "vendor/codex-runtime/package.json"),
-  `${JSON.stringify(
-    vendorManifest(runtimePkg, {
-      "@codex-omni/protocol": "file:../protocol",
-      "@openai/codex-sdk": runtimePkg.dependencies["@openai/codex-sdk"],
-      nanoid: runtimePkg.dependencies.nanoid,
-      zod: runtimePkg.dependencies.zod
-    }),
-    null,
-    2
-  )}\n`
-);
 
 const packed = {
   name: "@kaibush/codex-omni",
   version: rootPkg.version ?? serverPkg.version,
-  description: "Codex Omni 远程工作台：一条命令安装并启动服务",
+  description: "Codex 与 Claude Code 多客户端远程工作台：一条命令安装并启动服务",
   type: "module",
   bin: {
     "codex-omni": "dist/cli/codex-omni.js"
   },
-  files: ["dist", "public", "vendor", "README.md"],
+  files: ["dist", "public", "README.md"],
+  bundleDependencies: workspacePackages.map(({ manifest }) => manifest.name),
   engines: { node: ">=20" },
   publishConfig: {
     access: "public"
   },
   dependencies: {
-    ...productionDeps(serverPkg, runtimePkg, dbPkg, protocolPkg),
-    "@codex-omni/protocol": "file:./vendor/protocol",
-    "@codex-omni/db": "file:./vendor/db",
-    "@codex-omni/codex-runtime": "file:./vendor/codex-runtime"
+    // npm treats bundled internal packages as already installed, so their
+    // external dependencies must also be declared by the published package.
+    ...productionDeps(serverPkg, ...workspacePackages.map(({ manifest }) => manifest)),
+    ...Object.fromEntries(
+      workspacePackages.map(({ manifest }) => [manifest.name, manifest.version])
+    )
   }
 };
 

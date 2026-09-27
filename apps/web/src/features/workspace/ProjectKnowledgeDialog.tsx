@@ -1,3 +1,4 @@
+import { CLIENTS, type ClientType } from "@codex-omni/protocol";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -25,6 +26,8 @@ export function ProjectKnowledgeDialog({
   projectId: string;
 }) {
   const qc = useQueryClient();
+  const [client, setClient] = useState<ClientType>("codex");
+  const rulesFile = client === "claude-code" ? "CLAUDE.md" : "AGENTS.md";
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [kind, setKind] = useState<ProjectNote["kind"]>("rule");
@@ -36,10 +39,10 @@ export function ProjectKnowledgeDialog({
     enabled: open && Boolean(projectId)
   });
   const agentsFile = useQuery({
-    queryKey: ["agents-md", projectId],
+    queryKey: ["agents-md", projectId, client],
     queryFn: () =>
       api<{ content: string; revision: string; exists: boolean }>(
-        `/api/projects/${projectId}/agents-md`
+        `/api/projects/${projectId}/agents-md?clientType=${client}`
       ),
     enabled: open && Boolean(projectId)
   });
@@ -81,15 +84,16 @@ export function ProjectKnowledgeDialog({
   });
   const saveAgents = useMutation({
     mutationFn: () =>
-      api(`/api/projects/${projectId}/agents-md`, {
+      api(`/api/projects/${projectId}/agents-md?clientType=${client}`, {
         method: "PUT",
-        body: JSON.stringify({ content: agents, revision })
+        body: JSON.stringify({ content: agents, revision, clientType: client })
       }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["agents-md", projectId] });
-      toast.success("已保存 AGENTS.md");
+      await qc.invalidateQueries({ queryKey: ["agents-md", projectId, client] });
+      toast.success(`已保存 ${rulesFile}`);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "保存 AGENTS.md 失败")
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : `保存 ${rulesFile} 失败`)
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -98,17 +102,29 @@ export function ProjectKnowledgeDialog({
           <BookOpen className="size-4" /> 项目规则
         </DialogTitle>
         <DialogDescription>
-          启用的规则会在发送时注入当前 turn；AGENTS.md 仍由 Codex 自动读取。
+          启用的规则用于两种客户端；AGENTS.md 由 Codex 读取，CLAUDE.md 由 Claude Code 读取。
         </DialogDescription>
+        <div className="mt-3 flex gap-2">
+          {CLIENTS.map((entry) => (
+            <button
+              type="button"
+              key={entry.id}
+              className={`h-8 rounded-lg border px-3 text-sm ${client === entry.id ? "border-primary bg-accent" : "hover:bg-muted"}`}
+              onClick={() => setClient(entry.id)}
+            >
+              {entry.name}
+            </button>
+          ))}
+        </div>
         <section className="mt-4 space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            AGENTS.md
+            {rulesFile}
           </h3>
           <textarea
             className="field min-h-32 font-mono text-xs"
             value={agents}
             onChange={(event) => setAgents(event.target.value)}
-            placeholder="项目级 Codex 规则"
+            placeholder={`项目级 ${rulesFile} 规则`}
           />
           <Button
             type="button"
@@ -116,7 +132,7 @@ export function ProjectKnowledgeDialog({
             disabled={saveAgents.isPending}
             onClick={() => saveAgents.mutate()}
           >
-            保存 AGENTS.md
+            保存 {rulesFile}
           </Button>
         </section>
         <section className="mt-5 space-y-2">

@@ -34,6 +34,8 @@ export type PlanItemStatus = "pending" | "in_progress" | "completed";
 export type PlanItem = { text: string; status: PlanItemStatus };
 
 const COLLAB_TOOLS = new Set([
+  "agent",
+  "task",
   "collab",
   "spawnagent",
   "waitagent",
@@ -147,6 +149,7 @@ export function collabToolLabel(data: unknown) {
   if (tool === "closeagent") return "关闭子代理";
   if (tool === "resumeagent") return "恢复子代理";
   if (tool === "handoff") return "交接子代理";
+  if (tool === "agent" || tool === "task") return "子智能体";
   return tool.startsWith("collab") ? "子代理协作" : `子代理 · ${tool}`;
 }
 

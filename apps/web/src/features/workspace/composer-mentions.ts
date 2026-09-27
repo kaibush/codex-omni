@@ -25,6 +25,7 @@ export type SlashCommand = {
   name: string;
   title: string;
   prompt: string;
+  native?: boolean;
 };
 
 export type SlashExpandContext = {
@@ -55,7 +56,11 @@ export function rememberSlashCommand(name: string) {
 
 export function sortSlashCommands(items: SlashCommand[]) {
   const recent = loadRecentSlashCommands();
-  return [...items].sort((left, right) => {
+  const unique = new Map<string, SlashCommand>();
+  for (const item of items) {
+    if (!unique.has(item.name) || item.native) unique.set(item.name, item);
+  }
+  return [...unique.values()].sort((left, right) => {
     const leftIndex = recent.indexOf(left.name);
     const rightIndex = recent.indexOf(right.name);
     if (leftIndex === -1 && rightIndex === -1) return 0;
@@ -71,11 +76,14 @@ export function expandSlashCommand(
   context: SlashExpandContext = {}
 ) {
   const trimmed = input.trim();
-  const command = [...SLASH_COMMANDS, ...extra].find(
-    (item) => trimmed === item.name || trimmed.startsWith(`${item.name} `)
-  );
+  const command = [
+    ...extra.filter((entry) => entry.native),
+    ...SLASH_COMMANDS,
+    ...extra.filter((entry) => !entry.native)
+  ].find((item) => trimmed === item.name || trimmed.startsWith(`${item.name} `));
   if (!command) return input;
   rememberSlashCommand(command.name);
+  if ("native" in command && command.native) return input;
   const rest = trimmed.slice(command.name.length).trim();
   const values: Record<string, string> = {
     input: rest,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { clientName, clientType, type ClientType } from "@codex-omni/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -22,6 +23,7 @@ import { useNavigate, useParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -88,6 +90,7 @@ export function SystemSettingsPage() {
   const { theme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const [providerOpen, setProviderOpen] = useState(false);
+  const [runtimeClient, setRuntimeClient] = useState<ClientType>("codex");
   const [settingsProjectId, setSettingsProjectId] = useState("");
   const [taskBoardOpen, setTaskBoardOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -172,7 +175,10 @@ export function SystemSettingsPage() {
         content: templateContent.trim()
       };
       return editingTemplateId
-        ? api(`/api/templates/${editingTemplateId}`, { method: "PUT", body: JSON.stringify(payload) })
+        ? api(`/api/templates/${editingTemplateId}`, {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          })
         : api("/api/templates", { method: "POST", body: JSON.stringify(payload) });
     },
     onSuccess: async () => {
@@ -195,7 +201,8 @@ export function SystemSettingsPage() {
     await queryClient.invalidateQueries({ queryKey: ["providers"] });
   };
 
-  const showSave = active.id === "runtime" || active.id === "appearance" || active.id === "providers";
+  const showSave =
+    active.id === "runtime" || active.id === "appearance" || active.id === "providers";
   const providers = providersQuery.data ?? [];
   const defaultProvider = providers.find((item) => item.isDefault) ?? providers[0];
 
@@ -309,6 +316,26 @@ export function SystemSettingsPage() {
                   ) : null}
                 </SettingsCard>
                 <SettingsCard
+                  title="Claude Code 运行时"
+                  description="对话通过内置 Claude Agent SDK 调用，供应商配置相互独立。"
+                >
+                  <SettingsFormGrid>
+                    <SettingsInfoRow
+                      label="内置 SDK"
+                      value={runtimeQuery.data?.claude?.sdkVersion || "未读取"}
+                    />
+                    <SettingsInfoRow
+                      label="内置 CLI"
+                      value={runtimeQuery.data?.claude?.bundledCliVersion || "未读取"}
+                    />
+                    <SettingsInfoRow
+                      icon={Folder}
+                      label="系统 Claude 配置目录"
+                      value={runtimeQuery.data?.defaultClaudeHome || "未读取"}
+                    />
+                  </SettingsFormGrid>
+                </SettingsCard>
+                <SettingsCard
                   title="主机资源"
                   description="当前这台电脑的 CPU、内存和存储，每 30 秒自动刷新。"
                 >
@@ -357,7 +384,12 @@ export function SystemSettingsPage() {
                       label="供应商"
                       value={
                         defaultProvider
-                          ? `${providers.length} 个 · 默认 ${defaultProvider.name}`
+                          ? `${providers.length} 个 · ${providers
+                              .filter((provider) => provider.isDefault)
+                              .map(
+                                (provider) => `${clientName(provider.kind)} 默认 ${provider.name}`
+                              )
+                              .join(" · ")}`
                           : "尚未配置"
                       }
                     />
@@ -369,9 +401,7 @@ export function SystemSettingsPage() {
                     <SettingsInfoRow
                       icon={Folder}
                       label="运行时目录"
-                      value={
-                        defaultProvider?.codexHome || runtimeQuery.data?.providersRoot || "未读取"
-                      }
+                      value={runtimeQuery.data?.providersRoot || "未读取"}
                     />
                   </SettingsFormGrid>
                 </SettingsCard>
@@ -461,9 +491,23 @@ export function SystemSettingsPage() {
             {active.id === "runtime" ? (
               <SettingsCard
                 title="运行与权限"
-                description="按权限、发送和重试分开保存，会作用于后续 Codex 对话。"
+                description="按客户端设置工具权限与能力，发送和重试策略由两种客户端共用。"
               >
-                <RuntimeSettingsTabs settings={draft} onChange={setDraft} />
+                <Tabs
+                  value={runtimeClient}
+                  onValueChange={(value) => setRuntimeClient(clientType(value))}
+                  className="mb-3"
+                >
+                  <TabsList className="h-8 rounded-lg">
+                    <TabsTrigger value="codex">Codex</TabsTrigger>
+                    <TabsTrigger value="claude-code">Claude Code</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <RuntimeSettingsTabs
+                  settings={draft}
+                  onChange={setDraft}
+                  clientType={runtimeClient}
+                />
               </SettingsCard>
             ) : null}
 
@@ -537,89 +581,96 @@ export function SystemSettingsPage() {
 
             {active.id === "providers" ? (
               <>
-              <SettingsCard
-                title="供应商与模型"
-                description="在此选择默认模型，或打开供应商管理进行新增、编辑和测试连接。"
-                actions={
-                  <Button type="button" size="sm" onClick={() => setProviderOpen(true)}>
-                    <KeyRound className="size-4" />
-                    管理供应商
-                  </Button>
-                }
-              >
-                {providers.length ? (
-                  <div className="space-y-2">
-                    {providers.map((provider) => (
-                      <div
-                        key={provider.id}
-                        className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3"
-                      >
-                        <KeyRound className="size-4 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-medium">{provider.name}</p>
-                            {provider.isDefault ? <Badge variant="secondary">默认</Badge> : null}
-                            <Badge variant="outline">
-                              {homeModeLabel[provider.homeMode ?? "managed"]}
-                            </Badge>
+                <SettingsCard
+                  title="供应商与模型"
+                  description="在此选择默认模型，或打开供应商管理进行新增、编辑和测试连接。"
+                  actions={
+                    <Button type="button" size="sm" onClick={() => setProviderOpen(true)}>
+                      <KeyRound className="size-4" />
+                      管理供应商
+                    </Button>
+                  }
+                >
+                  {providers.length ? (
+                    <div className="space-y-2">
+                      {providers.map((provider) => (
+                        <div
+                          key={provider.id}
+                          className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3"
+                        >
+                          <KeyRound className="size-4 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-medium">{provider.name}</p>
+                              {provider.isDefault ? <Badge variant="secondary">默认</Badge> : null}
+                              <Badge variant="outline">
+                                {homeModeLabel[provider.homeMode ?? "managed"]}
+                              </Badge>
+                            </div>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {provider.baseUrl || provider.codexHome || "未配置 Base URL"}
+                            </p>
                           </div>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {provider.baseUrl || provider.codexHome || "未配置 Base URL"}
-                          </p>
+                          <label className="grid min-w-40 gap-1">
+                            <span className="text-[11px] text-muted-foreground">默认模型</span>
+                            <Select
+                              value={provider.model || "__none__"}
+                              onValueChange={(value) =>
+                                void updateProviderModel(
+                                  provider,
+                                  value === "__none__" ? "" : value
+                                )
+                              }
+                            >
+                              <SelectTrigger className="w-full min-w-40">
+                                <SelectValue placeholder="未设置模型" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">未设置模型</SelectItem>
+                                {provider.models.map((model) => (
+                                  <SelectItem key={model} value={model}>
+                                    {model}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </label>
                         </div>
-                        <label className="grid min-w-40 gap-1">
-                          <span className="text-[11px] text-muted-foreground">默认模型</span>
-                          <Select
-                            value={provider.model || "__none__"}
-                            onValueChange={(value) =>
-                              void updateProviderModel(provider, value === "__none__" ? "" : value)
-                            }
-                          >
-                            <SelectTrigger className="w-full min-w-40">
-                              <SelectValue placeholder="未设置模型" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">未设置模型</SelectItem>
-                              {provider.models.map((model) => (
-                                <SelectItem key={model} value={model}>
-                                  {model}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </label>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
+                      还没有供应商，点击「管理供应商」添加。
+                    </p>
+                  )}
+                </SettingsCard>
+                <SettingsCard
+                  title="供应商配置模板"
+                  description="新增托管供应商时使用。支持 {{name}}、{{model}}、{{baseUrl}}、{{apiKey}} 占位符，不要把真实密钥写进模板。"
+                >
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
+                      config.toml 模板
+                      <Textarea
+                        className="min-h-48 font-mono text-xs"
+                        value={draft.providerConfigTemplate}
+                        onChange={(event) =>
+                          setDraft({ ...draft, providerConfigTemplate: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      auth.json 模板
+                      <Textarea
+                        className="min-h-48 font-mono text-xs"
+                        value={draft.providerAuthTemplate}
+                        onChange={(event) =>
+                          setDraft({ ...draft, providerAuthTemplate: event.target.value })
+                        }
+                      />
+                    </label>
                   </div>
-                ) : (
-                  <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
-                    还没有供应商，点击「管理供应商」添加。
-                  </p>
-                )}
-              </SettingsCard>
-              <SettingsCard
-                title="供应商配置模板"
-                description="新增托管供应商时使用。支持 {{name}}、{{model}}、{{baseUrl}}、{{apiKey}} 占位符，不要把真实密钥写进模板。"
-              >
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <label className="grid gap-1 text-sm font-medium">
-                    config.toml 模板
-                    <Textarea
-                      className="min-h-48 font-mono text-xs"
-                      value={draft.providerConfigTemplate}
-                      onChange={(event) => setDraft({ ...draft, providerConfigTemplate: event.target.value })}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm font-medium">
-                    auth.json 模板
-                    <Textarea
-                      className="min-h-48 font-mono text-xs"
-                      value={draft.providerAuthTemplate}
-                      onChange={(event) => setDraft({ ...draft, providerAuthTemplate: event.target.value })}
-                    />
-                  </label>
-                </div>
-              </SettingsCard>
+                </SettingsCard>
               </>
             ) : null}
 
@@ -799,10 +850,13 @@ export function SystemSettingsPage() {
           await queryClient.invalidateQueries({ queryKey: ["providers"] });
         }}
         onSave={async (body) => {
-          const result = await api<Provider>(body.id ? `/api/providers/${body.id}` : "/api/providers", {
-            method: body.id ? "PUT" : "POST",
-            body: JSON.stringify(body)
-          });
+          const result = await api<Provider>(
+            body.id ? `/api/providers/${body.id}` : "/api/providers",
+            {
+              method: body.id ? "PUT" : "POST",
+              body: JSON.stringify(body)
+            }
+          );
           await queryClient.invalidateQueries({ queryKey: ["providers"] });
           return result;
         }}

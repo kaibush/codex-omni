@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx watch --exclude './data/**' --exclude './dist/**' --exclude '**/*.db*' --exclude '**/runtime/**' src/index.ts",
-    "dev:stable": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/codex-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx src/index.ts",
+    "dev": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/agent-runtime build && pnpm --filter @codex-omni/codex-runtime build && pnpm --filter @codex-omni/claude-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx watch --exclude './data/**' --exclude './dist/**' --exclude '**/*.db*' --exclude '**/runtime/**' src/index.ts",
+    "dev:stable": "pnpm --filter @codex-omni/protocol build && pnpm --filter @codex-omni/db build && pnpm --filter @codex-omni/agent-runtime build && pnpm --filter @codex-omni/codex-runtime build && pnpm --filter @codex-omni/claude-runtime build && CODEX_OMNI_INSTANCE=dev CODEX_OMNI_HOST=127.0.0.1 CODEX_OMNI_DATABASE=data/codex-omni-dev.db tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli/codex-omni.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -26,7 +26,9 @@
     "nanoid": "^5.1.5",
     "node-pty": "^1.1.0",
     "typescript": "^5.9.3",
-    "zod": "^3.25.76"
+    "zod": "^4.0.0",
+    "@codex-omni/agent-runtime": "workspace:*",
+    "@codex-omni/claude-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

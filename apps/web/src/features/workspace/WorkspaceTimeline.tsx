@@ -1,3 +1,4 @@
+import type { ApprovalResponse } from "@codex-omni/protocol";
 import { useQuery } from "@tanstack/react-query";
 import {
   useCallback,
@@ -262,7 +263,11 @@ export function WorkspaceTimeline({
     [onOpenSession, recentSessions]
   );
   const onApproval = useCallback(
-    (requestId: string, decision: "accept" | "acceptForSession" | "decline") => {
+    (
+      requestId: string,
+      decision: "accept" | "acceptForSession" | "decline",
+      response?: Omit<ApprovalResponse, "decision">
+    ) => {
       if (socket.current?.readyState !== WebSocket.OPEN) {
         setSendNotice("连接已断开，恢复连接后再提交确认");
         return;
@@ -272,6 +277,7 @@ export function WorkspaceTimeline({
           type: "approval.respond",
           sessionId,
           requestId,
+          ...response,
           decision
         })
       );
@@ -289,6 +295,7 @@ export function WorkspaceTimeline({
                       : "已允许本次命令",
                 data: {
                   ...event.data,
+                  ...response,
                   status: decision === "decline" ? "declined" : "accepted"
                 }
               }
@@ -666,6 +673,19 @@ export function WorkspaceTimeline({
                       onCreateFile={onCreateFile}
                       onOpenFile={onOpenFile}
                       onApproval={onApproval}
+                      onStopTask={
+                        runState?.status === "running"
+                          ? (taskId) => {
+                              if (socket.current?.readyState !== WebSocket.OPEN) {
+                                setSendNotice("连接已断开，恢复连接后重试");
+                                return;
+                              }
+                              socket.current.send(
+                                JSON.stringify({ type: "task.stop", sessionId, taskId })
+                              );
+                            }
+                          : undefined
+                      }
                     />
                   )}
                 />
@@ -759,7 +779,12 @@ export function WorkspaceTimeline({
               </div>
             )}
             {sessionId && runState?.status === "running" && (
-              <RunStatusBubble state={runState} connection={connection} notice={sendNotice} />
+              <RunStatusBubble
+                clientType={activeSession?.clientType}
+                state={runState}
+                connection={connection}
+                notice={sendNotice}
+              />
             )}
           </div>
         </div>

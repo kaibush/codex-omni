@@ -1,3 +1,5 @@
+import { ApprovalPrompt, type ApprovalHandler } from "./ApprovalPrompt";
+import { clientName } from "@codex-omni/protocol";
 import {
   Children,
   isValidElement,
@@ -34,7 +36,6 @@ import {
   SquareTerminal,
   User,
   Wrench,
-  ShieldQuestion,
   type LucideIcon
 } from "lucide-react";
 import { Highlight, themes, type Language } from "prism-react-renderer";
@@ -486,7 +487,10 @@ function UserAttachmentList({
     <div className="user-attachments">
       {attachments.map((item) => {
         const relative = openableFilePath(item.path, projectPath, projectDisplayPath) || item.path;
-        const src = item.kind === "image" ? projectImageSrc(projectId, item.path, projectPath, projectDisplayPath) : "";
+        const src =
+          item.kind === "image"
+            ? projectImageSrc(projectId, item.path, projectPath, projectDisplayPath)
+            : "";
         return (
           <figure key={`${item.kind}:${item.path}`} className="user-attachment">
             {src ? <BoundedImage src={src} alt={item.name} className="notice-image" /> : null}
@@ -634,7 +638,7 @@ function EventCardLite({ item, height }: { item: TimelineItem; height: number | 
     item.kind === "user"
       ? "你"
       : item.kind === "assistant"
-        ? "Codex"
+        ? clientName(item.data?.clientType)
         : item.kind === "reasoning"
           ? "Thinking"
           : item.kind === "activity"
@@ -672,7 +676,8 @@ type EventCardProps = {
   projectId?: string | undefined;
   projectPath?: string | undefined;
   projectDisplayPath?: string | undefined;
-  onApproval?: (requestId: string, decision: "accept" | "acceptForSession" | "decline") => void;
+  onApproval?: ApprovalHandler;
+  onStopTask?: ((taskId: string) => void) | undefined;
   onFork?: (() => void) | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
   onOpenThread?: ((threadId: string) => boolean | void) | undefined;
@@ -710,6 +715,7 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     prev.projectPath === next.projectPath &&
     prev.projectDisplayPath === next.projectDisplayPath &&
     sameHandler(prev.onApproval, next.onApproval) &&
+    sameHandler(prev.onStopTask, next.onStopTask) &&
     sameHandler(prev.onFork, next.onFork) &&
     sameHandler(prev.onOpenFile, next.onOpenFile) &&
     sameHandler(prev.onOpenThread, next.onOpenThread) &&
@@ -736,6 +742,7 @@ function EventCardComponent({
   projectPath,
   projectDisplayPath,
   onApproval,
+  onStopTask,
   onFork,
   onOpenFile,
   onOpenThread,
@@ -885,7 +892,7 @@ function EventCardComponent({
       <article data-message-id={item.id} className={`event-card event-card-bot${highlightClass}`}>
         <header className="event-title message-event-title min-w-0">
           <Bot className="size-4" />
-          <span>Codex</span>
+          <span>{clientName(item.data?.clientType)}</span>
           {showProviderLabel && providerName && (
             <span className="provider-pill max-w-40 truncate">{providerName}</span>
           )}
@@ -938,53 +945,7 @@ function EventCardComponent({
       </article>
     );
   if (item.kind === "approval")
-    return (
-      <article
-        data-message-id={item.id}
-        className={`event-card event-card-bot border-amber-300/70 bg-amber-50/70 dark:border-amber-700/60 dark:bg-amber-950/20${highlightClass}`}
-      >
-        <header className="event-title min-w-0">
-          <ShieldQuestion className="size-4 text-amber-600" />
-          <span>等待操作确认</span>
-          {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
-        </header>
-        <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-200">
-          {item.data?.command ?? item.text}
-        </pre>
-        {item.data?.status && item.data.status !== "pending" ? (
-          <p className="text-xs font-medium text-muted-foreground">
-            {item.data.status === "declined"
-              ? "已拒绝该命令"
-              : item.data.status === "cancelled"
-                ? "确认已取消"
-                : item.data.status === "expired"
-                  ? "确认请求已过期"
-                  : "已允许该命令"}
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white"
-              onClick={() => onApproval?.(item.data.approvalId, "accept")}
-            >
-              本次允许
-            </button>
-            <button
-              className="rounded-lg border bg-card px-3 py-2 text-xs font-medium"
-              onClick={() => onApproval?.(item.data.approvalId, "acceptForSession")}
-            >
-              本会话允许
-            </button>
-            <button
-              className="rounded-lg border border-red-200 bg-card px-3 py-2 text-xs font-medium text-red-600"
-              onClick={() => onApproval?.(item.data.approvalId, "decline")}
-            >
-              拒绝
-            </button>
-          </div>
-        )}
-      </article>
-    );
+    return <ApprovalPrompt item={item} onApproval={onApproval} className={highlightClass} />;
   if (item.kind === "activity") {
     const groupedItems = Array.isArray(item.data?.items) ? (item.data.items as TimelineItem[]) : [];
     const toolCount = groupedItems.filter((entry) => entry.kind === "tool").length;
@@ -1217,7 +1178,31 @@ function EventCardComponent({
             <EventTime value={item.createdAt} className="ml-auto" />
           ) : null}
         </button>
-        {open ? <CollabCard data={item.data} onOpenThread={onOpenThread} /> : null}
+        {open ? (
+          <>
+            <CollabCard data={item.data} onOpenThread={onOpenThread} />
+            {item.data?.description ? (
+              <p className="text-xs text-muted-foreground">{item.data.description}</p>
+            ) : null}
+            {item.data?.usage ? (
+              <p className="text-xs text-muted-foreground">
+                {Number(item.data.usage.tool_uses ?? 0)} 次工具调用 ·{" "}
+                {Number(item.data.usage.total_tokens ?? 0).toLocaleString()} tokens
+              </p>
+            ) : null}
+            {item.data?.taskId &&
+            (status === "in_progress" || status === "running") &&
+            onStopTask ? (
+              <button
+                type="button"
+                className="h-8 rounded-lg border px-3 text-xs text-destructive"
+                onClick={() => onStopTask(item.data.taskId)}
+              >
+                停止此子任务
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </article>
     );
   }

@@ -1,3 +1,4 @@
+import { clientName, type ClientType } from "@codex-omni/protocol";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -72,10 +73,12 @@ export function LiveDuration({
 }
 
 export function RunStatusBubble({
+  clientType = "codex",
   state,
   connection,
   notice
 }: {
+  clientType?: ClientType | undefined;
   state: RunState;
   connection: ConnectionState;
   notice: string;
@@ -97,7 +100,7 @@ export function RunStatusBubble({
     <article className="event-card event-card-bot compact">
       <header className="event-title min-w-0">
         <Bot className="size-4" />
-        <span>Codex</span>
+        <span>{clientName(clientType)}</span>
         <Icon
           className={`size-4 ${appearance.iconClassName}${appearance.spin ? " animate-spin" : ""}`}
         />
@@ -114,13 +117,13 @@ export function RunStatusBubble({
       </header>
       <p className="text-sm leading-6 text-foreground">
         {state.reconnecting
-          ? `Codex 流连接暂时中断，正在自动重连（${state.reconnecting.attempt}/${state.reconnecting.maxAttempts}）`
+          ? `${clientName(clientType)} 流连接暂时中断，正在自动重连（${state.reconnecting.attempt}/${state.reconnecting.maxAttempts}）`
           : state.status === "running"
             ? connection !== "connected"
               ? notice || "任务进行中，正在恢复连接"
               : state.firstResponseAt
-                ? "任务进行中，Codex 正在响应"
-                : "任务进行中，等待 Codex 响应"
+                ? `任务进行中，${clientName(clientType)} 正在响应`
+                : `任务进行中，等待 ${clientName(clientType)} 响应`
             : taskStatusLabel(state.status)}
       </p>
       {state.reconnecting?.reason ? (
@@ -241,12 +244,14 @@ export function RunSummary({ state }: { state: RunState }) {
 }
 
 export function RuntimeOptionsPanel({
+  clientType = "codex",
   settings,
   onChange,
   onClose,
   homePath,
   anchorRef
 }: {
+  clientType?: ClientType;
   settings: WorkspaceSettings;
   onChange: (settings: WorkspaceSettings) => Promise<void>;
   onClose: () => void;
@@ -255,7 +260,12 @@ export function RuntimeOptionsPanel({
 }) {
   const layerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+  const [box, setBox] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const sync = () => {
@@ -288,7 +298,8 @@ export function RuntimeOptionsPanel({
     window.visualViewport?.addEventListener("scroll", sync);
     window.addEventListener("resize", sync);
     const panel = panelRef.current;
-    const observer = typeof ResizeObserver !== "undefined" && panel ? new ResizeObserver(sync) : null;
+    const observer =
+      typeof ResizeObserver !== "undefined" && panel ? new ResizeObserver(sync) : null;
     if (panel) observer?.observe(panel);
     return () => {
       window.cancelAnimationFrame(frame);
@@ -346,6 +357,7 @@ export function RuntimeOptionsPanel({
         </div>
         <RuntimeSettingsTabs
           compact
+          clientType={clientType}
           settings={settings}
           onChange={(next) => void onChange(next)}
         />
@@ -354,7 +366,7 @@ export function RuntimeOptionsPanel({
         </p>
         {homePath ? (
           <p className="mt-2 truncate text-xs text-muted-foreground" title={homePath}>
-            CODEX_HOME {homePath}
+            {clientType === "claude-code" ? "Claude 配置" : "CODEX_HOME"} {homePath}
           </p>
         ) : null}
       </div>

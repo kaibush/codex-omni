@@ -1,3 +1,4 @@
+import type { ClientType } from "@codex-omni/protocol";
 export type PromptTemplate = {
   id: string;
   name: string;
@@ -118,6 +119,10 @@ export type Provider = {
   homeMode?: ProviderHomeMode;
   codexHomePath?: string | null;
   codexHome?: string;
+  runtimeHome?: string;
+  claudeHomePath?: string | null;
+  settingsJson?: string | null;
+  mcpServersJson?: string | null;
 };
 export type Project = {
   id: string;
@@ -134,6 +139,7 @@ export type Session = {
   id: string;
   projectId: string;
   kind?: "chat" | "terminal-chat";
+  clientType?: ClientType;
   threadId: string | null;
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
@@ -169,12 +175,7 @@ export type SessionOutlineItem = {
   createdAt: number;
 };
 export type ThreadGoalStatus =
-  | "active"
-  | "paused"
-  | "blocked"
-  | "usage_limited"
-  | "budget_limited"
-  | "complete";
+  "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
 export type ThreadGoal = {
   threadId: string;
   goalId: string;
@@ -229,6 +230,8 @@ export type QueuedTurn = {
 };
 
 export type ActiveRun = {
+  clientType?: ClientType;
+  clientPid?: number | null;
   id: string;
   sessionId: string;
   sessionTitle: string;
@@ -356,7 +359,8 @@ export type TerminalChatSession = {
   title: string;
   cwd: string;
   desiredState: "running" | "stopped";
-  state: "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
+  state:
+    "provisioning" | "running" | "detached" | "exited" | "failed" | "stopped" | "needs_attention";
   restartPolicy: "manual" | "on-unexpected-exit";
   pid: number | null;
   lastSeq: number;
@@ -417,6 +421,8 @@ export type CodexRuntimeInfo = {
 };
 
 export type RuntimeInfo = {
+  claude?: { sdkVersion: string; bundledCliVersion: string | null };
+  defaultClaudeHome?: string;
   defaultCodexHome: string;
   providersRoot: string;
   host: HostInfo;

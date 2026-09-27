@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { clientName } from "@codex-omni/protocol";
 import { useState } from "react";
 import {
   Activity,
@@ -120,44 +121,139 @@ export function RunningCenterDialog({
               <TabsTrigger value="recent">最近会话</TabsTrigger>
             </TabsList>
             <TabsContent value="active">
-          {query.isPending ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" /> 正在读取运行状态
-            </div>
-          ) : query.isError ? (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-              {query.error instanceof Error ? query.error.message : "运行状态加载失败"}
-            </div>
-          ) : runs.length ? (
-            <div className="space-y-3">
-              {runs.map((run) => (
-                <article key={run.id} className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex flex-wrap items-start gap-3">
-                    <span
-                      className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg ${
-                        run.runtimeAlive
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                          : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                      }`}
-                    >
-                      {run.runtimeAlive ? (
-                        <Radio className="size-4" />
-                      ) : (
-                        <Activity className="size-4" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <b className="truncate text-sm">{run.sessionTitle}</b>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                          {run.runtimeAlive ? "确认执行中" : "状态待核对"}
+              {query.isPending ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" /> 正在读取运行状态
+                </div>
+              ) : query.isError ? (
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                  {query.error instanceof Error ? query.error.message : "运行状态加载失败"}
+                </div>
+              ) : runs.length ? (
+                <div className="space-y-3">
+                  {runs.map((run) => (
+                    <article key={run.id} className="rounded-xl border border-border bg-card p-4">
+                      <div className="flex flex-wrap items-start gap-3">
+                        <span
+                          className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg ${
+                            run.runtimeAlive
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                          }`}
+                        >
+                          {run.runtimeAlive ? (
+                            <Radio className="size-4" />
+                          ) : (
+                            <Activity className="size-4" />
+                          )}
                         </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <b className="truncate text-sm">{run.sessionTitle}</b>
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                              {run.runtimeAlive ? "确认执行中" : "状态待核对"}
+                            </span>
+                          </div>
+                          <p
+                            className="mt-1 truncate text-xs text-muted-foreground"
+                            title={run.cwd}
+                          >
+                            {run.projectName} · {run.providerName ?? "未命名 Provider"} · {run.cwd}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={() => {
+                              onOpenSession(run.projectId, run.sessionId);
+                              onOpenChange(false);
+                            }}
+                          >
+                            <ExternalLink className="size-3.5" /> 打开
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-8"
+                            onClick={() => void stop(run)}
+                          >
+                            <Square className="size-3.5" /> 停止
+                          </Button>
+                        </div>
                       </div>
-                      <p className="mt-1 truncate text-xs text-muted-foreground" title={run.cwd}>
-                        {run.projectName} · {run.providerName ?? "未命名 Provider"} · {run.cwd}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
+                      <dl className="mt-3 grid gap-2 border-t border-border pt-3 text-[11px] text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                        <div className="flex items-center gap-2">
+                          <Clock3 className="size-3.5" />
+                          <span title={formatDateTime(run.startedAt)}>
+                            已运行 {duration(run.startedAt)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Cpu className="size-3.5" />
+                          <span>
+                            Worker {run.workerPid ?? "—"} · {clientName(run.clientType)}{" "}
+                            {run.clientPid ?? run.codexPid ?? "—"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Users className="size-3.5" />
+                          <span>浏览器订阅 {run.subscriberCount}</span>
+                        </div>
+                        <div className="flex min-w-0 items-center gap-2 sm:col-span-2">
+                          <TerminalSquare className="size-3.5 shrink-0" />
+                          <span className="truncate font-mono" title={run.threadId ?? run.id}>
+                            thread {run.threadId ?? "等待创建"}
+                          </span>
+                        </div>
+                        <div className="truncate font-mono" title={run.id}>
+                          seq {run.lastSeq} · {run.id}
+                        </div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid place-items-center py-16 text-center">
+                  <span className="grid size-12 place-items-center rounded-xl bg-muted text-muted-foreground">
+                    <Activity className="size-5" />
+                  </span>
+                  <b className="mt-3 text-sm">当前没有后台任务</b>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    运行中的 Codex turn 会显示在这里。
+                  </p>
+                </div>
+              )}
+            </TabsContent>
+            <TabsContent value="recent">
+              {recent.isPending ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" /> 正在读取最近会话
+                </div>
+              ) : recent.isError ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                  {recent.error instanceof Error ? recent.error.message : "最近会话加载失败"}
+                </div>
+              ) : recent.data?.length ? (
+                <div className="space-y-2">
+                  {recent.data.map((run) => (
+                    <article
+                      key={run.id}
+                      className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <b className="truncate text-sm">{run.sessionTitle}</b>
+                          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {recentRunStatusLabel[run.status]}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground" title={run.cwd}>
+                          {run.projectName} · {run.providerName ?? "未命名 Provider"}
+                          {run.model ? ` · ${run.model}` : ""} · {formatDateTime(run.startedAt)}
+                        </p>
+                      </div>
                       <Button
                         size="sm"
                         variant="outline"
@@ -169,77 +265,19 @@ export function RunningCenterDialog({
                       >
                         <ExternalLink className="size-3.5" /> 打开
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="h-8"
-                        onClick={() => void stop(run)}
-                      >
-                        <Square className="size-3.5" /> 停止
-                      </Button>
-                    </div>
-                  </div>
-                  <dl className="mt-3 grid gap-2 border-t border-border pt-3 text-[11px] text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="size-3.5" />
-                      <span title={formatDateTime(run.startedAt)}>
-                        已运行 {duration(run.startedAt)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Cpu className="size-3.5" />
-                      <span>
-                        Worker {run.workerPid ?? "—"} · Codex {run.codexPid ?? "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="size-3.5" />
-                      <span>浏览器订阅 {run.subscriberCount}</span>
-                    </div>
-                    <div className="flex min-w-0 items-center gap-2 sm:col-span-2">
-                      <TerminalSquare className="size-3.5 shrink-0" />
-                      <span className="truncate font-mono" title={run.threadId ?? run.id}>
-                        thread {run.threadId ?? "等待创建"}
-                      </span>
-                    </div>
-                    <div className="truncate font-mono" title={run.id}>
-                      seq {run.lastSeq} · {run.id}
-                    </div>
-                  </dl>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="grid place-items-center py-16 text-center">
-              <span className="grid size-12 place-items-center rounded-xl bg-muted text-muted-foreground">
-                <Activity className="size-5" />
-              </span>
-              <b className="mt-3 text-sm">当前没有后台任务</b>
-              <p className="mt-1 text-xs text-muted-foreground">
-                运行中的 Codex turn 会显示在这里。
-              </p>
-            </div>
-          )}
-            </TabsContent>
-            <TabsContent value="recent">
-              {recent.isPending ? (
-                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> 正在读取最近会话</div>
-              ) : recent.isError ? (
-                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">{recent.error instanceof Error ? recent.error.message : "最近会话加载失败"}</div>
-              ) : recent.data?.length ? (
-                <div className="space-y-2">
-                  {recent.data.map((run) => (
-                    <article key={run.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2"><b className="truncate text-sm">{run.sessionTitle}</b><span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{recentRunStatusLabel[run.status]}</span></div>
-                        <p className="mt-1 truncate text-xs text-muted-foreground" title={run.cwd}>{run.projectName} · {run.providerName ?? "未命名 Provider"}{run.model ? ` · ${run.model}` : ""} · {formatDateTime(run.startedAt)}</p>
-                      </div>
-                      <Button size="sm" variant="outline" className="h-8" onClick={() => { onOpenSession(run.projectId, run.sessionId); onOpenChange(false); }}><ExternalLink className="size-3.5" /> 打开</Button>
                     </article>
                   ))}
                 </div>
               ) : (
-                <div className="grid place-items-center py-16 text-center"><span className="grid size-12 place-items-center rounded-lg bg-muted text-muted-foreground"><Clock3 className="size-5" /></span><b className="mt-3 text-sm">暂无运行记录</b><p className="mt-1 text-xs text-muted-foreground">最近运行过的会话会显示在这里。</p></div>
+                <div className="grid place-items-center py-16 text-center">
+                  <span className="grid size-12 place-items-center rounded-lg bg-muted text-muted-foreground">
+                    <Clock3 className="size-5" />
+                  </span>
+                  <b className="mt-3 text-sm">暂无运行记录</b>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    最近运行过的会话会显示在这里。
+                  </p>
+                </div>
               )}
             </TabsContent>
           </Tabs>

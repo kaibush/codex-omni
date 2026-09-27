@@ -1,0 +1,349 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import readline from "node:readline";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  eventSchema,
+  type ApprovalResponse,
+  type BridgeEvent,
+  type BridgeRequest,
+  type ClientType
+} from "@codex-omni/protocol";
+import { isTerminalBridgeEvent, workerExitError } from "./worker-stream.js";
+
+export type WorkerRuntimeInfo = {
+  requestId: string;
+  sessionId: string;
+  workerPid: number | null;
+  codexPid: number | null;
+  clientPid?: number | null;
+  startedAt: number;
+  alive: boolean;
+};
+
+type ActiveWorker = {
+  child: ChildProcess;
+  requestId: string;
+  sessionId: string;
+  startedAt: number;
+  clientType: ClientType;
+  pendingCommands: Map<string, (response: { accepted: boolean; error?: string }) => void>;
+};
+
+const readProcText = (file: string) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+};
+
+const childPids = (pid: number) =>
+  readProcText(`/proc/${pid}/task/${pid}/children`)
+    .trim()
+    .split(/\s+/)
+    .map(Number)
+    .filter((value) => Number.isSafeInteger(value) && value > 0);
+
+const descendantPids = (rootPid: number) => {
+  if (process.platform !== "linux") return [];
+  const result: number[] = [];
+  const queue = [...childPids(rootPid)];
+  const visited = new Set<number>();
+  while (queue.length) {
+    const pid = queue.shift()!;
+    if (visited.has(pid)) continue;
+    visited.add(pid);
+    result.push(pid);
+    queue.push(...childPids(pid));
+  }
+  return result;
+};
+
+const commandLine = (pid: number) =>
+  readProcText(`/proc/${pid}/cmdline`).replaceAll("\0", " ").trim();
+
+const environment = (pid: number) => readProcText(`/proc/${pid}/environ`).replaceAll("\0", "\n");
+
+const findCodexPid = (workerPid: number) =>
+  descendantPids(workerPid).find((pid) => {
+    const command = commandLine(pid);
+    return /(?:^|\/)codex(?:\s|$)/.test(command) && /\bexec\b/.test(command);
+  }) ?? null;
+
+const signalTree = (child: ChildProcess, signal: NodeJS.Signals) => {
+  const pid = child.pid;
+  if (!pid) return false;
+  try {
+    if (process.platform !== "win32") process.kill(-pid, signal);
+    else child.kill(signal);
+    return true;
+  } catch {
+    try {
+      return child.kill(signal);
+    } catch {
+      return false;
+    }
+  }
+};
+
+export function terminateRecordedWorker(workerPid: number, requestId: string) {
+  if (!Number.isSafeInteger(workerPid) || workerPid <= 0) return false;
+  const matchesRecordedWorker = () => {
+    if (process.platform !== "linux") return true;
+    const env = environment(workerPid);
+    return env.includes(`CODEX_OMNI_RUN_ID=${requestId}\n`);
+  };
+  if (!matchesRecordedWorker()) return false;
+  try {
+    if (process.platform !== "win32") process.kill(-workerPid, "SIGTERM");
+    else process.kill(workerPid, "SIGTERM");
+    setTimeout(() => {
+      if (!matchesRecordedWorker()) return;
+      try {
+        if (process.platform !== "win32") process.kill(-workerPid, "SIGKILL");
+        else process.kill(workerPid, "SIGKILL");
+      } catch {
+        // The recorded process group already exited.
+      }
+    }, 3000).unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export class AgentBridgeWorkerAdapter {
+  private active = new Map<string, ActiveWorker>();
+
+  constructor(
+    private workerEntry: URL,
+    private incompleteMessage = "客户端事件流提前结束，任务未完成"
+  ) {}
+
+  run(
+    request: BridgeRequest,
+    onEvent: (event: BridgeEvent) => void,
+    onRuntime?: (runtime: WorkerRuntimeInfo) => void
+  ): Promise<void> {
+    if (this.active.has(request.sessionId))
+      return Promise.reject(new Error("Session already has an active turn"));
+    const sourceUrl = this.workerEntry;
+    const args = sourceUrl.pathname.endsWith(".ts")
+      ? [
+          "--import",
+          pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+          fileURLToPath(sourceUrl)
+        ]
+      : [fileURLToPath(sourceUrl)];
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const child = spawn(process.execPath, args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: request.cwd,
+        detached: process.platform !== "win32",
+        env: {
+          ...process.env,
+          CODEX_OMNI_RUN_ID: request.requestId,
+          CODEX_OMNI_SESSION_ID: request.sessionId
+        }
+      });
+      const active: ActiveWorker = {
+        child,
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        startedAt,
+        clientType: request.clientType ?? "codex",
+        pendingCommands: new Map()
+      };
+      this.active.set(request.sessionId, active);
+      onRuntime?.(this.runtimeInfo(request.sessionId)!);
+      let stderr = "";
+      let settled = false;
+      let sawTerminalEvent = false;
+      let failed = false;
+      let failureMessage = "";
+      const settleReject = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      child.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+        if (stderr.length > 16000) stderr = stderr.slice(-16000);
+      });
+      readline.createInterface({ input: child.stdout! }).on("line", (line) => {
+        if (settled) return;
+        try {
+          const value = JSON.parse(line);
+          if (value.type === "command.response") {
+            active.pendingCommands.get(String(value.commandId))?.({
+              accepted: value.accepted === true,
+              ...(typeof value.error === "string" ? { error: value.error } : {})
+            });
+            return;
+          }
+          const event = eventSchema.parse(value);
+          if (
+            event.requestId !== request.requestId ||
+            event.sessionId !== request.sessionId ||
+            event.projectId !== request.projectId
+          )
+            throw new Error("Bridge event does not belong to this run");
+          if (isTerminalBridgeEvent(event.type)) sawTerminalEvent = true;
+          if (event.type === "run.failed") {
+            failed = true;
+            const payload = (event.payload ?? {}) as Record<string, unknown>;
+            failureMessage = String(payload.message ?? payload.reason ?? "");
+          }
+          onEvent(event);
+        } catch (error) {
+          signalTree(child, "SIGTERM");
+          settleReject(new Error(`Invalid bridge event: ${String(error)}`));
+        }
+      });
+      child.once("error", (error) => settleReject(error));
+      child.stdin?.on("error", (error) => {
+        signalTree(child, "SIGTERM");
+        settleReject(error);
+      });
+      // `exit` can precede the final stdout lines. Wait for stdio to drain.
+      child.once("close", (code, signal) => {
+        for (const finish of active.pendingCommands.values()) finish({ accepted: false });
+        if (this.active.get(request.sessionId) === active) this.active.delete(request.sessionId);
+        onRuntime?.({
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          workerPid: child.pid ?? null,
+          codexPid: null,
+          startedAt,
+          alive: false
+        });
+        if (settled) return;
+        settled = true;
+        const error = workerExitError({
+          code,
+          signal,
+          stderr,
+          sawTerminalEvent,
+          failed,
+          failureMessage,
+          incompleteMessage: this.incompleteMessage
+        });
+        if (error) reject(error);
+        else resolve();
+      });
+      child.stdin?.write(`${JSON.stringify(request)}\n`);
+    });
+  }
+
+  respond(
+    sessionId: string,
+    requestId: string,
+    decision: ApprovalResponse["decision"],
+    response?: Omit<ApprovalResponse, "decision">
+  ) {
+    const child = this.active.get(sessionId)?.child;
+    if (!child?.stdin?.writable) return false;
+    child.stdin.write(
+      `${JSON.stringify({ type: "approval.respond", requestId, ...response, decision })}\n`
+    );
+    return true;
+  }
+
+  steer(sessionId: string, message: string, attachments?: BridgeRequest["attachments"]) {
+    const child = this.active.get(sessionId)?.child;
+    if (!child?.stdin?.writable) return false;
+    child.stdin.write(
+      `${JSON.stringify({ type: "turn.steer", message, ...(attachments?.length ? { attachments } : {}) })}\n`
+    );
+    return true;
+  }
+
+  stopTask(sessionId: string, taskId: string) {
+    const child = this.active.get(sessionId)?.child;
+    if (!child?.stdin?.writable) return false;
+    child.stdin.write(`${JSON.stringify({ type: "task.stop", taskId })}\n`);
+    return true;
+  }
+
+  sendAcknowledgedCommand(
+    sessionId: string,
+    command:
+      | { type: "turn.steer"; message: string; attachments?: BridgeRequest["attachments"] }
+      | { type: "task.stop"; taskId: string }
+  ): Promise<boolean> {
+    const active = this.active.get(sessionId);
+    if (!active?.child.stdin?.writable) return Promise.resolve(false);
+    const commandId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(
+        () => finish({ accepted: false, error: "客户端未确认操作，请检查当前运行状态" }),
+        15_000
+      );
+      const finish = (response: { accepted: boolean; error?: string }) => {
+        clearTimeout(timeout);
+        active.pendingCommands.delete(commandId);
+        if (response.error) reject(new Error(response.error));
+        else resolve(response.accepted);
+      };
+      active.pendingCommands.set(commandId, finish);
+      active.child.stdin!.write(`${JSON.stringify({ ...command, commandId })}\n`, (error) => {
+        if (error) finish({ accepted: false });
+      });
+    });
+  }
+
+  cancel(sessionId: string) {
+    const active = this.active.get(sessionId);
+    if (!active) return false;
+    signalTree(active.child, "SIGTERM");
+    setTimeout(() => {
+      if (active.child.exitCode === null && active.child.signalCode === null)
+        signalTree(active.child, "SIGKILL");
+    }, 3000).unref();
+    return true;
+  }
+
+  isActive(sessionId: string) {
+    const child = this.active.get(sessionId)?.child;
+    return Boolean(child && child.exitCode === null && child.signalCode === null);
+  }
+
+  runtimeInfo(sessionId: string): WorkerRuntimeInfo | null {
+    const active = this.active.get(sessionId);
+    if (!active) return null;
+    const workerPid = active.child.pid ?? null;
+    return {
+      requestId: active.requestId,
+      sessionId: active.sessionId,
+      workerPid,
+      codexPid: active.clientType === "codex" && workerPid ? findCodexPid(workerPid) : null,
+      clientPid: workerPid
+        ? active.clientType === "codex"
+          ? findCodexPid(workerPid)
+          : (descendantPids(workerPid)[0] ?? null)
+        : null,
+      startedAt: active.startedAt,
+      alive: active.child.exitCode === null && active.child.signalCode === null
+    };
+  }
+
+  listRuntimeInfo() {
+    return [...this.active.keys()]
+      .map((sessionId) => this.runtimeInfo(sessionId))
+      .filter((runtime): runtime is WorkerRuntimeInfo => Boolean(runtime));
+  }
+
+  shutdown() {
+    for (const sessionId of this.active.keys()) this.cancel(sessionId);
+  }
+}
+
+export {
+  isPathInsideRoot,
+  resolveContainedAttachmentPath,
+  sanitizeAttachments
+} from "./attachments.js";
