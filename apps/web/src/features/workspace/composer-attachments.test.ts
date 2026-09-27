@@ -3,6 +3,8 @@ import {
   attachmentUploadPath,
   buildAttachmentPrompt,
   collectComposerAttachments,
+  readComposerAttachment,
+  MAX_ATTACHMENT_BYTES,
   stripAttachmentPrompt,
   visibleUserMessageText,
   estimateComposerContext,
@@ -98,6 +100,51 @@ describe("composer attachments", () => {
     ).toEqual([{ name: "a.png", path: ".codex-uploads/a.png", kind: "image" }]);
   });
 
+  it("keeps small images unchanged and infers a camera file's missing MIME type", async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const result = await readComposerAttachment(
+      {
+        name: "IMG_1234.JPG",
+        size: bytes.byteLength,
+        arrayBuffer: async () => bytes.buffer
+      },
+      "photo"
+    );
+    expect(result).toMatchObject({
+      id: "photo",
+      name: "IMG_1234.JPG",
+      size: bytes.byteLength,
+      mime: "image/jpeg",
+      kind: "image",
+      bytes
+    });
+    expect(result.previewUrl).toBe(`data:image/jpeg;base64,${btoa(String.fromCharCode(...bytes))}`);
+  });
+
+  it("still rejects oversized non-photo files without reading their content", async () => {
+    for (const [name, type] of [
+      ["archive.zip", "application/zip"],
+      ["animation.gif", "image/gif"]
+    ]) {
+      let read = false;
+      await expect(
+        readComposerAttachment(
+          {
+            name: name!,
+            type: type!,
+            size: MAX_ATTACHMENT_BYTES + 1,
+            arrayBuffer: async () => {
+              read = true;
+              return new ArrayBuffer(0);
+            }
+          },
+          "oversized"
+        )
+      ).rejects.toThrow("超过 2.0 MB 限制");
+      expect(read).toBe(false);
+    }
+  });
+
   it("explains send blocks and pending approvals without blocking the composer", () => {
     expect(sendBlockReason({ hasSession: false, hasProvider: true, hasContent: true })).toContain(
       "Session"
@@ -109,6 +156,14 @@ describe("composer attachments", () => {
       "附件"
     );
     expect(sendBlockReason({ hasSession: true, hasProvider: true, hasContent: true })).toBeNull();
+    expect(
+      sendBlockReason({
+        hasSession: true,
+        hasProvider: true,
+        hasContent: true,
+        preparingAttachments: true
+      })
+    ).toBe("正在处理附件，请稍候");
     expect(approvalSummary(0)).toBeNull();
     expect(approvalSummary(2)).toContain("待审批 2 条");
   });

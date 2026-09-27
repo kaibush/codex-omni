@@ -102,6 +102,7 @@ export function WorkspaceComposer({
   attachments,
   setAttachments,
   attachError,
+  preparingAttachments,
   attachInputRef,
   projectId,
   providerId,
@@ -165,6 +166,7 @@ export function WorkspaceComposer({
   attachments: ComposerAttachment[];
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   attachError: string;
+  preparingAttachments: boolean;
   attachInputRef: RefObject<HTMLInputElement | null>;
   projectId: string;
   providerId: string;
@@ -376,6 +378,12 @@ export function WorkspaceComposer({
             {attachError ? (
               <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p>
             ) : null}
+            {preparingAttachments ? (
+              <p role="status" className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground">
+                <LoaderCircle className="size-3.5 animate-spin" />
+                正在处理附件，大图片会自动压缩…
+              </p>
+            ) : null}
             <Textarea
               ref={inputRef}
               rows={2}
@@ -559,6 +567,7 @@ export function WorkspaceComposer({
                   className="size-8 rounded-lg"
                   aria-label="添加附件"
                   title="添加附件，也可拖入或粘贴图片"
+                  disabled={preparingAttachments}
                   onClick={() => attachInputRef.current?.click()}
                 >
                   <Paperclip className="size-4" />
@@ -655,7 +664,9 @@ export function WorkspaceComposer({
                               : "发送消息")
                         }
                       >
-                        {runState?.status === "running" &&
+                        {preparingAttachments ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : runState?.status === "running" &&
                         workspaceSettings.sendMode === "steer" ? (
                           <Send className="size-4" />
                         ) : runState?.status === "running" || pendingApprovals.length ? (

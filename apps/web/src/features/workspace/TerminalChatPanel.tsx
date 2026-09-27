@@ -64,6 +64,7 @@ import {
   filesFromClipboard,
   filesFromDataTransfer,
   formatBytes,
+  mergeAttachments,
   type ComposerAttachment,
   type FileLike
 } from "./composer-attachments";
@@ -268,6 +269,10 @@ function TerminalChatViewport({
   const [shortcutOpen, setShortcutOpen] = useState(false);
   const [comboDraft, setComboDraft] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const [preparingAttachments, setPreparingAttachments] = useState(false);
+  const pendingAttachmentReads = useRef(0);
   const [attachError, setAttachError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -823,20 +828,30 @@ function TerminalChatViewport({
     focusTerminalIfAppropriate();
   };
   const addAttachments = async (files: FileLike[]) => {
-    if (!files.length) return;
+    if (!files.length || uploadingRef.current) return;
+    pendingAttachmentReads.current += 1;
+    setPreparingAttachments(true);
+    setComposerOpen(true);
+    setAttachError("");
     try {
-      const result = await collectComposerAttachments(attachments, files, createId);
+      const incoming = await collectComposerAttachments([], files, createId);
+      const result = mergeAttachments(attachmentsRef.current, incoming.items);
+      attachmentsRef.current = result.items;
       setAttachments(result.items);
-      setAttachError(result.error ?? "");
+      const message = result.error ?? incoming.error ?? "";
+      setAttachError(message);
       if (result.items.length) {
         setComposerOpen(true);
         window.setTimeout(() => lineRef.current?.focus(), 0);
       }
-      if (result.error) toast.error(result.error);
+      if (message) toast.error(message);
     } catch (error) {
       const message = error instanceof Error ? error.message : "添加附件失败";
       setAttachError(message);
       toast.error(message);
+    } finally {
+      pendingAttachmentReads.current -= 1;
+      setPreparingAttachments(pendingAttachmentReads.current > 0);
     }
   };
   addAttachmentsRef.current = addAttachments;
@@ -864,7 +879,7 @@ function TerminalChatViewport({
     return uploaded;
   };
   const submitLine = () => {
-    if (lineComposing.current || uploadingRef.current) return;
+    if (lineComposing.current || uploadingRef.current || pendingAttachmentReads.current > 0) return;
     void (async () => {
       let command = draft;
       let shouldSubmit = Boolean(command.trim());
@@ -1213,6 +1228,12 @@ function TerminalChatViewport({
             </div>
           ) : null}
           {attachError ? <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p> : null}
+          {preparingAttachments ? (
+            <p role="status" className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              正在处理附件，大图片会自动压缩…
+            </p>
+          ) : null}
           <div className="relative">
             {shortcutOpen ? (
               <div ref={shortcutPanelRef} className="absolute bottom-full left-0 z-30 mb-2 rounded-xl border border-border bg-card shadow-xl dark:border-white/15 dark:bg-slate-900">
@@ -1353,7 +1374,7 @@ function TerminalChatViewport({
                 className={COMPOSER_ICON_BUTTON_CLASS}
                 aria-label="添加附件"
                 title="添加附件，也可拖入或粘贴文件"
-                disabled={uploading}
+                disabled={uploading || preparingAttachments}
                 onClick={() => attachInputRef.current?.click()}
               >
                 <Paperclip className="size-4" />
@@ -1372,8 +1393,8 @@ function TerminalChatViewport({
                   {historyLoading ? <LoaderCircle className="size-4 animate-spin" /> : <HistoryIcon className="size-4" />}
                 </Button>
               </span>
-              <Button type="button" size="icon" className={COMPOSER_ICON_BUTTON_CLASS} aria-label="发送到终端" title="发送到终端" onClick={submitLine} disabled={uploading || (!draft.trim() && attachments.length === 0)}>
-                {uploading ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+              <Button type="button" size="icon" className={COMPOSER_ICON_BUTTON_CLASS} aria-label="发送到终端" title="发送到终端" onClick={submitLine} disabled={uploading || preparingAttachments || (!draft.trim() && attachments.length === 0)}>
+                {uploading || preparingAttachments ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </Button>
             </div>
           </div>

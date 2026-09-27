@@ -120,12 +120,14 @@ import {
   buildAttachmentPrompt,
   collectComposerAttachments,
   formatContextEstimate,
+  mergeAttachments,
   parseComposerDraft,
   queuedAttachmentMeta,
   timelineAttachments,
   sendBlockReason,
   stringifyComposerDraft,
-  type ComposerAttachment
+  type ComposerAttachment,
+  type FileLike
 } from "@/features/workspace/composer-attachments";
 import {
   expandSlashCommand,
@@ -204,6 +206,10 @@ export function Workspace() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const [preparingAttachments, setPreparingAttachments] = useState(false);
+  const attachmentReads = useRef({ pending: 0 });
   const [attachError, setAttachError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [sending, setSending] = useState(false);
@@ -592,6 +598,8 @@ export function Workspace() {
     setQueueDraft("");
     setAttachments([]);
     setAttachError("");
+    attachmentReads.current = { pending: 0 };
+    setPreparingAttachments(false);
     setDragActive(false);
     setSending(false);
     stickToBottom.current = true;
@@ -1448,7 +1456,8 @@ export function Workspace() {
     hasSession: Boolean(activeSession),
     hasProvider: Boolean(providerId),
     hasContent: Boolean(input.trim() || attachments.length),
-    sending
+    sending,
+    preparingAttachments
   });
   const approvalNotice = approvalSummary(pendingApprovals.length);
   const contextEstimate = formatContextEstimate(input, attachments);
@@ -1892,24 +1901,29 @@ export function Workspace() {
       window.alert(error instanceof Error ? error.message : "删除项目失败");
     }
   });
-  const addAttachments = async (
-    files: Array<{
-      name: string;
-      type?: string;
-      size: number;
-      arrayBuffer: () => Promise<ArrayBuffer>;
-    }>
-  ) => {
-    if (!files.length) return;
+  const addAttachments = async (files: FileLike[]) => {
+    if (!files.length || sending) return;
+    const batch = attachmentReads.current;
+    batch.pending += 1;
+    setPreparingAttachments(true);
+    setAttachError("");
     try {
-      const result = await collectComposerAttachments(attachments, files, createId);
+      const incoming = await collectComposerAttachments([], files, createId);
+      if (attachmentReads.current !== batch) return;
+      const result = mergeAttachments(attachmentsRef.current, incoming.items);
+      attachmentsRef.current = result.items;
       setAttachments(result.items);
-      setAttachError(result.error ?? "");
-      if (result.error) setSendNotice(result.error);
+      const message = result.error ?? incoming.error ?? "";
+      setAttachError(message);
+      setSendNotice(message);
     } catch (error) {
+      if (attachmentReads.current !== batch) return;
       const message = error instanceof Error ? error.message : "添加附件失败";
       setAttachError(message);
       setSendNotice(message);
+    } finally {
+      batch.pending -= 1;
+      if (attachmentReads.current === batch) setPreparingAttachments(batch.pending > 0);
     }
   };
   const composeTurnPayload = async (raw: string, files: ComposerAttachment[]) => {
@@ -1991,7 +2005,8 @@ export function Workspace() {
       hasSession: Boolean(activeSession),
       hasProvider: Boolean(chosenProviderId),
       hasContent: Boolean(raw || files.length),
-      sending
+      sending,
+      preparingAttachments: attachmentReads.current.pending > 0
     });
     if (reason) {
       setSendNotice(reason);
@@ -2776,6 +2791,7 @@ export function Workspace() {
                   attachments={attachments}
                   setAttachments={setAttachments}
                   attachError={attachError}
+                  preparingAttachments={preparingAttachments}
                   attachInputRef={attachInputRef}
                   projectId={projectId}
                   providerId={providerId}

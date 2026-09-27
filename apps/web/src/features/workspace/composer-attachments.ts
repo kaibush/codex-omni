@@ -1,3 +1,5 @@
+import { compressImageAttachment, imageMimeType } from "./image-compression";
+
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_TOTAL_BYTES = 8 * 1024 * 1024;
@@ -75,7 +77,18 @@ const TEXT_EXTENSIONS = new Set([
   "sql"
 ]);
 
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "avif",
+  "heic",
+  "heif"
+]);
 
 export function fileExtension(name: string) {
   const parts = name.split(".");
@@ -160,7 +173,9 @@ export function sendBlockReason(input: {
   hasProvider: boolean;
   hasContent: boolean;
   sending?: boolean;
+  preparingAttachments?: boolean;
 }) {
+  if (input.preparingAttachments) return "正在处理附件，请稍候";
   if (input.sending) return "正在处理附件和发送";
   if (!input.hasSession) return "Session 尚未加载完成，请稍后再试";
   if (!input.hasProvider) return "请先选择一个 Provider";
@@ -291,11 +306,12 @@ export async function readComposerAttachment(
   file: FileLike,
   id: string
 ): Promise<ComposerAttachment> {
+  file = await compressImageAttachment(file, MAX_ATTACHMENT_BYTES);
   if (file.size > MAX_ATTACHMENT_BYTES) {
     throw new Error(`${file.name} 超过 ${formatBytes(MAX_ATTACHMENT_BYTES)} 限制`);
   }
   const buffer = new Uint8Array(await file.arrayBuffer());
-  const mime = file.type || "application/octet-stream";
+  const mime = imageMimeType(file.name, file.type) || "application/octet-stream";
   const kind = attachmentKind(file.name, mime);
   const text = kind === "text" ? decodeText(buffer) : undefined;
   return {
