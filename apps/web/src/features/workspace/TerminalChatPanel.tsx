@@ -68,6 +68,7 @@ import {
   type FileLike
 } from "./composer-attachments";
 import { LiveDuration } from "./WorkspaceStatus";
+import type { SessionToDelete } from "./DeleteSessionsDialog";
 import { PromptTemplatePicker } from "./PromptTemplatePicker";
 import { TerminalProfileManager, TerminalProfilePicker } from "./TerminalProfilePicker";
 import { joinInsertedTemplate } from "./prompt-templates";
@@ -1418,15 +1419,20 @@ export function TerminalChatPanel({
   project,
   sessionId = "",
   onOpenSession,
+  onDeleteSession,
+  deletingSessions,
   active = true
 }: {
   project: Project;
   sessionId?: string;
   onOpenSession?: (sessionId: string) => void;
+  onDeleteSession: (session: SessionToDelete) => void;
+  deletingSessions: boolean;
   active?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState("");
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [visitedIds, setVisitedIds] = useState<string[]>([]);
   const [fontSize, setFontSize] = useState(() => loadTerminalFontSize(window.innerWidth));
   const changeFontSize = (size: number) => {
@@ -1466,27 +1472,6 @@ export function TerminalChatPanel({
     onSuccess: (result) => update(result.terminal.id, result.terminal),
     onError: (error) => toast.error(error instanceof Error ? error.message : "更新重启策略失败")
   });
-  const remove = useMutation({
-    mutationFn: (item: TerminalChatSession) => api<{ ok: boolean }>(`/api/sessions/${item.sessionId}`, { method: "DELETE" }),
-    onSuccess: (_result, item) => {
-      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) =>
-        current ? { items: current.items.filter((session) => session.id !== item.id) } : current
-      );
-      queryClient.setQueriesData<Session[]>({ queryKey: ["sessions", project.id] }, (current) =>
-        (current ?? []).filter((session) => session.id !== item.sessionId)
-      );
-      void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] });
-      void queryClient.invalidateQueries({ queryKey: ["terminal-chat-sessions", project.id] });
-      void queryClient.removeQueries({ queryKey: ["session", item.sessionId] });
-      const remaining = queryClient.getQueryData<SessionList>(["terminal-chat-sessions", project.id])?.items ?? [];
-      if (selectedId === item.id) {
-        const next = remaining[0];
-        setSelectedId(next?.id ?? "");
-        onOpenSession?.(next?.sessionId ?? "");
-      }
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "删除终端对话失败")
-  });
   const tabLabels = useMemo(
     () => numberedDuplicateTitles(items.map((item) => ({ id: item.sessionId, title: item.title, createdAt: item.createdAt }))),
     [items]
@@ -1512,10 +1497,12 @@ export function TerminalChatPanel({
   }, [items, selected]);
   const visitedItems = items.filter((item) => item.id === selected?.id || visitedIds.includes(item.id));
   const closeTab = (item: TerminalChatSession) => {
-    const running = item.state === "running" || item.desiredState === "running";
-    const title = tabLabels.get(item.sessionId) ?? item.title;
-    if (!window.confirm(running ? `删除终端对话「${title}」？进程会被停止。` : `删除终端对话「${title}」？`)) return;
-    remove.mutate(item);
+    setSwitcherOpen(false);
+    onDeleteSession({
+      id: item.sessionId,
+      title: tabLabels.get(item.sessionId) ?? item.title,
+      kind: "terminal-chat"
+    });
   };
   const shellTitle = (item: TerminalChatSession) => tabLabels.get(item.sessionId) ?? item.title;
   const openShell = (item: TerminalChatSession) => {
@@ -1535,7 +1522,7 @@ export function TerminalChatPanel({
     <>
       <BotMessageSquare className="hidden size-3.5 shrink-0 text-primary sm:block" />
       <div className="min-w-0 flex-1 sm:hidden">
-        <DropdownMenu>
+        <DropdownMenu open={switcherOpen} onOpenChange={setSwitcherOpen}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -1561,7 +1548,7 @@ export function TerminalChatPanel({
                   type="button"
                   className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={`关闭 ${shellTitle(item)}`}
-                  disabled={remove.isPending}
+                  disabled={deletingSessions}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.preventDefault();
@@ -1599,7 +1586,7 @@ export function TerminalChatPanel({
                   <Square className="size-3.5" />
                   停止当前终端
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={remove.isPending} onSelect={() => closeTab(selected)}>
+                <DropdownMenuItem disabled={deletingSessions} onSelect={() => closeTab(selected)}>
                   <X className="size-3.5" />
                   关闭当前终端
                 </DropdownMenuItem>
@@ -1630,7 +1617,7 @@ export function TerminalChatPanel({
               type="button"
               className="grid size-7 place-items-center rounded-r-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               aria-label={`关闭 ${shellTitle(item)}`}
-              disabled={remove.isPending}
+              disabled={deletingSessions}
               onClick={() => closeTab(item)}
             >
               <X className="size-3.5" />

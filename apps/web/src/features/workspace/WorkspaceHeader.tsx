@@ -74,7 +74,8 @@ export function WorkspaceHeader({
   archiveSession,
   exportSession,
   copySession,
-  deleteSession
+  onDeleteSession,
+  deletingSessions
 }: {
   sidebar: boolean;
   isMobile: boolean;
@@ -119,7 +120,8 @@ export function WorkspaceHeader({
   archiveSession: (session: Session, archived: boolean) => void;
   exportSession: (id: string, format: "markdown" | "json") => void;
   copySession: (id: string) => void;
-  deleteSession: { mutate: (id: string) => void };
+  onDeleteSession: (session: Session) => void;
+  deletingSessions: boolean;
 }) {
   return (
     <header className="workspace-header flex shrink-0 items-center gap-3 px-3 sm:px-5">
@@ -359,17 +361,8 @@ export function WorkspaceHeader({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
-                onSelect={() => {
-                  if (
-                    !window.confirm(
-                      activeSession.kind === "terminal-chat"
-                        ? `删除终端对话「${sessionDisplayTitle ?? activeSession.title}」？进程会被停止。`
-                        : `删除对话「${activeSession.title}」？`
-                    )
-                  )
-                    return;
-                  deleteSession.mutate(activeSession.id);
-                }}
+                disabled={deletingSessions}
+                onSelect={() => onDeleteSession(activeSession)}
               >
                 <Trash2 /> 删除
               </DropdownMenuItem>

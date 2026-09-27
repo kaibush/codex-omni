@@ -168,8 +168,8 @@ export function WorkspaceSidebar({
   archiveSession,
   exportSession,
   copySession,
-  deleteSession,
-  bulkDeleteSessions,
+  onDeleteSessions,
+  deletingSessions,
   activeRunsCount,
   pendingApprovalCount,
   connection,
@@ -251,14 +251,8 @@ export function WorkspaceSidebar({
   archiveSession: (session: Session, archived: boolean) => void;
   exportSession: (id: string, format: "markdown" | "json") => void;
   copySession: (id: string) => void;
-  deleteSession: { mutate: (id: string) => void };
-  bulkDeleteSessions: {
-    isPending: boolean;
-    mutate: (
-      input: { ids: string[]; purgeSource: boolean },
-      options?: { onSuccess?: () => void }
-    ) => void;
-  };
+  onDeleteSessions: (sessions: Session[], onSuccess?: () => void) => void;
+  deletingSessions: boolean;
   activeRunsCount: number;
   pendingApprovalCount: number;
   connection: ConnectionState;
@@ -276,12 +270,10 @@ export function WorkspaceSidebar({
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() => loadExpandedProjectIds());
   const [selectingSessions, setSelectingSessions] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
-  const [purgeSource, setPurgeSource] = useState(false);
   const currentProjectExpanded = Boolean(projectId) && expandedProjectIds.includes(projectId);
   useEffect(() => {
     setSelectingSessions(false);
     setSelectedSessionIds([]);
-    setPurgeSource(false);
   }, [projectId]);
   useEffect(() => {
     if (currentProjectExpanded) return;
@@ -991,10 +983,8 @@ export function WorkspaceSidebar({
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       variant="destructive"
-                                      onSelect={() => {
-                                        if (!window.confirm(`删除对话「${displayTitle}」？`)) return;
-                                        deleteSession.mutate(s.id);
-                                      }}
+                                      disabled={deletingSessions}
+                                      onSelect={() => onDeleteSessions([s])}
                                     >
                                       <Trash2 /> 删除
                                     </DropdownMenuItem>
@@ -1034,7 +1024,7 @@ export function WorkspaceSidebar({
                     <button
                       type="button"
                       className="h-8 shrink-0 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                      disabled={!visibleSessionIds.length || bulkDeleteSessions.isPending}
+                      disabled={!visibleSessionIds.length || deletingSessions}
                       onClick={() => setSelectedSessionIds(allVisibleSelected ? [] : visibleSessionIds)}
                     >
                       {allVisibleSelected ? "取消全选" : "全选"}
@@ -1046,35 +1036,19 @@ export function WorkspaceSidebar({
                       type="button"
                       variant="destructive"
                       className="h-8 shrink-0 rounded-lg px-3"
-                      disabled={!selectedSessionIds.length || bulkDeleteSessions.isPending}
+                      disabled={!selectedSessionIds.length || deletingSessions}
                       onClick={() => {
-                        const count = selectedSessionIds.length;
-                        const message = purgeSource
-                          ? `删除 ${count} 个对话，并同步删除供应商里的原始对话数据？此操作不可恢复。`
-                          : `删除 ${count} 个对话？客户端目录中的原始数据会保留。`;
-                        if (!window.confirm(message)) return;
-                        bulkDeleteSessions.mutate(
-                          { ids: selectedSessionIds, purgeSource },
-                          { onSuccess: () => stopSelectingSessions() }
+                        onDeleteSessions(
+                          projectSessions.filter((session) =>
+                            selectedSessionIds.includes(session.id)
+                          ),
+                          stopSelectingSessions
                         );
                       }}
                     >
-                      {bulkDeleteSessions.isPending ? "删除中" : "删除"}
+                      {deletingSessions ? "删除中" : "删除"}
                     </Button>
                   </div>
-                  <label
-                    className="mt-1 flex h-8 items-center gap-2 rounded-lg px-1 text-xs text-muted-foreground"
-                    title="同时删除客户端目录里的 rollout、快照和历史记录，用来腾出磁盘空间。仍被其他会话使用的原始数据会保留。"
-                  >
-                    <input
-                      type="checkbox"
-                      className="size-4 shrink-0 accent-primary"
-                      checked={purgeSource}
-                      disabled={bulkDeleteSessions.isPending}
-                      onChange={(event) => setPurgeSource(event.target.checked)}
-                    />
-                    <span className="min-w-0 truncate">同步删除原数据</span>
-                  </label>
                 </div>
               ) : null}
               <div className="border-t border-border bg-background/60 p-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">

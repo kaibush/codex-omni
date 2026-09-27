@@ -107,6 +107,7 @@ import {
   mergeSessionOutline
 } from "@/features/workspace/timeline-outline";
 import { ChangeProjectPathDialog } from "@/features/workspace/ChangeProjectPathDialog";
+import { DeleteSessionsDialog, type SessionToDelete } from "@/features/workspace/DeleteSessionsDialog";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
@@ -221,6 +222,10 @@ export function Workspace() {
   const [newProject, setNewProject] = useState(false);
   const [pathProject, setPathProject] = useState<Project | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [sessionDeletion, setSessionDeletion] = useState<{
+    sessions: SessionToDelete[];
+    onSuccess?: () => void;
+  } | null>(null);
   const [providerManager, setProviderManager] = useState(false);
   const [runningCenterOpen, setRunningCenterOpen] = useState(false);
   const [taskBoardOpen, setTaskBoardOpen] = useState(false);
@@ -1738,39 +1743,7 @@ export function Workspace() {
       openWorkspace(action.projectId, sessionId || "", false, "git");
     }
   };
-  const deleteSession = useMutation({
-    mutationFn: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
-    onSuccess: (_result, id) => {
-      const remaining = (sessions.data ?? []).filter((session) => session.id !== id);
-      qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
-        (current ?? []).filter((session) => session.id !== id)
-      );
-      qc.setQueryData<{ items: TerminalChatSession[] }>(
-        ["terminal-chat-sessions", projectId],
-        (current) =>
-          current ? { items: current.items.filter((item) => item.sessionId !== id) } : current
-      );
-      if (sessionId === id) {
-        const deleted = (sessions.data ?? []).find((session) => session.id === id);
-        if (deleted?.kind === "terminal-chat" || workspaceView === "terminal-chat") {
-          const next = remaining.find((session) => session.kind === "terminal-chat");
-          openWorkspace(projectId, next?.id ?? "", true, "terminal-chat");
-        } else {
-          const next = remaining[0];
-          openWorkspace(
-            projectId,
-            next?.id ?? "",
-            true,
-            next?.kind === "terminal-chat" ? "terminal-chat" : "chat"
-          );
-        }
-      }
-      void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
-      void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", projectId] });
-      void qc.removeQueries({ queryKey: ["session", id] });
-    }
-  });
-  const bulkDeleteSessions = useMutation({
+  const deleteSessions = useMutation({
     mutationFn: (input: { ids: string[]; purgeSource: boolean }) =>
       api<{
         ok: boolean;
@@ -1793,12 +1766,16 @@ export function Workspace() {
             : current
       );
       if (removed.has(sessionId)) {
-        const next = remaining[0];
+        const deleted = (sessions.data ?? []).find((session) => session.id === sessionId);
+        const terminalChat = deleted?.kind === "terminal-chat" || workspaceView === "terminal-chat";
+        const next = terminalChat
+          ? remaining.find((session) => session.kind === "terminal-chat")
+          : remaining[0];
         openWorkspace(
           projectId,
           next?.id ?? "",
           true,
-          next?.kind === "terminal-chat" || workspaceView === "terminal-chat"
+          next?.kind === "terminal-chat" || terminalChat
             ? "terminal-chat"
             : "chat"
         );
@@ -1824,6 +1801,16 @@ export function Workspace() {
       toast.error(error instanceof Error ? error.message : "删除对话失败");
     }
   });
+  const requestDeleteSessions = (targets: SessionToDelete[], onSuccess?: () => void) => {
+    if (!targets.length || deleteSessions.isPending) return;
+    setSessionDeletion({
+      sessions: targets.map((session) => ({
+        ...session,
+        title: sessionDisplayTitles.get(session.id) ?? session.title
+      })),
+      ...(onSuccess ? { onSuccess } : {})
+    });
+  };
   const updateSession = useMutation({
     mutationFn: ({
       id,
@@ -2615,8 +2602,8 @@ export function Workspace() {
         archiveSession={archiveSession}
         exportSession={exportSession}
         copySession={(id) => void copySession(id)}
-        deleteSession={deleteSession}
-        bulkDeleteSessions={bulkDeleteSessions}
+        onDeleteSessions={requestDeleteSessions}
+        deletingSessions={deleteSessions.isPending}
         activeRunsCount={activeRuns.data?.length ?? 0}
         pendingApprovalCount={pendingApprovalQuery.data?.length ?? pendingApprovals.length}
         connection={connection}
@@ -2676,7 +2663,8 @@ export function Workspace() {
               archiveSession={archiveSession}
               exportSession={exportSession}
               copySession={(id) => void copySession(id)}
-              deleteSession={deleteSession}
+              onDeleteSession={(session) => requestDeleteSessions([session])}
+              deletingSessions={deleteSessions.isPending}
             />
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               {workspaceView !== "terminal-chat" && (
@@ -2886,6 +2874,8 @@ export function Workspace() {
                       onOpenSession={(nextSessionId) =>
                         openWorkspace(projectId, nextSessionId, false, "terminal-chat")
                       }
+                      onDeleteSession={(session) => requestDeleteSessions([session])}
+                      deletingSessions={deleteSessions.isPending}
                     />
                   </Suspense>
                 </div>
@@ -2930,6 +2920,25 @@ export function Workspace() {
           </>
         )}
       </main>
+      {sessionDeletion ? (
+        <DeleteSessionsDialog
+          sessions={sessionDeletion.sessions}
+          busy={deleteSessions.isPending}
+          onCancel={() => setSessionDeletion(null)}
+          onConfirm={(purgeSource) => {
+            if (deleteSessions.isPending) return;
+            deleteSessions.mutate(
+              { ids: sessionDeletion.sessions.map((session) => session.id), purgeSource },
+              {
+                onSuccess: () => {
+                  setSessionDeletion(null);
+                  sessionDeletion.onSuccess?.();
+                }
+              }
+            );
+          }}
+        />
+      ) : null}
       <NewSessionDialog
         initialClient={composerClient}
         open={newSessionOpen}
