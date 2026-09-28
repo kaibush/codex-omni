@@ -50,6 +50,8 @@ describe("RecentSessionsSwitcher", () => {
     expect(html).toContain("修登录");
     expect(html).toContain("看部署");
     expect(html).toContain("codex-omni");
+    expect(html).toContain("timeline-recent-provider");
+    expect(html).toContain("Provider");
     expect(html).toContain("运行中");
     expect(html).toContain("已完成");
     expect(html).toContain('role="button"');
@@ -100,6 +102,8 @@ describe("RecentSessionsSwitcher", () => {
     expect(css).toMatch(/\.timeline-recent\.timeline-outline\.is-open \{\s*display: block;/);
     expect(css).toMatch(/\.timeline-recent-copy \{[\s\S]*display: block;/);
     expect(css).toMatch(/\.timeline-recent-row \{[\s\S]*display: grid;/);
+    expect(css).toMatch(/\.timeline-recent-meta \{[\s\S]*display: flex;/);
+    expect(css).toMatch(/\.timeline-recent-provider \{[\s\S]*text-overflow: ellipsis;/);
     expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*border-radius: 0\.55rem;/);
     expect(css).toMatch(/\.timeline-recent-item \{[\s\S]*min-height: 2\.6rem;/);
     expect(css).toMatch(/\.timeline-recent-title \{[\s\S]*font-weight: 400;/);

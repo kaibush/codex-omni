@@ -71,7 +71,9 @@ export function RecentSessionsPanel({
               role="button"
               tabIndex={0}
               className={`timeline-recent-item${item.sessionId === activeSessionId ? " is-active" : ""}`}
-              title={`${item.sessionTitle} · ${item.projectName}`}
+              title={[item.sessionTitle, item.projectName, item.providerName]
+                .filter(Boolean)
+                .join(" · ")}
               onClick={() => onOpen(item.projectId, item.sessionId)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") return;
@@ -85,7 +87,12 @@ export function RecentSessionsPanel({
                   <span className="timeline-recent-title">{item.sessionTitle}</span>
                 </span>
                 <span className="timeline-recent-row">
-                  <span className="timeline-recent-project">{item.projectName}</span>
+                  <span className="timeline-recent-meta">
+                    <span className="timeline-recent-project">{item.projectName}</span>
+                    {item.providerName ? (
+                      <span className="timeline-recent-provider">· {item.providerName}</span>
+                    ) : null}
+                  </span>
                   <span className={`timeline-recent-badge is-${item.status}`}>
                     {recentRunStatusLabel[item.status]}
                   </span>
