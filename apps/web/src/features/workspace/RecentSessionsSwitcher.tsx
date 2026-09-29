@@ -1,7 +1,14 @@
-import { History, LoaderCircle } from "lucide-react";
+import { ArrowUpDown, Check, History, LoaderCircle } from "lucide-react";
 import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
-import { formatCompactDateTime } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { type SessionListSort } from "@/lib/session-title";
+import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
 
 export const recentRunStatusLabel: Record<RecentRun["status"], string> = {
@@ -36,6 +43,8 @@ export function RecentSessionsPanel({
   pending,
   error,
   activeSessionId,
+  sort = "created",
+  onSort,
   onOpen,
   onClose
 }: {
@@ -44,6 +53,8 @@ export function RecentSessionsPanel({
   pending: boolean;
   error: string;
   activeSessionId?: string | undefined;
+  sort?: SessionListSort;
+  onSort?: (sort: SessionListSort) => void;
   onOpen: (projectId: string, sessionId: string) => void;
   onClose: () => void;
 }) {
@@ -57,7 +68,32 @@ export function RecentSessionsPanel({
         onClick={onClose}
       />
       <nav className="timeline-outline timeline-recent is-open" aria-label="最近对话">
-        <p className="timeline-outline-heading">最近对话</p>
+        <div className="timeline-recent-heading">
+          <p className="timeline-outline-heading">最近对话</p>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="timeline-recent-sort"
+                aria-label="最近对话排序规则"
+                title={sort === "updated" ? "更新时间" : "创建时间"}
+              >
+                <ArrowUpDown className="size-3.5 shrink-0" />
+                <span>{sort === "updated" ? "更新时间" : "创建时间"}</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-36">
+              <DropdownMenuItem onSelect={() => onSort?.("created")}>
+                创建时间
+                {sort === "created" ? <Check className="ms-auto size-3.5" /> : null}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onSort?.("updated")}>
+                更新时间
+                {sort === "updated" ? <Check className="ms-auto size-3.5" /> : null}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         {pending ? (
           <p className="timeline-recent-status">
             <LoaderCircle className="size-3.5 animate-spin" /> 正在读取最近对话
@@ -96,7 +132,14 @@ export function RecentSessionsPanel({
                   <span className={`timeline-recent-badge is-${item.status}`}>
                     {recentRunStatusLabel[item.status]}
                   </span>
-                  <span className="timeline-recent-time">{formatCompactDateTime(item.startedAt)}</span>
+                  <span
+                    className="timeline-recent-time"
+                    title={`${sort === "created" ? "创建于" : "更新于"} ${formatDateTime(
+                      sort === "created" ? item.sessionCreatedAt : item.startedAt
+                    )}`}
+                  >
+                    {formatCompactDateTime(sort === "created" ? item.sessionCreatedAt : item.startedAt)}
+                  </span>
                 </span>
               </span>
             </div>

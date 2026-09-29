@@ -60,7 +60,8 @@ async function homeFixture(page: Page) {
       cwd: claude.directory,
       startedAt: now,
       endedAt: now,
-      reason: null
+      reason: null,
+      sessionCreatedAt: now
     },
     {
       id: "run-codex",
@@ -78,7 +79,8 @@ async function homeFixture(page: Page) {
       cwd: codex.directory,
       startedAt: now - 60_000,
       endedAt: now - 60_000,
-      reason: null
+      reason: null,
+      sessionCreatedAt: now - 120_000
     }
   ];
   await page.route("**/api/runs/recent-sessions*", (route) => route.fulfill({ json: recent }));

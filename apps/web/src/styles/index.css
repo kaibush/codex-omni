@@ -2265,6 +2265,35 @@ button.user-attachment-path {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.timeline-recent-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+.timeline-recent-heading .timeline-outline-heading {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.timeline-recent-sort {
+  display: inline-flex;
+  height: 2rem;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.5rem;
+  padding: 0 0.45rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.timeline-recent-sort:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
 .timeline-outline-heading {
   margin: 0 0 0.15rem;
   padding: 0.1rem 0.4rem 0.3rem;
@@ -2350,6 +2379,18 @@ button.user-attachment-path {
     padding: 0.15rem 0.4rem 0.35rem;
     border-bottom: 1px solid var(--border);
     font-size: 0.7rem;
+  }
+  .timeline-recent-heading {
+    margin-bottom: 0.2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .timeline-recent-heading .timeline-outline-heading {
+    margin-bottom: 0;
+    border-bottom: 0;
+    font-size: 0.75rem;
+  }
+  .timeline-recent-sort {
+    font-size: 0.75rem;
   }
 }
 

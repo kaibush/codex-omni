@@ -1,5 +1,5 @@
 import type { ApprovalResponse } from "@codex-omni/protocol";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -29,6 +29,7 @@ import {
   shouldPauseLiveFollowFromWheel
 } from "@/lib/live-follow";
 import { api } from "@/lib/api";
+import type { SessionListSort } from "@/lib/session-title";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import { isThreadGoalLocked, type ThreadGoal } from "@/lib/thread-goal";
 import type { RecentRun, Session, SessionOutlineItem, TimelineItem } from "@/types";
@@ -129,6 +130,8 @@ export function WorkspaceTimeline({
   sessionsPending,
   onOpenSession,
   onOpenRecentSession,
+  sessionSort,
+  onSessionSort,
   runState,
   connection,
   sendNotice,
@@ -191,6 +194,8 @@ export function WorkspaceTimeline({
   sessionsPending: boolean;
   onOpenSession: (sessionId: string) => void;
   onOpenRecentSession: (projectId: string, sessionId: string) => void;
+  sessionSort: SessionListSort;
+  onSessionSort: (sort: SessionListSort) => void;
   runState: RunState | null;
   connection: ConnectionState;
   sendNotice: string;
@@ -223,9 +228,10 @@ export function WorkspaceTimeline({
   const outline = useTimelineOutline(outlineItems);
   const [recentOpen, setRecentOpen] = useState(false);
   const recentSessionsQuery = useQuery({
-    queryKey: ["recent-run-sessions", 20],
-    queryFn: () => api<RecentRun[]>("/api/runs/recent-sessions?limit=20"),
+    queryKey: ["recent-run-sessions", 20, sessionSort],
+    queryFn: () => api<RecentRun[]>(`/api/runs/recent-sessions?limit=20&sort=${sessionSort}`),
     enabled: recentOpen,
+    placeholderData: keepPreviousData,
     refetchInterval: recentOpen ? 10_000 : false
   });
   const pointerScroll = useRef<{
@@ -400,6 +406,8 @@ export function WorkspaceTimeline({
       <RecentSessionsPanel
         open={recentOpen}
         items={recentSessionsQuery.data ?? []}
+        sort={sessionSort}
+        onSort={onSessionSort}
         pending={recentSessionsQuery.isLoading}
         error={
           recentSessionsQuery.isError

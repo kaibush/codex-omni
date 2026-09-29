@@ -51,6 +51,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { copyMenuItemProps } from "@/lib/clipboard";
 import { requestSystemUpdateCheck } from "@/lib/system-update";
+import { sessionListTime, type SessionListSort } from "@/lib/session-title";
 import { formatCompactDateTime, formatDataSize, formatDateTime } from "@/lib/utils";
 import type { HostInfo, Project, Session } from "@/types";
 import { SESSION_COLORS, SESSION_ICONS, sessionIcon } from "./session-appearance";
@@ -139,6 +140,8 @@ export function WorkspaceSidebar({
   projectList,
   projectSort,
   setProjectSort,
+  sessionSort,
+  setSessionSort,
   openWorkspace,
   renamingProjectId,
   setRenamingProjectId,
@@ -203,6 +206,8 @@ export function WorkspaceSidebar({
   projectList: Project[];
   projectSort: "created" | "updated";
   setProjectSort: (value: "created" | "updated") => void;
+  sessionSort: SessionListSort;
+  setSessionSort: (value: SessionListSort) => void;
   openWorkspace: (
     projectId: string,
     sessionId?: string,
@@ -730,7 +735,36 @@ export function WorkspaceSidebar({
                     </div>
                     {project.id === projectId && expandedProjectIds.includes(project.id) && (
                       <div className="ml-4 mt-0.5 border-l border-border pl-1.5">
-                        <div className="mb-0.5 flex justify-end px-1">
+                        <div className="mb-0.5 flex items-center justify-between gap-1 px-1">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="flex h-8 min-w-0 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                                aria-label="对话排序规则"
+                                title={sessionSort === "updated" ? "更新时间" : "创建时间"}
+                              >
+                                <ArrowUpDown className="size-3.5 shrink-0" />
+                                <span className="truncate">
+                                  {sessionSort === "updated" ? "更新时间" : "创建时间"}
+                                </span>
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="min-w-36">
+                              <DropdownMenuItem onSelect={() => setSessionSort("created")}>
+                                创建时间
+                                {sessionSort === "created" ? (
+                                  <Check className="ms-auto size-3.5" />
+                                ) : null}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => setSessionSort("updated")}>
+                                更新时间
+                                {sessionSort === "updated" ? (
+                                  <Check className="ms-auto size-3.5" />
+                                ) : null}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                           <button
                             type="button"
                             className={`h-8 rounded-lg px-2.5 text-xs ${
@@ -866,9 +900,9 @@ export function WorkspaceSidebar({
                                       <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
                                         <span
                                           className="truncate font-mono"
-                                          title={formatDateTime(s.lastMessageAt ?? s.createdAt)}
+                                          title={`${sessionSort === "created" ? "创建于" : "更新于"} ${formatDateTime(sessionListTime(s, sessionSort))}`}
                                         >
-                                          {formatCompactDateTime(s.lastMessageAt ?? s.createdAt)}
+                                          {formatCompactDateTime(sessionListTime(s, sessionSort))}
                                         </span>
                                         {s.providerId ? (
                                           <span className="truncate">

@@ -20,6 +20,38 @@ describe("Store", () => {
     expect(recent.at(-1)?.sessionTitle).toBe("Session 2");
     expect(store.listRecentRunSessions(200)).toHaveLength(51);
   });
+  it("can list the same sessions by creation time instead of the latest run", () => {
+    store = new Store(":memory:");
+    const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });
+    const older = store.createSession({ projectId: project.id, title: "Older" });
+    const newer = store.createSession({ projectId: project.id, title: "Newer" });
+    store.db.prepare("UPDATE sessions SET created_at=? WHERE id=?").run(10, older.id);
+    store.db.prepare("UPDATE sessions SET created_at=? WHERE id=?").run(40, newer.id);
+    store.createRun({
+      id: "older-run",
+      sessionId: older.id,
+      projectId: project.id,
+      serviceInstanceId: "test",
+      cwd: "/tmp",
+      startedAt: 90
+    });
+    store.createRun({
+      id: "newer-run",
+      sessionId: newer.id,
+      projectId: project.id,
+      serviceInstanceId: "test",
+      cwd: "/tmp",
+      startedAt: 20
+    });
+    expect(store.listRecentRunSessions(10, "updated").map((item) => item.id)).toEqual([
+      "older-run",
+      "newer-run"
+    ]);
+    expect(store.listRecentRunSessions(10, "created")).toMatchObject([
+      { id: "newer-run", sessionCreatedAt: 40 },
+      { id: "older-run", sessionCreatedAt: 10 }
+    ]);
+  });
   it("keeps the session client in recent runs, search and approvals without a provider", () => {
     store = new Store(":memory:");
     const project = store.createProject({ name: "Project", displayPath: "/tmp", realPath: "/tmp" });

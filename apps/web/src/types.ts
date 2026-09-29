@@ -269,6 +269,7 @@ export type RecentRun = Pick<Session, "kind" | "clientType"> & {
   startedAt: number;
   endedAt: number | null;
   reason: string | null;
+  sessionCreatedAt: number;
 };
 
 export type PendingApproval = {

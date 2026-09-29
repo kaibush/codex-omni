@@ -4,6 +4,8 @@ import {
   isPlaceholderSessionTitle,
   listHistoricalSessions,
   resolveSessionTitle,
+  sessionListTime,
+  sortSessions,
   sortSessionsByLatest,
   titleFromFirstMessage
 } from "./session-title";
@@ -54,5 +56,31 @@ describe("sortSessionsByLatest", () => {
         { id: "active", createdAt: 1, updatedAt: 1, lastMessageAt: 9 }
       ]).map((session) => session.id)
     ).toEqual(["active", "new", "old"]);
+  });
+});
+
+describe("sortSessions", () => {
+  const sessions = [
+    { id: "older", createdAt: 10, updatedAt: 50, lastMessageAt: 40 },
+    { id: "newer", createdAt: 30, updatedAt: 30, lastMessageAt: 30 },
+    { id: "touched", createdAt: 20, updatedAt: 20, lastMessageAt: 80 }
+  ];
+
+  it("defaults the visible order to creation time", () => {
+    expect(sortSessions(sessions, "created").map((session) => session.id)).toEqual([
+      "newer",
+      "touched",
+      "older"
+    ]);
+    expect(sessionListTime(sessions[0]!, "created")).toBe(10);
+  });
+
+  it("can switch back to update time", () => {
+    expect(sortSessions(sessions, "updated").map((session) => session.id)).toEqual([
+      "touched",
+      "older",
+      "newer"
+    ]);
+    expect(sessionListTime(sessions[2]!, "updated")).toBe(80);
   });
 });

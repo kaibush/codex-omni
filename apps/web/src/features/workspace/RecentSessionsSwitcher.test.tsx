@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { formatCompactDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
 import { RecentSessionsPanel, RecentSessionsToggle } from "./RecentSessionsSwitcher";
 
@@ -22,7 +23,8 @@ const run: RecentRun = {
   cwd: "/work",
   startedAt: Date.UTC(2026, 8, 24, 8, 30),
   endedAt: null,
-  reason: null
+  reason: null,
+  sessionCreatedAt: Date.UTC(2026, 0, 2, 9, 0)
 };
 
 describe("RecentSessionsSwitcher", () => {
@@ -52,6 +54,10 @@ describe("RecentSessionsSwitcher", () => {
     expect(html).toContain("codex-omni");
     expect(html).toContain("timeline-recent-provider");
     expect(html).toContain("Provider");
+    expect(html).toContain("创建时间");
+    expect(html).toContain("创建于");
+    expect(html).toContain(formatCompactDateTime(run.sessionCreatedAt));
+    expect(html).not.toContain(formatCompactDateTime(run.startedAt));
     expect(html).toContain("运行中");
     expect(html).toContain("已完成");
     expect(html).toContain('role="button"');
@@ -68,6 +74,24 @@ describe("RecentSessionsSwitcher", () => {
         onClose={() => undefined}
       />
     )).toBe("");
+  });
+
+  it("switches the visible time when sorting by the latest run", () => {
+    const html = renderToStaticMarkup(
+      <RecentSessionsPanel
+        open
+        items={[run]}
+        pending={false}
+        error=""
+        sort="updated"
+        onOpen={() => undefined}
+        onClose={() => undefined}
+      />
+    );
+    expect(html).toContain("更新时间");
+    expect(html).toContain("更新于");
+    expect(html).toContain(formatCompactDateTime(run.startedAt));
+    expect(html).not.toContain(formatCompactDateTime(run.sessionCreatedAt));
   });
 
   it("shows loading and empty states without leaving the overlay", () => {

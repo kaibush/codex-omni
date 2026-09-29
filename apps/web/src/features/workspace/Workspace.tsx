@@ -59,8 +59,10 @@ import {
 } from "@/lib/composer-selection";
 import {
   isPlaceholderSessionTitle,
+  sortSessions,
   sortSessionsByLatest,
-  titleFromFirstMessage
+  titleFromFirstMessage,
+  type SessionListSort
 } from "@/lib/session-title";
 import {
   beginRunningTaskState,
@@ -304,6 +306,20 @@ export function Workspace() {
       // private browsing
     }
   }, [projectSort]);
+  const [sessionSort, setSessionSort] = useState<SessionListSort>(() => {
+    try {
+      return localStorage.getItem("codex-omni:session-sort") === "updated" ? "updated" : "created";
+    } catch {
+      return "created";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("codex-omni:session-sort", sessionSort);
+    } catch {
+      // private browsing
+    }
+  }, [sessionSort]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [renamingProjectId, setRenamingProjectId] = useState("");
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
@@ -507,31 +523,30 @@ export function Workspace() {
       ),
     [projectSessions]
   );
-  const sessionGroups = useMemo(
-    () =>
-      [
-        {
-          key: "pinned",
-          label: "置顶",
-          items: projectSessions.filter((session) => session.pinnedAt && !session.archivedAt)
-        },
-        {
-          key: "recent",
-          label: "最近",
-          items: projectSessions.filter((session) => !session.pinnedAt && !session.archivedAt)
-        },
-        ...(showArchived
-          ? [
-              {
-                key: "archived",
-                label: "已归档",
-                items: archivedSessions
-              }
-            ]
-          : [])
-      ].filter((group) => group.key === "archived" || group.items.length > 0),
-    [archivedSessions, projectSessions, showArchived]
-  );
+  const sessionGroups = useMemo(() => {
+    const ordered = sortSessions(projectSessions, sessionSort);
+    return [
+      {
+        key: "pinned",
+        label: "置顶",
+        items: ordered.filter((session) => session.pinnedAt && !session.archivedAt)
+      },
+      {
+        key: "recent",
+        label: "最近",
+        items: ordered.filter((session) => !session.pinnedAt && !session.archivedAt)
+      },
+      ...(showArchived
+        ? [
+            {
+              key: "archived",
+              label: "已归档",
+              items: ordered.filter((session) => session.archivedAt)
+            }
+          ]
+        : [])
+    ].filter((group) => group.key === "archived" || group.items.length > 0);
+  }, [projectSessions, sessionSort, showArchived]);
   const projectList = useMemo(() => {
     const list = [...(projects.data ?? [])];
     list.sort((left, right) => {
@@ -2601,6 +2616,8 @@ export function Workspace() {
         projectList={projectList}
         projectSort={projectSort}
         setProjectSort={setProjectSort}
+        sessionSort={sessionSort}
+        setSessionSort={setSessionSort}
         openWorkspace={openWorkspace}
         renamingProjectId={renamingProjectId}
         setRenamingProjectId={setRenamingProjectId}
@@ -2762,6 +2779,8 @@ export function Workspace() {
                     openWorkspace(nextProjectId, nextSessionId, false, "chat");
                     if (isMobile) setSidebar(false);
                   }}
+                  sessionSort={sessionSort}
+                  onSessionSort={setSessionSort}
                   runState={runState}
                   connection={connection}
                   sendNotice={sendNotice}

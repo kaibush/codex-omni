@@ -1533,9 +1533,12 @@ app.get("/api/approvals/stats", { preHandler: auth }, async (req) => {
 app.get("/api/runs/active", { preHandler: auth }, async () => runs.listActiveRuns());
 app.get("/api/runs/recent-sessions", { preHandler: auth }, async (req) => {
   const query = z
-    .object({ limit: z.coerce.number().int().min(1).max(200).default(50) })
+    .object({
+      limit: z.coerce.number().int().min(1).max(200).default(50),
+      sort: z.enum(["created", "updated"]).default("updated")
+    })
     .parse(req.query ?? {});
-  return store.listRecentRunSessions(query.limit);
+  return store.listRecentRunSessions(query.limit, query.sort);
 });
 app.get("/api/stats", { preHandler: auth }, async (req) => {
   const query = z

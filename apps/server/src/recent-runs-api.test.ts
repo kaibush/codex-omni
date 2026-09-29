@@ -44,6 +44,8 @@ describe("recent run sessions API", () => {
         startedAt
       });
     }
+    store.db.prepare("UPDATE sessions SET created_at=? WHERE id=?").run(1, first.id);
+    store.db.prepare("UPDATE sessions SET created_at=? WHERE id=?").run(2, second.id);
     store.db.close();
 
     const offline = path.join(directory, "offline.mjs");
@@ -104,8 +106,16 @@ describe("recent run sessions API", () => {
     const recent = await fetch(`${baseUrl}/api/runs/recent-sessions`, { headers: { cookie } });
     expect(recent.status).toBe(200);
     expect(await recent.json()).toMatchObject([
-      { id: "first-new", sessionTitle: "First", projectName: "Project", kind: "chat", clientType: "codex" },
-      { id: "second", sessionTitle: "Second", projectName: "Project", kind: "chat", clientType: "claude-code" }
+      { id: "first-new", sessionTitle: "First", projectName: "Project", kind: "chat", clientType: "codex", sessionCreatedAt: 1 },
+      { id: "second", sessionTitle: "Second", projectName: "Project", kind: "chat", clientType: "claude-code", sessionCreatedAt: 2 }
+    ]);
+    const created = await fetch(`${baseUrl}/api/runs/recent-sessions?sort=created`, {
+      headers: { cookie }
+    });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toMatchObject([
+      { id: "second", sessionCreatedAt: 2 },
+      { id: "first-new", sessionCreatedAt: 1 }
     ]);
     const limited = await fetch(`${baseUrl}/api/runs/recent-sessions?limit=1`, {
       headers: { cookie }

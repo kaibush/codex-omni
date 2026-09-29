@@ -194,6 +194,7 @@ export type RecentRunSessionRow = Pick<
   sessionTitle: string;
   projectName: string;
   providerName: string | null;
+  sessionCreatedAt: number;
 };
 export type ApprovalRow = {
   id: string;
@@ -2210,8 +2211,12 @@ export class Store {
       )
       .all(limit) as RunRow[];
   }
-  listRecentRunSessions(limit = 50): RecentRunSessionRow[] {
+  listRecentRunSessions(
+    limit = 50,
+    sort: "created" | "updated" = "updated"
+  ): RecentRunSessionRow[] {
     const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+    const orderBy = sort === "created" ? "s.created_at" : "l.started_at";
     return this.db
       .prepare(
         `WITH latest AS (
@@ -2221,13 +2226,14 @@ export class Store {
          )
          SELECT l.id,l.session_id as sessionId,l.project_id as projectId,l.provider_id as providerId,l.thread_id as threadId,
                 l.status,l.model,l.cwd,l.started_at as startedAt,l.ended_at as endedAt,l.reason,
-                s.title as sessionTitle,s.kind,s.client_type as clientType,p.name as projectName,pr.name as providerName
+                s.title as sessionTitle,s.kind,s.client_type as clientType,s.created_at as sessionCreatedAt,
+                p.name as projectName,pr.name as providerName
          FROM latest l
          JOIN sessions s ON s.id=l.session_id
          JOIN projects p ON p.id=l.project_id
          LEFT JOIN providers pr ON pr.id=l.provider_id
          WHERE l.rank=1
-         ORDER BY l.started_at DESC,l.id DESC LIMIT ?`
+         ORDER BY ${orderBy} DESC,l.id DESC LIMIT ?`
       )
       .all(safeLimit) as RecentRunSessionRow[];
   }

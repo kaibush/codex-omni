@@ -26,6 +26,8 @@ export function listHistoricalSessions<T extends { title: string }>(sessions: T[
   return sessions.filter((session) => !isPlaceholderSessionTitle(session.title));
 }
 
+export type SessionListSort = "created" | "updated";
+
 export function sessionRecency(session: {
   createdAt: number;
   updatedAt?: number;
@@ -34,8 +36,30 @@ export function sessionRecency(session: {
   return Math.max(session.createdAt, session.updatedAt ?? 0, session.lastMessageAt ?? 0);
 }
 
+export function sessionListTime(
+  session: {
+    createdAt: number;
+    updatedAt?: number;
+    lastMessageAt?: number | null;
+  },
+  sort: SessionListSort
+) {
+  return sort === "created" ? session.createdAt : sessionRecency(session);
+}
+
+export function sortSessions<
+  T extends { createdAt: number; updatedAt?: number; lastMessageAt?: number | null }
+>(sessions: T[], sort: SessionListSort) {
+  return [...sessions].sort(
+    (left, right) =>
+      sessionListTime(right, sort) - sessionListTime(left, sort) ||
+      sessionRecency(right) - sessionRecency(left) ||
+      right.createdAt - left.createdAt
+  );
+}
+
 export function sortSessionsByLatest<
   T extends { createdAt: number; updatedAt?: number; lastMessageAt?: number | null }
 >(sessions: T[]) {
-  return [...sessions].sort((left, right) => sessionRecency(right) - sessionRecency(left));
+  return sortSessions(sessions, "updated");
 }
