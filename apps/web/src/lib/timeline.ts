@@ -1,3 +1,4 @@
+import { compactTimelineItem } from "@codex-omni/protocol";
 import {
   isPlanTool,
   isRecoverableStreamError,
@@ -7,7 +8,7 @@ import {
   planItemProgress,
   planItemSignature
 } from "@/lib/tool-event";
-import type { TimelineItem } from "@/types";
+import type { MessageCursor, TimelineItem } from "@/types";
 import { compareTimelineItems, compareTimelineVersions } from "./timeline-order";
 
 export const TIMELINE_VIEWS = ["folded", "flat", "expanded"] as const;
@@ -340,6 +341,44 @@ export function capTimelineEvents(
   return start <= 0 ? items : items.slice(start);
 }
 
+function latestConversationContext(items: TimelineItem[]): TimelineItem[] {
+  const user = findLastIndex(items, (item) => item.kind === "user");
+  const assistant = findLastIndex(items, (item) => item.kind === "assistant");
+  return items.filter((_, index) => index === user || index === assistant);
+}
+
+function asHistoryContext(item: TimelineItem): TimelineItem {
+  return { ...compactTimelineItem(item), historyContext: true, historyBoundary: false };
+}
+
+/** Bound tool traffic without letting it evict the conversation being worked on. */
+export function capLiveTimelineEvents(items: TimelineItem[]): TimelineItem[] {
+  const contiguous = items.filter((item) => !item.historyContext);
+  const tail = capTimelineEvents(contiguous);
+  if (tail.length === items.length) return items;
+  const tailIds = new Set(tail.map((item) => item.id));
+  // At most two compact previews are retained in addition to the bounded tail.
+  // Mark them separately: their timestamps must never become the paging cursor
+  // or the tools between the context and the tail would become unreachable.
+  const context = latestConversationContext(items)
+    .filter((item) => !tailIds.has(item.id))
+    .map(asHistoryContext);
+  const trimmed = tail.length < contiguous.length;
+  return [
+    ...context,
+    ...tail.map((item, index) => (trimmed ? { ...item, historyBoundary: index === 0 } : item))
+  ];
+}
+
+export function liveTimelineHistoryCursor(items: TimelineItem[]): MessageCursor | null {
+  const boundary = items.findIndex((item) => item.historyBoundary && !item.historyContext);
+  if (boundary < 0) return null;
+  const first = items.slice(boundary).find((item) => item.messageId && item.createdAt != null);
+  return first?.messageId && first.createdAt != null
+    ? { id: first.messageId, createdAt: first.createdAt }
+    : null;
+}
+
 /** Keep the oldest loaded edge stable while the user is browsing history. */
 export function capHistoryTimelineEvents(items: TimelineItem[]): TimelineItem[] {
   return capTimelineEvents(items, {
@@ -360,6 +399,17 @@ export function capHistoryPreserveVisible(
   visible: TimelineItem[]
 ): TimelineItem[] {
   if (!older.length) return visible;
+  const conversation = visible.filter((item) => item.historyContext);
+  if (conversation.length) {
+    const window = capHistoryPreserveVisible(
+      older,
+      visible.filter((item) => !item.historyContext)
+    );
+    const known = new Set(window.map((item) => item.id));
+    return [...conversation.filter((item) => !known.has(item.id)), ...window].sort(
+      compareTimelineItems
+    );
+  }
   // Keep a small tail context so the user can still scroll back toward the
   // newest loaded messages, while bounding the combined history window. The
   // previous implementation capped only the newly fetched page, allowing
@@ -412,6 +462,7 @@ export function mergeSessionTimeline(input: {
   current: TimelineItem[];
   historyExpanded: boolean;
   settled?: boolean;
+  preserveConversation?: boolean;
 }): TimelineItem[] {
   const liveById = new Map(input.current.map((item) => [item.id, item]));
   const historical = input.historical.map((item) => {
@@ -424,6 +475,10 @@ export function mergeSessionTimeline(input: {
       ...(liveIsNewer ? live : {}),
       ...(item.createdAt != null ? { createdAt: item.createdAt } : {}),
       ...(item.messageId ? { messageId: item.messageId } : {}),
+      // A row fetched in the page is contiguous again, even if it used to be
+      // retained context or the boundary of a shorter live window.
+      ...(live.historyContext ? { historyContext: false } : {}),
+      ...(live.historyBoundary ? { historyBoundary: false } : {}),
       data: liveIsNewer
         ? mergeToolEventData(item.data, live.data)
         : mergeToolEventData(live.data, item.data)
@@ -444,7 +499,17 @@ export function mergeSessionTimeline(input: {
     ? firstHistoricalIndex >= 0
       ? input.current.slice(0, firstHistoricalIndex).filter((item) => !historicalIds.has(item.id))
       : extras.filter((item) => (item.createdAt ?? 0) <= oldestCreatedAt)
-    : [];
+    : input.preserveConversation
+      ? latestConversationContext(input.current)
+          .filter(
+            (item) =>
+              !historicalIds.has(item.id) &&
+              (firstHistoricalIndex >= 0
+                ? input.current.indexOf(item) < firstHistoricalIndex
+                : historical[0] && compareTimelineItems(item, historical[0]) < 0)
+          )
+          .map(asHistoryContext)
+      : [];
   const olderIds = new Set(older.map((item) => item.id));
   const afterHistoricalIds = new Set(
     lastHistoricalIndex >= 0

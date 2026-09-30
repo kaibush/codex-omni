@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   capHistoryPreserveVisible,
   capHistoryTimelineEvents,
+  capLiveTimelineEvents,
   historyAnchorId,
   capPausedTimelineEvents,
   capTimelineEvents,
@@ -12,6 +13,7 @@ import {
   HISTORY_TIMELINE_MAX_ITEMS,
   LIVE_TIMELINE_MAX_CHARS,
   LIVE_TIMELINE_TAIL_ITEMS,
+  liveTimelineHistoryCursor,
   mergeSessionTimeline
 } from "./timeline";
 import type { TimelineItem } from "@/types";
@@ -596,6 +598,116 @@ describe("capTimelineEvents", () => {
     const result = capTimelineEvents(items, { maxItems: 40, maxChars: 200_000 });
     expect(result.length).toBeLessThan(items.length);
     expect(result.at(-1)?.id).toBe("tool-39");
+  });
+});
+
+describe("live conversation retention", () => {
+  const prompt = item("prompt", 1, { messageId: "prompt", text: "keep working" });
+  const reply = item("reply", 2, {
+    kind: "assistant",
+    messageId: "reply",
+    text: "Checking the service."
+  });
+  const tools = (count: number, outputSize = 0) =>
+    Array.from({ length: count }, (_, index) =>
+      item(`tool-${index}`, index + 3, {
+        kind: "tool",
+        messageId: `tool-${index}`,
+        text: "x".repeat(outputSize)
+      })
+    );
+
+  it("keeps the prompt and reply through repeated live tool trimming", () => {
+    let current = [prompt, reply];
+    for (const tool of tools(400)) current = capLiveTimelineEvents([...current, tool]);
+    expect(current.slice(0, 2)).toEqual([
+      { ...prompt, historyContext: true, historyBoundary: false },
+      { ...reply, historyContext: true, historyBoundary: false }
+    ]);
+    expect(current).toHaveLength(LIVE_TIMELINE_TAIL_ITEMS + 2);
+    expect(current.at(-1)?.id).toBe("tool-399");
+    expect(liveTimelineHistoryCursor(current)).toEqual({ id: "tool-320", createdAt: 323 });
+  });
+
+  it("keeps conversation context and a valid cursor when the character budget trims a short list", () => {
+    const current = capLiveTimelineEvents([prompt, reply, ...tools(60, 12_000)]);
+    expect(current.slice(0, 2).map((entry) => entry.id)).toEqual(["prompt", "reply"]);
+    expect(current.length).toBeLessThan(60);
+    expect(current.at(-1)?.id).toBe("tool-59");
+    expect(liveTimelineHistoryCursor(current)?.id).toBe(current[2]?.id);
+    expect(
+      current
+        .filter((entry) => !entry.historyContext)
+        .reduce((size, entry) => size + (entry.text?.length ?? 0), 0)
+    ).toBeLessThanOrEqual(LIVE_TIMELINE_MAX_CHARS);
+  });
+
+  it("does not accumulate retained context across new user turns", () => {
+    let current = capLiveTimelineEvents([prompt, reply, ...tools(130)]);
+    const nextPrompt = item("next-prompt", 200);
+    const nextReply = item("next-reply", 201, { kind: "assistant" });
+    current = capLiveTimelineEvents([...current, nextPrompt, nextReply]);
+    expect(current.some((entry) => entry.id === prompt.id || entry.id === reply.id)).toBe(false);
+    expect(current.slice(-2)).toMatchObject([nextPrompt, nextReply]);
+    expect(current.length).toBeLessThanOrEqual(LIVE_TIMELINE_TAIL_ITEMS + 2);
+  });
+
+  it("compacts oversized retained context instead of keeping full payloads in memory", () => {
+    const current = capLiveTimelineEvents([
+      { ...prompt, text: "x".repeat(1_000_000), data: { nested: "y".repeat(1_000_000) } },
+      reply,
+      ...tools(130)
+    ]);
+    expect(current[0]?.text?.length).toBeLessThan(40_000);
+    expect(current[0]?.data.nested.length).toBeLessThan(10_000);
+    expect(current[0]?.data.previewTruncated).toBe(true);
+  });
+
+  it("preserves visible conversation when the refreshed latest page contains only tools", () => {
+    const history = tools(130);
+    const current = capLiveTimelineEvents([prompt, reply, ...history]);
+    const merged = capLiveTimelineEvents(
+      mergeSessionTimeline({
+        current,
+        historical: history.slice(-50),
+        historyExpanded: false,
+        preserveConversation: true
+      })
+    );
+    expect(merged.slice(0, 2).map((entry) => entry.id)).toEqual(["prompt", "reply"]);
+    expect(merged.slice(2)).toMatchObject(history.slice(-50));
+  });
+
+  it("recovers context already outside a shorter refreshed page before the live limit is reached", () => {
+    const history = tools(60);
+    const merged = capLiveTimelineEvents(
+      mergeSessionTimeline({
+        current: [prompt, reply, ...history],
+        historical: history.slice(-50),
+        historyExpanded: false,
+        preserveConversation: true
+      })
+    );
+    expect(merged.slice(0, 2).map((entry) => entry.id)).toEqual(["prompt", "reply"]);
+    expect(merged.slice(2)).toMatchObject(history.slice(-50));
+  });
+
+  it("merges a page back into its chronological position without duplicating retained context", () => {
+    const history = tools(130);
+    const current = capLiveTimelineEvents([prompt, reply, ...history]);
+    const next = capHistoryPreserveVisible([prompt, reply, ...history.slice(0, 50)], current);
+    expect(next.map((entry) => entry.id)).toEqual(
+      [prompt, reply, ...history].map((entry) => entry.id)
+    );
+    expect(next.slice(0, 2)).toEqual([prompt, reply]);
+    const partial = capHistoryPreserveVisible(history.slice(0, 50), current);
+    expect(partial.map((entry) => entry.id)).toEqual(next.map((entry) => entry.id));
+  });
+
+  it("returns short contiguous timelines unchanged", () => {
+    const current = [prompt, reply];
+    expect(capLiveTimelineEvents(current)).toBe(current);
+    expect(liveTimelineHistoryCursor(current)).toBeNull();
   });
 });
 

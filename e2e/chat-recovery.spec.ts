@@ -2,6 +2,169 @@ import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { apiJson, createChatSession, ensureWorkspace } from "./helpers";
 import type { Message, SessionDetailPage } from "../apps/web/src/types";
 
+test("keeps the running conversation visible across tool limits and latest-page refreshes", async ({
+  page
+}) => {
+  await ensureWorkspace(page);
+  const created = await createChatSession(page);
+  const original = await apiJson<SessionDetailPage>(
+    page.request,
+    `/api/sessions/${created.session.id}`
+  );
+  const settings = await apiJson<Record<string, unknown>>(page.request, "/api/settings");
+  await page.route("**/api/settings", (route) =>
+    route.fulfill({
+      json: { ...settings, timelineView: "folded", showReasoning: false }
+    })
+  );
+  const startedAt = Date.now();
+  const messages: Message[] = [
+    {
+      role: "user" as const,
+      content: "持续检查这个长任务",
+      itemId: null,
+      eventType: "user.message"
+    },
+    {
+      role: "assistant" as const,
+      content: "我会继续检查并保留运行进度。",
+      itemId: "long-run:commentary",
+      eventType: "assistant.completed"
+    }
+  ].map((message, index) => ({
+    ...message,
+    id: `long-${index}`,
+    sessionId: created.session.id,
+    providerId: created.provider.id,
+    dataJson: null,
+    createdAt: startedAt + index,
+    updatedAt: startedAt + index
+  }));
+  const historyRequests: string[] = [];
+  let latestRequests = 0;
+  await page.route(`**/api/sessions/${created.session.id}?*`, (route) => {
+    const before = new URL(route.request().url()).searchParams.get("beforeId");
+    if (before) historyRequests.push(before);
+    else latestRequests += 1;
+    const end = before ? messages.findIndex((message) => message.id === before) : messages.length;
+    const start = Math.max(0, end - 50);
+    const first = messages[start]!;
+    return route.fulfill({
+      json: {
+        ...original,
+        session: { ...original.session, status: "running" },
+        messages: messages.slice(start, end),
+        latestRun: null,
+        hasMore: start > 0,
+        nextCursor: start > 0 ? { id: first.id, createdAt: first.createdAt } : null
+      }
+    });
+  });
+  let connection: WebSocketRoute | undefined;
+  const snapshot = () =>
+    connection!.send(
+      JSON.stringify({
+        type: "session.snapshot",
+        sessionId: created.session.id,
+        requestId: "long-run",
+        payload: {
+          session: { ...original.session, status: "running" },
+          run: { id: "long-run", status: "running", startedAt },
+          approvals: [],
+          queue: [],
+          replayTruncated: false,
+          serverTime: Date.now()
+        }
+      })
+    );
+  await page.routeWebSocket("**/api/ws", (ws) => {
+    ws.onMessage((raw) => {
+      if (JSON.parse(String(raw)).type !== "session.subscribe") return;
+      connection = ws;
+      snapshot();
+    });
+  });
+  await page.goto(`/projects/${created.project.id}/sessions/${created.session.id}`);
+  const prompt = page.getByText(messages[0]!.content, { exact: true }).first();
+  const commentary = page.getByText(/^我会继续检查并保留运行进度。/);
+  await expect(commentary).toBeVisible();
+  await expect.poll(() => Boolean(connection)).toBe(true);
+  const sendTools = async (count: number, outputSize: number) => {
+    for (let n = 0; n < count; n += 1) {
+      const index = messages.length;
+      const command = `check-progress-${index}`;
+      const output = "x".repeat(outputSize);
+      const data = { tool: "command", command, output, status: "completed", phase: "completed" };
+      const message: Message = {
+        id: `long-${index}`,
+        sessionId: created.session.id,
+        providerId: created.provider.id,
+        role: "tool",
+        itemId: `long-run:tool-${index}`,
+        eventType: "tool.output",
+        content: output,
+        dataJson: JSON.stringify(data),
+        createdAt: startedAt + index,
+        updatedAt: startedAt + index
+      };
+      messages.push(message);
+      connection!.send(
+        JSON.stringify({
+          type: "tool.output",
+          sessionId: created.session.id,
+          requestId: "long-run",
+          seq: index,
+          payload: {
+            ...data,
+            itemId: `tool-${index}`,
+            messageId: message.id,
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+            eventSeq: index
+          }
+        })
+      );
+    }
+    const reply = messages[1]!;
+    reply.content = `我会继续检查并保留运行进度。已检查 ${messages.length - 2} 项。`;
+    reply.updatedAt = startedAt + messages.length;
+    connection!.send(
+      JSON.stringify({
+        type: "assistant.completed",
+        sessionId: created.session.id,
+        requestId: "long-run",
+        payload: {
+          itemId: "commentary",
+          messageId: reply.id,
+          text: reply.content,
+          createdAt: reply.createdAt,
+          updatedAt: reply.updatedAt
+        }
+      })
+    );
+    await expect(commentary).toHaveText(reply.content);
+  };
+  await sendTools(130, 10);
+  await expect(prompt).toBeVisible();
+  await expect(commentary).toBeVisible();
+  await sendTools(60, 12_000);
+  await expect(prompt).toBeVisible();
+  await expect(commentary).toBeVisible();
+  const requestsBefore = latestRequests;
+  snapshot();
+  await expect.poll(() => latestRequests).toBeGreaterThan(requestsBefore);
+  await expect(prompt).toBeVisible();
+  await expect(commentary).toBeVisible();
+  await page.getByRole("button", { name: "加载更早的对话", exact: true }).click();
+  await expect.poll(() => historyRequests.length).toBe(1);
+  // Paging must start before the retained tool tail, not before the pinned prompt.
+  expect(Number(historyRequests[0]!.replace("long-", ""))).toBeGreaterThan(2);
+  await page.getByRole("button", { name: "返回最新", exact: true }).click();
+  await expect(prompt).toBeVisible();
+  await expect(commentary).toBeVisible();
+  await expect(page.getByRole("button", { name: "停止当前任务", exact: true })).toBeVisible();
+});
+
 async function historyFixture(page: Page) {
   await ensureWorkspace(page);
   const created = await createChatSession(page);

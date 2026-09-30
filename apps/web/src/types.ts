@@ -197,6 +197,10 @@ export type SessionDetailPage = {
 export type TimelineItem = {
   id: string;
   messageId?: string;
+  /** Conversation context retained outside the contiguous live event window. */
+  historyContext?: boolean;
+  /** The first retained event after live history was trimmed. */
+  historyBoundary?: boolean;
   kind:
     | "user"
     | "assistant"

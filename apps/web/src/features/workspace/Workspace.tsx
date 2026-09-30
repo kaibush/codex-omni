@@ -73,12 +73,12 @@ import {
 import { isDeferredLiveTimelineEvent, isStreamProgressEvent } from "@/lib/live-follow";
 import {
   capHistoryPreserveVisible,
+  capLiveTimelineEvents,
   capPausedTimelineEvents,
-  capTimelineEvents,
   historyAnchorId,
+  liveTimelineHistoryCursor,
   LIVE_TIMELINE_FLUSH_MAX_BATCH,
   LIVE_TIMELINE_FLUSH_MS,
-  LIVE_TIMELINE_TAIL_ITEMS,
   mergeSessionTimeline
 } from "@/lib/timeline";
 import { existingPlanTimelineId, isPlanTool, mergeToolEventData } from "@/lib/tool-event";
@@ -409,14 +409,15 @@ export function Workspace() {
       historyLoadingRef.current = false;
       setHistoryLoading(false);
       const latestPage = qc.getQueryData<SessionDetailPage>(["session", sessionId]);
+      const liveCursor = liveTimelineHistoryCursor(liveEventsRef.current);
       if (latestPage) {
-        setHistoryCursor(latestPage.nextCursor);
-        setHasOlderMessages(latestPage.hasMore);
+        setHistoryCursor(liveCursor ?? latestPage.nextCursor);
+        setHasOlderMessages(Boolean(liveCursor) || latestPage.hasMore);
       }
       setTimelineLockId(undefined);
       setFollowingLive(true);
       setHasDeferredLiveEvents(false);
-      setEvents(capTimelineEvents(liveEventsRef.current));
+      setEvents(capLiveTimelineEvents(liveEventsRef.current));
       if (invalidate && sessionId) void qc.invalidateQueries({ queryKey: ["session", sessionId] });
       window.requestAnimationFrame(() => {
         const container = chatScroll.current;
@@ -718,11 +719,12 @@ export function Workspace() {
     }
 
     setEvents((current) => {
-      liveEventsRef.current = capTimelineEvents(
+      liveEventsRef.current = capLiveTimelineEvents(
         mergeSessionTimeline({
           historical,
           current: liveEventsRef.current,
           historyExpanded: false,
+          preserveConversation: true,
           settled: Boolean(resolved && resolved.status !== "running")
         })
       );
@@ -730,9 +732,12 @@ export function Workspace() {
         historical,
         current: following ? liveEventsRef.current : current,
         historyExpanded: expanded,
+        preserveConversation: true,
         settled: Boolean(resolved && resolved.status !== "running")
       });
-      return following ? capTimelineEvents(merged) : capPausedTimelineEvents(merged, historical);
+      return following
+        ? capLiveTimelineEvents(merged)
+        : capPausedTimelineEvents(merged, historical);
     });
     if (!expanded) {
       setHistoryCursor(detail.data.nextCursor);
@@ -742,14 +747,11 @@ export function Workspace() {
   }, [detail.data?.messages, detail.data?.latestRun, detail.data?.session.status, sessionId]);
   useEffect(() => {
     if (!sessionId || !stickToBottom.current) return;
-    if (events.length < LIVE_TIMELINE_TAIL_ITEMS) return;
-    const oldest = events.find((item) => item.messageId && item.createdAt != null);
-    const messageId = oldest?.messageId;
-    const createdAt = oldest?.createdAt;
-    if (!messageId || createdAt == null) return;
+    const cursor = liveTimelineHistoryCursor(events);
+    if (!cursor) return;
     setHasOlderMessages(true);
     setHistoryCursor((current) =>
-      current?.id === messageId ? current : { createdAt, id: messageId }
+      current?.id === cursor.id && current.createdAt === cursor.createdAt ? current : cursor
     );
   }, [events, sessionId]);
   useLayoutEffect(() => {
@@ -800,7 +802,7 @@ export function Workspace() {
       timelineUpdates.push((displayed) => {
         const following = stickToBottom.current;
         const base = following ? displayed : liveEventsRef.current;
-        const next = capTimelineEvents(update(base));
+        const next = capLiveTimelineEvents(update(base));
         liveEventsRef.current = next;
         return following ? next : displayed;
       });
@@ -1368,7 +1370,9 @@ export function Workspace() {
         .filter(isVisibleTimelineMessage)
         .map((message) => fromMessage(message));
       const currentEvents = eventsRef.current;
-      const known = new Set(currentEvents.map((item) => item.id));
+      const known = new Set(
+        currentEvents.filter((item) => !item.historyContext).map((item) => item.id)
+      );
       const prepend = olderEvents.filter((item) => !known.has(item.id));
       stickToBottom.current = false;
       setFollowingLive(false);
@@ -1376,7 +1380,7 @@ export function Workspace() {
         historyScrollSnapshot.current = null;
       } else {
         const next = capHistoryPreserveVisible(prepend, currentEvents);
-        const anchorId = historyAnchorId(currentEvents);
+        const anchorId = historyAnchorId(currentEvents.filter((item) => !item.historyContext));
         if (anchorId) {
           historyScrollSnapshot.current = null;
           setTimelineLockId(anchorId);
