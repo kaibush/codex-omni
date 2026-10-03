@@ -81,3 +81,31 @@ export function setProviderStreamIdleTimeout(content: string) {
   finishProvider(lines.length);
   return changed ? lines.join(newline) : content;
 }
+
+const CLAUDE_STREAM_IDLE_TIMEOUT_KEY = "CLAUDE_STREAM_IDLE_TIMEOUT_MS";
+
+// Claude Code reads this from settings env. Leave an explicit custom value alone.
+export function setClaudeStreamIdleTimeout(content: string | null | undefined) {
+  const source = content ?? "";
+  let parsed: unknown;
+  try {
+    parsed = source.trim() ? JSON.parse(source) : {};
+  } catch {
+    return content ?? null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return content ?? null;
+  const settings = parsed as Record<string, unknown>;
+  const currentEnv = settings.env;
+  if (currentEnv != null && (typeof currentEnv !== "object" || Array.isArray(currentEnv)))
+    return content ?? null;
+  const env = { ...((currentEnv as Record<string, unknown> | undefined) ?? {}) };
+  const timeout = String(PROVIDER_STREAM_IDLE_TIMEOUT_MS);
+  const current = env[CLAUDE_STREAM_IDLE_TIMEOUT_KEY];
+  if (typeof current === "string" && current.trim()) return content ?? "";
+  env[CLAUDE_STREAM_IDLE_TIMEOUT_KEY] = timeout;
+  return JSON.stringify(
+    { ...settings, env },
+    null,
+    source.includes("\n") || !source.trim() ? 2 : undefined
+  );
+}

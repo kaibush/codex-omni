@@ -3,10 +3,12 @@ import { nanoid } from "nanoid";
 import { DEFAULT_SESSION_TITLE, resolveSessionTitle } from "./session-title.js";
 import {
   migrateLegacyGeneratedProviderConfig,
+  setClaudeStreamIdleTimeout,
   setProviderStreamIdleTimeout
 } from "./provider-context-migration.js";
 export {
   PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  setClaudeStreamIdleTimeout,
   setProviderStreamIdleTimeout
 } from "./provider-context-migration.js";
 export {
@@ -510,6 +512,18 @@ export class Store {
       for (const provider of providers) {
         const next = setProviderStreamIdleTimeout(provider.configToml);
         if (next !== provider.configToml) update.run(next, provider.id);
+      }
+    })();
+    this.db.transaction(() => {
+      const providers = this.db
+        .prepare(
+          "SELECT id, settings_json as settingsJson FROM providers WHERE kind = 'claude-code' AND COALESCE(home_mode, 'managed') != 'native'"
+        )
+        .all() as Array<{ id: string; settingsJson: string | null }>;
+      const update = this.db.prepare("UPDATE providers SET settings_json=? WHERE id=?");
+      for (const provider of providers) {
+        const next = setClaudeStreamIdleTimeout(provider.settingsJson);
+        if (next !== provider.settingsJson) update.run(next, provider.id);
       }
     })();
     this.db.exec(`

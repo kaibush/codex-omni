@@ -10,6 +10,12 @@ export const defaultProviderTemplates: ProviderTemplates = {
   authJson: DEFAULT_PROVIDER_AUTH_TEMPLATE
 };
 
+export const defaultClaudeProviderSettings = `{
+  "env": {
+    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "600000"
+  }
+}`;
+
 const escapeString = (value: string) => JSON.stringify(value).slice(1, -1);
 
 export function renderProviderTemplates(

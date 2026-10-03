@@ -35,6 +35,7 @@ import { api } from "@/lib/api";
 import type { Provider, ProviderHomeMode } from "@/types";
 import { ProviderRuntimeFields } from "./ProviderRuntimeFields";
 import {
+  defaultClaudeProviderSettings,
   defaultProviderTemplates,
   providerAuthKey,
   providerConfigValue,
@@ -140,7 +141,7 @@ export function ProviderDialog({
             baseUrl: "https://api.anthropic.com",
             configToml: null,
             authJson: null,
-            settingsJson: "{}",
+            settingsJson: defaultClaudeProviderSettings,
             mcpServersJson: "{}"
           }
         : {
@@ -566,7 +567,7 @@ export function ProviderDialog({
                             baseUrl: "https://api.anthropic.com",
                             configToml: null,
                             authJson: null,
-                            settingsJson: "{}",
+                            settingsJson: defaultClaudeProviderSettings,
                             mcpServersJson: "{}"
                           }
                         : {

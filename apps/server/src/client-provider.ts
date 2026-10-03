@@ -1,4 +1,4 @@
-import type { ProviderRow } from "@codex-omni/db";
+import { setClaudeStreamIdleTimeout, type ProviderRow } from "@codex-omni/db";
 import { parseClaudeMcpServers, parseClaudeSettings } from "@codex-omni/claude-runtime";
 import type { ProviderInput } from "@codex-omni/protocol";
 
@@ -43,7 +43,7 @@ export async function claudeProviderFiles(input: ProviderInput, current?: Provid
     model: input.model === undefined ? (current?.model ?? null) : input.model,
     contextWindow: null,
     autoCompactTokenLimit: null,
-    settingsJson,
+    settingsJson: setClaudeStreamIdleTimeout(settingsJson),
     mcpServersJson,
     configToml: null,
     authJson: null

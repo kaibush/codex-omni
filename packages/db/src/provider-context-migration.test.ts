@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Store } from "./index.js";
 import {
   removeLegacyGeneratedContextDefaults,
+  setClaudeStreamIdleTimeout,
   setProviderStreamIdleTimeout
 } from "./provider-context-migration.js";
 
@@ -125,5 +126,44 @@ describe("provider stream idle timeout", () => {
     expect(store.getProvider(managed.id)?.configToml).toContain("stream_idle_timeout_ms = 600000");
     expect(store.getProvider(apiKey.id)?.configToml).toContain("stream_idle_timeout_ms = 600000");
     expect(store.getProvider(native.id)?.configToml).toBe(configToml);
+  });
+});
+
+describe("claude stream idle timeout", () => {
+  it("adds the ten minute timeout without replacing a custom value", () => {
+    expect(setClaudeStreamIdleTimeout(null)).toBe(
+      '{\n  "env": {\n    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "600000"\n  }\n}'
+    );
+    expect(setClaudeStreamIdleTimeout("{}")).toBe(
+      '{"env":{"CLAUDE_STREAM_IDLE_TIMEOUT_MS":"600000"}}'
+    );
+    const custom = '{"env":{"CLAUDE_STREAM_IDLE_TIMEOUT_MS":"1200000","CUSTOM":"value"}}';
+    expect(setClaudeStreamIdleTimeout(custom)).toBe(custom);
+    expect(setClaudeStreamIdleTimeout("[]")).toBe("[]");
+    expect(setClaudeStreamIdleTimeout("{")).toBe("{");
+  });
+
+  it("migrates Claude providers and leaves native settings untouched", () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "omni-claude-timeout-"));
+    const file = path.join(dir, "store.db");
+    store = new Store(file);
+    const apiKey = store.upsertProvider({
+      name: "Claude API",
+      kind: "claude-code",
+      homeMode: "api-key",
+      settingsJson: '{"env":{"CUSTOM":"value"}}'
+    });
+    const native = store.upsertProvider({
+      name: "Claude native",
+      kind: "claude-code",
+      homeMode: "native",
+      settingsJson: "{}"
+    });
+    store.db.close();
+    store = new Store(file);
+    expect(store.getProvider(apiKey.id)?.settingsJson).toBe(
+      '{"env":{"CUSTOM":"value","CLAUDE_STREAM_IDLE_TIMEOUT_MS":"600000"}}'
+    );
+    expect(store.getProvider(native.id)?.settingsJson).toBe("{}");
   });
 });

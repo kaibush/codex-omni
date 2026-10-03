@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Store } from "@codex-omni/db";
+import { setClaudeStreamIdleTimeout, Store } from "@codex-omni/db";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -212,6 +212,7 @@ describe("provider runtime settings HTTP contract", () => {
       mcpServersJson: '{"local":{"command":"node","args":["server.js"]}}',
       isDefault: true
     };
+    const claudeSettings = setClaudeStreamIdleTimeout(claudeConfig.settingsJson);
     const claude = await call("/api/providers", "POST", claudeConfig);
     expect(claude.response.status, JSON.stringify(claude.body)).toBe(200);
     expect(claude.body).toMatchObject({
@@ -219,6 +220,7 @@ describe("provider runtime settings HTTP contract", () => {
       model: "sonnet",
       configToml: null,
       authJson: null,
+      settingsJson: claudeSettings,
       isDefault: true
     });
     const claudeId = String(claude.body.id);
@@ -233,6 +235,7 @@ describe("provider runtime settings HTTP contract", () => {
       expect(native.body).toMatchObject({
         homeMode: "native",
         apiKey: null,
+        settingsJson: null,
         runtimeHome: path.join(dir!, "runtime", "clients", kind)
       });
       expect(
@@ -264,7 +267,7 @@ describe("provider runtime settings HTTP contract", () => {
     });
     const renamed = await call(`/api/providers/${claudeId}`, "PUT", { name: "Claude renamed" });
     expect(renamed.body).toMatchObject({
-      settingsJson: claudeConfig.settingsJson,
+      settingsJson: claudeSettings,
       mcpServersJson: claudeConfig.mcpServersJson
     });
     expect(
@@ -275,7 +278,7 @@ describe("provider runtime settings HTTP contract", () => {
     expect(claudeExport.body).toMatchObject({
       kind: "claude-code",
       apiKey: "claude-fixture-key",
-      settingsJson: claudeConfig.settingsJson
+      settingsJson: claudeSettings
     });
     for (const copy of [
       await call(`/api/providers/${claudeId}/clone`, "POST", {}),
@@ -284,7 +287,7 @@ describe("provider runtime settings HTTP contract", () => {
       expect(copy.response.status, JSON.stringify(copy.body)).toBe(200);
       expect(copy.body).toMatchObject({
         kind: "claude-code",
-        settingsJson: claudeConfig.settingsJson,
+        settingsJson: claudeSettings,
         mcpServersJson: claudeConfig.mcpServersJson
       });
     }

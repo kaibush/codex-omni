@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultClaudeProviderSettings,
   defaultProviderTemplates,
   providerAuthKey,
   providerConfigValue,
@@ -25,5 +26,11 @@ describe("provider templates", () => {
     const auth = setProviderAuthKey('{"other":"value"}', "sk-new");
     expect(providerConfigValue(config, "model")).toBe("new");
     expect(providerAuthKey(auth)).toBe("sk-new");
+  });
+
+  it("presets the Claude stream idle timeout to ten minutes", () => {
+    expect(JSON.parse(defaultClaudeProviderSettings)).toEqual({
+      env: { CLAUDE_STREAM_IDLE_TIMEOUT_MS: "600000" }
+    });
   });
 });
