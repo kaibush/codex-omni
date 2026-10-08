@@ -1815,12 +1815,12 @@ function FilesWorkspace({
               <p className="truncate" title={selectedEntry.path || selectedEntry.name}>
                 {selectedEntry.path || selectedEntry.name}
               </p>
-              <p className="truncate text-muted-foreground" title={fileEntryTooltip(selectedEntry)}>
+              <p className="file-tree-detail-line text-muted-foreground">
                 {fileEntryDetailLine(selectedEntry)}
               </p>
             </>
           ) : (
-            <p className="text-muted-foreground">选择文件或文件夹，查看大小、修改时间和创建时间</p>
+            <p className="text-muted-foreground">点一下查看大小、修改时间和创建时间</p>
           )}
         </div>
       </aside>
