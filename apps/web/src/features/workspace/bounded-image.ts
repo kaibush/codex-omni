@@ -35,3 +35,51 @@ export function enqueueImageDecode<T>(
   );
   return run;
 }
+
+export type PreviewFrame = {
+  src: string;
+  width: number;
+  height: number;
+};
+
+export const PREVIEW_FRAME_CACHE_LIMIT = 160;
+export const PREVIEW_FRAME_CACHE_CHARS = 32_000_000;
+
+const previewFrames = new Map<string, PreviewFrame>();
+
+export function previewFrameCacheKey(src: string, maxWidth: number, maxHeight: number) {
+  return `${Math.round(maxWidth)}x${Math.round(maxHeight)}:${src}`;
+}
+
+export function peekPreviewFrame(key: string) {
+  return previewFrames.get(key);
+}
+
+export function readPreviewFrame(key: string) {
+  const hit = previewFrames.get(key);
+  if (!hit) return undefined;
+  previewFrames.delete(key);
+  previewFrames.set(key, hit);
+  return hit;
+}
+
+export function storePreviewFrame(key: string, frame: PreviewFrame) {
+  if (!key || !frame.src) return;
+  if (previewFrames.has(key)) previewFrames.delete(key);
+  previewFrames.set(key, frame);
+  let chars = 0;
+  for (const item of previewFrames.values()) chars += item.src.length;
+  while (
+    previewFrames.size > 1 &&
+    (previewFrames.size > PREVIEW_FRAME_CACHE_LIMIT || chars > PREVIEW_FRAME_CACHE_CHARS)
+  ) {
+    const oldest = previewFrames.keys().next().value;
+    if (!oldest) break;
+    chars -= previewFrames.get(oldest)?.src.length ?? 0;
+    previewFrames.delete(oldest);
+  }
+}
+
+export function clearPreviewFrameCache() {
+  previewFrames.clear();
+}

@@ -2,15 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   BOUNDED_IMAGE_MAX_HEIGHT,
   BOUNDED_IMAGE_MAX_WIDTH,
+  type PreviewFrame,
   boundedImageSize,
-  enqueueImageDecode
+  enqueueImageDecode,
+  peekPreviewFrame,
+  previewFrameCacheKey,
+  readPreviewFrame,
+  storePreviewFrame
 } from "./bounded-image";
-
-type PreviewFrame = {
-  src: string;
-  width: number;
-  height: number;
-};
 
 async function previewFrameFromBlob(
   blob: Blob,
@@ -56,8 +55,14 @@ export function BoundedImage({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const cacheKey = previewFrameCacheKey(src, maxWidth, maxHeight);
   const [visible, setVisible] = useState(false);
-  const [frame, setFrame] = useState<PreviewFrame | null>(null);
+  const [frame, setFrame] = useState<PreviewFrame | null>(() => peekPreviewFrame(cacheKey) ?? null);
+  const frameKeyRef = useRef(cacheKey);
+  if (frameKeyRef.current !== cacheKey) {
+    frameKeyRef.current = cacheKey;
+    setFrame(peekPreviewFrame(cacheKey) ?? null);
+  }
 
   useEffect(() => {
     const node = hostRef.current;
@@ -77,10 +82,16 @@ export function BoundedImage({
   }, []);
 
   useEffect(() => {
-    if (!visible || !src) {
+    if (!src) {
       setFrame(null);
       return;
     }
+    const cached = readPreviewFrame(cacheKey);
+    if (cached) {
+      setFrame(cached);
+      return;
+    }
+    if (!visible) return;
     let cancelled = false;
     const controller = new AbortController();
     void enqueueImageDecode(async () => {
@@ -92,7 +103,9 @@ export function BoundedImage({
       const blob = await response.blob();
       if (cancelled) return;
       const next = await previewFrameFromBlob(blob, maxWidth, maxHeight);
-      if (!cancelled) setFrame(next);
+      if (cancelled) return;
+      storePreviewFrame(cacheKey, next);
+      setFrame(next);
     }, controller.signal).catch((error) => {
       if (cancelled || (error instanceof DOMException && error.name === "AbortError")) return;
       setFrame(null);
@@ -101,9 +114,8 @@ export function BoundedImage({
     return () => {
       cancelled = true;
       controller.abort();
-      setFrame(null);
     };
-  }, [maxHeight, maxWidth, src, visible]);
+  }, [cacheKey, maxHeight, maxWidth, src, visible]);
 
   return (
     <div ref={hostRef} className="bounded-image-host" data-image-src={src}>
