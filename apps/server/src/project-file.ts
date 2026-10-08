@@ -41,6 +41,7 @@ export type ProjectFileMeta = {
   type: "file" | "directory" | "symlink";
   size: number;
   mtimeMs: number;
+  birthtimeMs?: number;
   writable: boolean;
   revision: string | null;
   text: boolean;
@@ -52,6 +53,7 @@ export type ProjectDirectoryEntry = {
   type: "directory" | "file" | "symlink";
   size: number;
   mtimeMs: number;
+  birthtimeMs?: number;
   hidden: boolean;
 };
 
@@ -280,6 +282,20 @@ function entryType(info: {
   return "file";
 }
 
+export function birthtimeMsFromStat(birthtimeMs: number) {
+  if (!Number.isFinite(birthtimeMs)) return undefined;
+  const value = Math.trunc(birthtimeMs);
+  return value > 0 ? value : undefined;
+}
+
+function listedTimes(info: { mtimeMs: number; birthtimeMs: number }) {
+  const birthtimeMs = birthtimeMsFromStat(info.birthtimeMs);
+  return {
+    mtimeMs: Math.trunc(info.mtimeMs),
+    ...(birthtimeMs === undefined ? {} : { birthtimeMs })
+  };
+}
+
 async function withFileWriteLock<T>(key: string, action: () => Promise<T>): Promise<T> {
   const previous = fileWriteLocks.get(key) ?? Promise.resolve();
   let release!: () => void;
@@ -332,7 +348,7 @@ export async function listProjectDirectory(
         isSymbolicLink: () => dirent.isSymbolicLink() || info.isSymbolicLink()
       }),
       size: Number(info.size),
-      mtimeMs: Math.trunc(info.mtimeMs),
+      ...listedTimes(info),
       hidden: dirent.name.startsWith(".")
     });
   }
@@ -407,7 +423,7 @@ export async function statProjectFile(
     path: location.normalized,
     type,
     size: Number(info.size),
-    mtimeMs: Math.trunc(info.mtimeMs),
+    ...listedTimes(info),
     writable: await isWritable(location.targetPath),
     revision,
     text
@@ -914,7 +930,7 @@ async function listEntry(
     path: relative,
     type: entryType(info),
     size: Number(info.size),
-    mtimeMs: Math.trunc(info.mtimeMs),
+    ...listedTimes(info),
     hidden: path.posix.basename(relative).startsWith(".")
   };
 }

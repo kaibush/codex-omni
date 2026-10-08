@@ -86,6 +86,9 @@ import {
 import {
   ancestorPaths,
   compactSelectedPaths,
+  fileEntryDetailLine,
+  fileEntryRowMeta,
+  fileEntryTooltip,
   fileName,
   flattenVisibleFileEntries,
   isMarkdownFile,
@@ -147,6 +150,16 @@ function fileLookupIcon(mode: FileLookupMode, className: string) {
   if (mode === "content") return <TextSearch className={className} />;
   if (mode === "name") return <Search className={className} />;
   return <ListTree className={className} />;
+}
+
+function FileTreeMeta({ entry }: { entry: FileEntry }) {
+  const meta = fileEntryRowMeta(entry);
+  return (
+    <span className="file-tree-meta">
+      <span className="file-tree-size">{meta.size}</span>
+      <span className="file-tree-time">{meta.time}</span>
+    </span>
+  );
 }
 
 const fileIcon = (name: string) =>
@@ -1430,7 +1443,7 @@ function FilesWorkspace({
                   void deleteEntries(checkedPaths.size ? checkedPaths : [entry.path]);
                 }
               }}
-              title={isDirectory ? entry.path : "双击打开文件"}
+              title={fileEntryTooltip(entry)}
             >
               <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
                 {isDirectory ? (
@@ -1459,6 +1472,7 @@ function FilesWorkspace({
               {!isDirectory && !isDirty && isOpen ? (
                 <span className="size-1.5 rounded-full bg-primary/70" title="已打开" />
               ) : null}
+              <FileTreeMeta entry={entry} />
             </button>
             {renderMenu(entry)}
           </div>
@@ -1480,6 +1494,15 @@ function FilesWorkspace({
     });
   };
 
+  const selectedEntry = useMemo(() => {
+    const target = selectedPath ?? activePath;
+    if (!target) return null;
+    for (const entries of Object.values(directories)) {
+      const found = entries.find((entry) => entry.path === target);
+      if (found) return found;
+    }
+    return null;
+  }, [activePath, directories, selectedPath]);
   const draftSize = activeTab ? new TextEncoder().encode(activeTab.draft).byteLength : 0;
   const tooLarge = draftSize > MAX_EDITABLE_FILE_BYTES;
   const dirty = Boolean(activeTab && activeTab.draft !== activeTab.content);
@@ -1784,6 +1807,20 @@ function FilesWorkspace({
                 <p className="px-4 py-8 text-center text-xs text-muted-foreground">目录为空</p>
               )}
             </>
+          )}
+        </div>
+        <div className="file-tree-details">
+          {selectedEntry ? (
+            <>
+              <p className="truncate" title={selectedEntry.path || selectedEntry.name}>
+                {selectedEntry.path || selectedEntry.name}
+              </p>
+              <p className="truncate text-muted-foreground" title={fileEntryTooltip(selectedEntry)}>
+                {fileEntryDetailLine(selectedEntry)}
+              </p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">选择文件或文件夹，查看大小、修改时间和创建时间</p>
           )}
         </div>
       </aside>

@@ -1,9 +1,12 @@
+import { formatDataSize, formatDateTime } from "@/lib/utils";
+
 export type FileEntry = {
   name: string;
   path: string;
   type: "directory" | "file" | "symlink";
   size?: number;
   mtimeMs?: number;
+  birthtimeMs?: number;
   hidden?: boolean;
 };
 
@@ -28,6 +31,7 @@ export type FileMeta = {
   type: "file" | "directory" | "symlink";
   size: number;
   mtimeMs: number;
+  birthtimeMs?: number;
   writable: boolean;
   revision: string | null;
   text: boolean;
@@ -191,7 +195,10 @@ function positiveInt(value: string | undefined) {
 }
 
 export function parseFileLocation(inputPath: string) {
-  let raw = toPosixPath(inputPath).trim().replace(/^['"`]+/, "").replace(/['"`]+$/, "");
+  let raw = toPosixPath(inputPath)
+    .trim()
+    .replace(/^['"`]+/, "")
+    .replace(/['"`]+$/, "");
   if (/^file:\/\//i.test(raw)) {
     raw = raw.replace(/^file:\/\//i, "");
     if (raw.toLowerCase().startsWith("localhost")) raw = raw.slice("localhost".length);
@@ -270,12 +277,17 @@ function looksLikeRepoRelativeAbsolute(raw: string, roots: string[]) {
   return !roots.some((root) => firstPathSegment(root) === first);
 }
 
-export function toProjectRelativePath(inputPath: string, ...projectRoots: Array<string | null | undefined>) {
+export function toProjectRelativePath(
+  inputPath: string,
+  ...projectRoots: Array<string | null | undefined>
+) {
   const location = parseFileLocation(inputPath);
   const raw = location.path;
   if (!raw) return null;
   const roots = [
-    ...new Set(projectRoots.map((root) => toPosixPath(root ?? "").replace(/\/+$/, "")).filter(Boolean))
+    ...new Set(
+      projectRoots.map((root) => toPosixPath(root ?? "").replace(/\/+$/, "")).filter(Boolean)
+    )
   ];
   for (const root of roots) {
     const relative = relativeUnderRoot(raw, root);
@@ -377,6 +389,65 @@ export function flattenVisibleFileEntries(
   };
   walk("");
   return result;
+}
+
+export function fileEntryKindLabel(type: FileEntry["type"]) {
+  if (type === "directory") return "文件夹";
+  if (type === "symlink") return "链接";
+  return "文件";
+}
+
+export function fileEntrySizeText(entry: Pick<FileEntry, "type" | "size">, compact = false) {
+  if (entry.type !== "file") return "";
+  if (typeof entry.size !== "number" || !Number.isFinite(entry.size) || entry.size < 0) return "";
+  return formatDataSize(entry.size, compact);
+}
+
+export function formatFileListTime(value?: number | null, now = Date.now()) {
+  if (!value) return "";
+  const date = new Date(value);
+  const current = new Date(now);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (
+    date.getFullYear() === current.getFullYear() &&
+    date.getMonth() === current.getMonth() &&
+    date.getDate() === current.getDate()
+  ) {
+    return clock;
+  }
+  const monthDay = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  if (date.getFullYear() === current.getFullYear()) return monthDay;
+  return `${date.getFullYear()}-${monthDay}`;
+}
+
+export function fileEntryRowMeta(
+  entry: Pick<FileEntry, "type" | "size" | "mtimeMs">,
+  now = Date.now()
+) {
+  return {
+    size: fileEntrySizeText(entry, true),
+    time: formatFileListTime(entry.mtimeMs, now)
+  };
+}
+
+export function fileEntryDetailLine(entry: FileEntry) {
+  const parts = [fileEntryKindLabel(entry.type)];
+  const size = fileEntrySizeText(entry);
+  if (size) parts.push(size);
+  if (entry.mtimeMs) parts.push(`修改 ${formatDateTime(entry.mtimeMs)}`);
+  if (entry.birthtimeMs) parts.push(`创建 ${formatDateTime(entry.birthtimeMs)}`);
+  return parts.join(" · ");
+}
+
+export function fileEntryTooltip(entry: FileEntry) {
+  const lines = [entry.path || entry.name, `类型：${fileEntryKindLabel(entry.type)}`];
+  const size = fileEntrySizeText(entry);
+  if (size) lines.push(`大小：${size}`);
+  if (entry.mtimeMs) lines.push(`修改：${formatDateTime(entry.mtimeMs)}`);
+  if (entry.birthtimeMs) lines.push(`创建：${formatDateTime(entry.birthtimeMs)}`);
+  if (entry.type !== "directory") lines.push("双击打开");
+  return lines.join("\n");
 }
 
 export function fileName(relativePath: string) {

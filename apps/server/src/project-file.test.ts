@@ -1,5 +1,15 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -8,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 import {
   MAX_EDITABLE_FILE_BYTES,
+  birthtimeMsFromStat,
   compactDeletePaths,
   copyProjectEntry,
   createProjectEntry,
@@ -193,16 +204,43 @@ describe("project text files", () => {
   });
 });
 
+describe("project file timestamps", () => {
+  it("omits birth times the filesystem does not provide", () => {
+    expect(birthtimeMsFromStat(0)).toBeUndefined();
+    expect(birthtimeMsFromStat(Number.NaN)).toBeUndefined();
+    expect(birthtimeMsFromStat(-5)).toBeUndefined();
+    expect(birthtimeMsFromStat(1_700_000_000_000.8)).toBe(1_700_000_000_000);
+  });
+});
+
 describe("project file workspace operations", () => {
   it("lists directories with metadata and creates, renames, copies and deletes entries", async () => {
     const root = await fixture();
     const listed = await listProjectDirectory(root, "src");
     expect(listed.path).toBe("src");
+    const source = "export const value = 1;\n";
+    const info = await stat(path.join(root, "src", "index.ts"));
     expect(listed.entries).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "index.ts", type: "file", hidden: false })
+        expect.objectContaining({
+          name: "index.ts",
+          type: "file",
+          hidden: false,
+          size: Buffer.byteLength(source),
+          mtimeMs: Math.trunc(info.mtimeMs),
+          ...(birthtimeMsFromStat(info.birthtimeMs) === undefined
+            ? {}
+            : { birthtimeMs: birthtimeMsFromStat(info.birthtimeMs) })
+        })
       ])
     );
+    const listedFile = listed.entries.find((entry) => entry.name === "index.ts");
+    expect(listedFile?.birthtimeMs).toBe(birthtimeMsFromStat(info.birthtimeMs));
+    const rootListing = await listProjectDirectory(root, "");
+    const folder = rootListing.entries.find((entry) => entry.name === "src");
+    expect(folder).toMatchObject({ type: "directory" });
+    expect(folder?.mtimeMs).toBeGreaterThan(0);
+    expect(folder?.size).not.toBe(Buffer.byteLength(source));
 
     const file = await createProjectEntry({
       rootPath: root,

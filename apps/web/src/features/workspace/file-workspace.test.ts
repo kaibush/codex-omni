@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { formatDateTime } from "@/lib/utils";
 import {
   ancestorPaths,
   compactSelectedPaths,
+  fileEntryDetailLine,
+  fileEntryRowMeta,
+  fileEntryTooltip,
   flattenVisibleFileEntries,
+  formatFileListTime,
   joinProjectPath,
   parentProjectPath,
   parseFileLocation,
@@ -94,6 +99,48 @@ describe("file workspace helpers", () => {
         sort: "name"
       }).map((entry) => entry.path)
     ).toEqual(["src", "src/lib", "src/index.ts", "README.md"]);
+  });
+
+  it("describes file size and timestamps without using directory size", () => {
+    const now = new Date(2026, 9, 8, 16, 0).getTime();
+    const modified = new Date(2026, 9, 8, 14, 22).getTime();
+    const created = new Date(2026, 8, 1, 9, 10).getTime();
+    const file = {
+      name: "index.ts",
+      path: "src/index.ts",
+      type: "file" as const,
+      size: 1536,
+      mtimeMs: modified,
+      birthtimeMs: created
+    };
+    expect(formatFileListTime(modified, now)).toBe("14:22");
+    expect(formatFileListTime(new Date(2026, 0, 3, 1, 2).getTime(), now)).toBe("01-03");
+    expect(formatFileListTime(new Date(2025, 11, 31, 23, 59).getTime(), now)).toBe("2025-12-31");
+    expect(fileEntryRowMeta(file, now)).toEqual({ size: "1.5K", time: "14:22" });
+    expect(fileEntryDetailLine(file)).toBe(
+      `文件 · 1.5 KB · 修改 ${formatDateTime(modified)} · 创建 ${formatDateTime(created)}`
+    );
+    expect(fileEntryTooltip(file)).toBe(
+      [
+        "src/index.ts",
+        "类型：文件",
+        "大小：1.5 KB",
+        `修改：${formatDateTime(modified)}`,
+        `创建：${formatDateTime(created)}`,
+        "双击打开"
+      ].join("\n")
+    );
+    const folder = {
+      name: "src",
+      path: "src",
+      type: "directory" as const,
+      size: 4096,
+      mtimeMs: new Date(2026, 0, 3, 8, 0).getTime()
+    };
+    expect(fileEntryRowMeta(folder, now)).toEqual({ size: "", time: "01-03" });
+    expect(fileEntryDetailLine(folder)).toBe(`文件夹 · 修改 ${formatDateTime(folder.mtimeMs)}`);
+    expect(fileEntryTooltip(folder)).not.toContain("4096");
+    expect(fileEntryTooltip(folder)).not.toContain("双击打开");
   });
 
   it("classifies media and markdown preview kinds", () => {
