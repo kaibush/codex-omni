@@ -1,3 +1,4 @@
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowUpDown, Check, History, LoaderCircle } from "lucide-react";
 import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { api } from "@/lib/api";
 import { type SessionListSort } from "@/lib/session-title";
 import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
@@ -19,7 +21,33 @@ export const recentRunStatusLabel: Record<RecentRun["status"], string> = {
   interrupted: "已中断"
 };
 
-export function RecentSessionsToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function RecentSessionsToggle({
+  open,
+  onToggle,
+  tone = "float"
+}: {
+  open: boolean;
+  onToggle: () => void;
+  tone?: "float" | "header";
+}) {
+  const label = open ? "收起最近对话" : "最近对话";
+  if (tone === "header") {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        className={`h-8 shrink-0 rounded-lg px-2 ${open ? "bg-muted" : ""}`}
+        aria-pressed={open}
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        onClick={onToggle}
+      >
+        <History className="size-4" />
+        <span className="hidden lg:inline">最近</span>
+      </Button>
+    );
+  }
   return (
     <Button
       type="button"
@@ -28,8 +56,8 @@ export function RecentSessionsToggle({ open, onToggle }: { open: boolean; onTogg
       className={`timeline-recent-toggle ${open ? "is-open" : ""}`}
       aria-pressed={open}
       aria-expanded={open}
-      aria-label={open ? "收起最近对话" : "最近对话"}
-      title={open ? "收起最近对话" : "最近对话"}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
     >
       <History className="size-4" />
@@ -55,7 +83,7 @@ export function RecentSessionsPanel({
   activeSessionId?: string | undefined;
   sort?: SessionListSort;
   onSort?: (sort: SessionListSort) => void;
-  onOpen: (projectId: string, sessionId: string) => void;
+  onOpen: (projectId: string, sessionId: string, kind?: RecentRun["kind"]) => void;
   onClose: () => void;
 }) {
   if (!open) return null;
@@ -110,11 +138,11 @@ export function RecentSessionsPanel({
               title={[item.sessionTitle, item.projectName, item.providerName]
                 .filter(Boolean)
                 .join(" · ")}
-              onClick={() => onOpen(item.projectId, item.sessionId)}
+              onClick={() => onOpen(item.projectId, item.sessionId, item.kind)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") return;
                 event.preventDefault();
-                onOpen(item.projectId, item.sessionId);
+                onOpen(item.projectId, item.sessionId, item.kind);
               }}
             >
               <span className="timeline-recent-copy">
@@ -138,7 +166,9 @@ export function RecentSessionsPanel({
                       sort === "created" ? item.sessionCreatedAt : item.startedAt
                     )}`}
                   >
-                    {formatCompactDateTime(sort === "created" ? item.sessionCreatedAt : item.startedAt)}
+                    {formatCompactDateTime(
+                      sort === "created" ? item.sessionCreatedAt : item.startedAt
+                    )}
                   </span>
                 </span>
               </span>
@@ -147,5 +177,54 @@ export function RecentSessionsPanel({
         )}
       </nav>
     </>
+  );
+}
+
+export function RecentSessionsOverlay({
+  open,
+  activeSessionId,
+  sort = "created",
+  onSort,
+  onOpen,
+  onClose
+}: {
+  open: boolean;
+  activeSessionId?: string | undefined;
+  sort?: SessionListSort;
+  onSort?: (sort: SessionListSort) => void;
+  onOpen: (projectId: string, sessionId: string, kind?: RecentRun["kind"]) => void;
+  onClose: () => void;
+}) {
+  const recentSessionsQuery = useQuery({
+    queryKey: ["recent-run-sessions", 20, sort],
+    queryFn: () => api<RecentRun[]>(`/api/runs/recent-sessions?limit=20&sort=${sort}`),
+    enabled: open,
+    placeholderData: keepPreviousData,
+    refetchInterval: open ? 10_000 : false
+  });
+  if (!open) return null;
+  return (
+    <div className="workspace-recent-layer">
+      <RecentSessionsPanel
+        open
+        items={recentSessionsQuery.data ?? []}
+        sort={sort}
+        {...(onSort ? { onSort } : {})}
+        pending={recentSessionsQuery.isLoading}
+        error={
+          recentSessionsQuery.isError
+            ? recentSessionsQuery.error instanceof Error
+              ? recentSessionsQuery.error.message
+              : "最近对话加载失败"
+            : ""
+        }
+        activeSessionId={activeSessionId}
+        onOpen={(projectId, sessionId, kind) => {
+          onClose();
+          onOpen(projectId, sessionId, kind);
+        }}
+        onClose={onClose}
+      />
+    </div>
   );
 }

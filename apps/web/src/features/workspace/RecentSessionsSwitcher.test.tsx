@@ -29,17 +29,56 @@ const run: RecentRun = {
 
 describe("RecentSessionsSwitcher", () => {
   it("renders a fixed recent-sessions button beside the outline", () => {
-    const html = renderToStaticMarkup(<RecentSessionsToggle open={false} onToggle={() => undefined} />);
+    const html = renderToStaticMarkup(
+      <RecentSessionsToggle open={false} onToggle={() => undefined} />
+    );
     expect(html).toContain("最近对话");
     expect(html).toContain("timeline-recent-toggle");
     expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("renders a compact header button for pages outside the chat timeline", () => {
+    const html = renderToStaticMarkup(
+      <RecentSessionsToggle open={false} tone="header" onToggle={() => undefined} />
+    );
+    expect(html).toContain("最近对话");
+    expect(html).toContain("最近");
+    expect(html).toContain("rounded-lg");
+    expect(html).not.toContain("timeline-recent-toggle");
+  });
+
+  it("keeps the recent list mounted on the workspace shell, not only the chat timeline", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const workspace = readFileSync(join(dir, "Workspace.tsx"), "utf8");
+    const header = readFileSync(join(dir, "WorkspaceHeader.tsx"), "utf8");
+    const settings = readFileSync(join(dir, "SystemSettingsPage.tsx"), "utf8");
+    const timeline = readFileSync(join(dir, "WorkspaceTimeline.tsx"), "utf8");
+    const css = readFileSync(join(dir, "../../styles/index.css"), "utf8");
+    expect(header).toContain('tone="header"');
+    expect(workspace).toContain("<RecentSessionsOverlay");
+    expect(settings).toContain("<RecentSessionsOverlay");
+    expect(timeline).not.toContain("RecentSessionsToggle");
+    expect(timeline).not.toContain("recent-run-sessions");
+    expect(css).toMatch(/\.workspace-recent-layer \{[\s\S]*pointer-events: none;/);
+    expect(css).toMatch(
+      /\.workspace-recent-layer \.timeline-recent\.timeline-outline \{[\s\S]*top: 0\.5rem;/
+    );
   });
 
   it("lists running-center sessions and marks the active one", () => {
     const html = renderToStaticMarkup(
       <RecentSessionsPanel
         open
-        items={[run, { ...run, id: "run-2", sessionId: "session-2", sessionTitle: "看部署", status: "completed" }]}
+        items={[
+          run,
+          {
+            ...run,
+            id: "run-2",
+            sessionId: "session-2",
+            sessionTitle: "看部署",
+            status: "completed"
+          }
+        ]}
         pending={false}
         error=""
         activeSessionId="session-2"
@@ -64,16 +103,18 @@ describe("RecentSessionsSwitcher", () => {
     expect(html).toContain("timeline-recent-item is-active");
     expect(html).toContain("timeline-recent-copy");
     expect(html).toContain("timeline-recent-row");
-    expect(renderToStaticMarkup(
-      <RecentSessionsPanel
-        open={false}
-        items={[run]}
-        pending={false}
-        error=""
-        onOpen={() => undefined}
-        onClose={() => undefined}
-      />
-    )).toBe("");
+    expect(
+      renderToStaticMarkup(
+        <RecentSessionsPanel
+          open={false}
+          items={[run]}
+          pending={false}
+          error=""
+          onOpen={() => undefined}
+          onClose={() => undefined}
+        />
+      )
+    ).toBe("");
   });
 
   it("switches the visible time when sorting by the latest run", () => {
@@ -122,7 +163,10 @@ describe("RecentSessionsSwitcher", () => {
   });
 
   it("stacks title and meta so mobile rows cannot overlap", () => {
-    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../styles/index.css"), "utf8");
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles/index.css"),
+      "utf8"
+    );
     expect(css).toMatch(/\.timeline-recent\.timeline-outline\.is-open \{\s*display: block;/);
     expect(css).toMatch(/\.timeline-recent-copy \{[\s\S]*display: block;/);
     expect(css).toMatch(/\.timeline-recent-row \{[\s\S]*display: grid;/);
@@ -133,5 +177,27 @@ describe("RecentSessionsSwitcher", () => {
     expect(css).toMatch(/\.timeline-recent-title \{[\s\S]*font-weight: 400;/);
     expect(css).toMatch(/\.timeline-recent-title \{[\s\S]*color: inherit;/);
     expect(css).not.toMatch(/\.timeline-recent-item \{[^}]*min-height: 0/);
+  });
+
+  it("keeps recent actions on the first mobile row and moves the raw terminal tab aside", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const header = readFileSync(join(dir, "WorkspaceHeader.tsx"), "utf8");
+    const sidebar = readFileSync(join(dir, "WorkspaceSidebar.tsx"), "utf8");
+    const settings = readFileSync(join(dir, "SystemSettingsPage.tsx"), "utf8");
+    const css = readFileSync(join(dir, "../../styles/index.css"), "utf8");
+    expect(header).not.toContain('value="terminal"');
+    expect(header).toContain("workspace-header-actions");
+    expect(header).toContain("workspace-header-views");
+    expect(header).toContain("sm:order-3");
+    expect(header).toContain('aria-current="page"');
+    expect(header).toContain("打开终端");
+    expect(sidebar).toContain('aria-label="打开终端"');
+    expect(settings).toContain("settings-page-header");
+    expect(settings).toContain("sm:w-auto");
+    expect(css).toMatch(/\.settings-page-header \{[\s\S]*safe-area-inset-top/);
+    expect(css).toMatch(/\.workspace-header-views \{[\s\S]*overflow-x: auto/);
+    expect(css).toMatch(
+      /\.workspace-recent-layer \.timeline-outline \{[\s\S]*safe-area-inset-bottom/
+    );
   });
 });

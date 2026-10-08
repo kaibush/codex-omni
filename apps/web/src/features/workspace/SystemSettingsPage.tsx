@@ -39,9 +39,15 @@ import { useTheme } from "@/context/theme-provider";
 import { api } from "@/lib/api";
 import { joinDocumentTitle, useDocumentTitle } from "@/lib/document-title";
 import { workspacePath } from "@/lib/routes";
+import {
+  readSessionListSort,
+  writeSessionListSort,
+  type SessionListSort
+} from "@/lib/session-title";
 import { formatDataSize, formatUptime } from "@/lib/utils";
 import type { Project, PromptTemplate, Provider, ProviderHomeMode, RuntimeInfo } from "@/types";
 import { ApprovalAuditDialog } from "./ApprovalAuditDialog";
+import { RecentSessionsOverlay, RecentSessionsToggle } from "./RecentSessionsSwitcher";
 import { ProjectKnowledgeDialog } from "./ProjectKnowledgeDialog";
 import { ProviderDialog } from "./ProviderDialog";
 import { ScheduleDialog } from "./ScheduleDialog";
@@ -98,6 +104,11 @@ export function SystemSettingsPage() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
+  const [sessionSort, setSessionSort] = useState<SessionListSort>(readSessionListSort);
+  useEffect(() => {
+    writeSessionListSort(sessionSort);
+  }, [sessionSort]);
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: () => api<WorkspaceSettings>("/api/settings")
@@ -219,607 +230,643 @@ export function SystemSettingsPage() {
         </SheetContent>
       </Sheet>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 sm:px-4">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="lg:hidden"
-            aria-label="打开设置菜单"
-            onClick={() => setMenuOpen(true)}
-          >
-            <Menu className="size-4" />
-          </Button>
-          <h1 className="min-w-0 flex-1 truncate text-base font-bold tracking-tight sm:text-lg">
-            {active.title}
-          </h1>
-          <ThemeSwitch />
-          {dirty ? <Badge variant="warning">有未保存修改</Badge> : null}
-          {showSave ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!dirty || save.isPending}
-                onClick={() => setDraft(settings)}
-              >
-                <RotateCcw className="size-4" />
-                重置
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!dirty || save.isPending || settingsQuery.isPending}
-                onClick={() => save.mutate()}
-              >
-                <Save className="size-4" />
-                保存
-              </Button>
-            </>
+        <header className="settings-page-header flex shrink-0 flex-wrap items-center gap-2 border-b sm:flex-nowrap">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0 lg:hidden"
+              aria-label="打开设置菜单"
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu className="size-4" />
+            </Button>
+            <h1 className="min-w-0 flex-1 truncate text-base font-bold tracking-tight sm:text-lg">
+              {active.title}
+            </h1>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <RecentSessionsToggle
+              tone="header"
+              open={recentOpen}
+              onToggle={() => setRecentOpen((open) => !open)}
+            />
+            <ThemeSwitch />
+          </div>
+          {dirty || showSave ? (
+            <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
+              {dirty ? <Badge variant="warning">有未保存修改</Badge> : null}
+              {showSave ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!dirty || save.isPending}
+                    onClick={() => setDraft(settings)}
+                  >
+                    <RotateCcw className="size-4" />
+                    重置
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!dirty || save.isPending || settingsQuery.isPending}
+                    onClick={() => save.mutate()}
+                  >
+                    <Save className="size-4" />
+                    保存
+                  </Button>
+                </>
+              ) : null}
+            </div>
           ) : null}
         </header>
-        <SettingsMobileNav activeId={active.id} />
-        <div className="min-h-0 flex-1 overflow-auto px-3 py-4 sm:px-4 sm:py-5">
-          <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-            {active.id === "system-info" ? (
-              <>
-                <SettingsCard title="当前版本" description="后续检查更新时会对照这个版本号。">
-                  <SettingsFormGrid>
-                    <SettingsInfoRow label="应用" value="Codex Omni" />
-                    <SettingsInfoRow
-                      label="版本"
-                      value={runtimeQuery.data?.host.app.version || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      label="Node.js"
-                      value={runtimeQuery.data?.host.node || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      label="主机名"
-                      value={runtimeQuery.data?.host.hostname || "未读取"}
-                    />
-                  </SettingsFormGrid>
-                </SettingsCard>
-                <SettingsCard
-                  title="Codex 运行时"
-                  actions={<ClientIcon client="codex" className="size-5" />}
-                  description="对话使用工作台内置的 Codex SDK 和 CLI。PATH 上的 codex 只做对照，不会接管当前对话。"
-                >
-                  <SettingsFormGrid>
-                    <SettingsInfoRow
-                      label="内置 SDK"
-                      value={runtimeQuery.data?.codex?.sdkVersion || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      label="内置 CLI"
-                      value={runtimeQuery.data?.codex?.bundledCliVersion || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      label="PATH codex"
-                      value={runtimeQuery.data?.codex?.pathCliVersion || "未安装"}
-                    />
-                    <SettingsInfoRow
-                      label="npm 最新稳定版"
-                      value={runtimeQuery.data?.codex?.npmLatestVersion || "未读取"}
-                    />
-                  </SettingsFormGrid>
-                  {runtimeQuery.data?.codex?.warnings.length ? (
-                    <div className="mt-6 rounded-lg border bg-muted/40 p-3">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-                        <div className="space-y-2 text-sm leading-6">
-                          {runtimeQuery.data.codex.warnings.map((warning) => (
-                            <p key={warning}>{warning}</p>
-                          ))}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <RecentSessionsOverlay
+            open={recentOpen}
+            sort={sessionSort}
+            onSort={setSessionSort}
+            onClose={() => setRecentOpen(false)}
+            onOpen={(nextProjectId, nextSessionId) => {
+              setRecentOpen(false);
+              navigate(workspacePath(nextProjectId, nextSessionId));
+            }}
+          />
+          <SettingsMobileNav activeId={active.id} />
+          <div className="min-h-0 flex-1 overflow-auto px-3 py-4 sm:px-4 sm:py-5">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+              {active.id === "system-info" ? (
+                <>
+                  <SettingsCard title="当前版本" description="后续检查更新时会对照这个版本号。">
+                    <SettingsFormGrid>
+                      <SettingsInfoRow label="应用" value="Codex Omni" />
+                      <SettingsInfoRow
+                        label="版本"
+                        value={runtimeQuery.data?.host.app.version || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        label="Node.js"
+                        value={runtimeQuery.data?.host.node || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        label="主机名"
+                        value={runtimeQuery.data?.host.hostname || "未读取"}
+                      />
+                    </SettingsFormGrid>
+                  </SettingsCard>
+                  <SettingsCard
+                    title="Codex 运行时"
+                    actions={<ClientIcon client="codex" className="size-5" />}
+                    description="对话使用工作台内置的 Codex SDK 和 CLI。PATH 上的 codex 只做对照，不会接管当前对话。"
+                  >
+                    <SettingsFormGrid>
+                      <SettingsInfoRow
+                        label="内置 SDK"
+                        value={runtimeQuery.data?.codex?.sdkVersion || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        label="内置 CLI"
+                        value={runtimeQuery.data?.codex?.bundledCliVersion || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        label="PATH codex"
+                        value={runtimeQuery.data?.codex?.pathCliVersion || "未安装"}
+                      />
+                      <SettingsInfoRow
+                        label="npm 最新稳定版"
+                        value={runtimeQuery.data?.codex?.npmLatestVersion || "未读取"}
+                      />
+                    </SettingsFormGrid>
+                    {runtimeQuery.data?.codex?.warnings.length ? (
+                      <div className="mt-6 rounded-lg border bg-muted/40 p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                          <div className="space-y-2 text-sm leading-6">
+                            {runtimeQuery.data.codex.warnings.map((warning) => (
+                              <p key={warning}>{warning}</p>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ) : null}
-                </SettingsCard>
-                <SettingsCard
-                  title="Claude Code 运行时"
-                  actions={<ClientIcon client="claude-code" className="size-5" />}
-                  description="对话通过内置 Claude Agent SDK 调用，供应商配置相互独立。"
-                >
-                  <SettingsFormGrid>
-                    <SettingsInfoRow
-                      label="内置 SDK"
-                      value={runtimeQuery.data?.claude?.sdkVersion || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      label="内置 CLI"
-                      value={runtimeQuery.data?.claude?.bundledCliVersion || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      icon={Folder}
-                      label="系统 Claude 配置目录"
-                      value={runtimeQuery.data?.defaultClaudeHome || "未读取"}
-                    />
-                  </SettingsFormGrid>
-                </SettingsCard>
-                <SettingsCard
-                  title="主机资源"
-                  description="当前这台电脑的 CPU、内存和存储，每 30 秒自动刷新。"
-                >
-                  <SettingsFormGrid>
-                    <SettingsUsageBar
-                      label="CPU"
-                      value={runtimeQuery.data?.host.cpu.usage ?? 0}
-                      detail={
-                        runtimeQuery.data
-                          ? `${runtimeQuery.data.host.cpu.cores} 核 · ${runtimeQuery.data.host.cpu.model} · 负载 ${runtimeQuery.data.host.cpu.load1.toFixed(2)}`
-                          : "未读取"
-                      }
-                    />
-                    <SettingsUsageBar
-                      label="内存"
-                      value={runtimeQuery.data?.host.memory.usage ?? 0}
-                      detail={
-                        runtimeQuery.data
-                          ? `${formatDataSize(runtimeQuery.data.host.memory.used)} / ${formatDataSize(runtimeQuery.data.host.memory.total)}`
-                          : "未读取"
-                      }
-                    />
-                    <SettingsUsageBar
-                      label="存储"
-                      value={runtimeQuery.data?.host.storage.usage ?? 0}
-                      detail={
-                        runtimeQuery.data
-                          ? `${formatDataSize(runtimeQuery.data.host.storage.used)} / ${formatDataSize(runtimeQuery.data.host.storage.total)}`
-                          : "未读取"
-                      }
-                    />
-                    <SettingsInfoRow
-                      label="系统"
-                      value={
-                        runtimeQuery.data
-                          ? `${runtimeQuery.data.host.platform} ${runtimeQuery.data.host.arch} · ${runtimeQuery.data.host.release} · 已运行 ${formatUptime(runtimeQuery.data.host.uptimeSec)}`
-                          : "未读取"
-                      }
-                    />
-                  </SettingsFormGrid>
-                </SettingsCard>
-                <SettingsCard title="系统信息" description="当前工作台标识和运行目录。">
-                  <SettingsFormGrid>
-                    <SettingsInfoRow label="工作台" value="Codex Omni" />
-                    <SettingsInfoRow
-                      label="供应商"
-                      value={
-                        defaultProvider ? (
-                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span>{providers.length} 个</span>
-                            {providers
-                              .filter((provider) => provider.isDefault)
-                              .map((provider) => (
-                                <span key={provider.id} className="inline-flex items-center gap-1.5">
-                                  <ClientIcon client={clientType(provider.kind)} />
-                                  {clientName(provider.kind)} 默认 {provider.name}
-                                </span>
-                              ))}
-                          </span>
-                        ) : (
-                          "尚未配置"
-                        )
-                      }
-                    />
-                    <SettingsInfoRow
-                      icon={Folder}
-                      label="系统 CODEX_HOME"
-                      value={runtimeQuery.data?.defaultCodexHome || "未读取"}
-                    />
-                    <SettingsInfoRow
-                      icon={Folder}
-                      label="客户端目录"
-                      value={runtimeQuery.data?.clientsRoot || "未读取"}
-                    />
-                  </SettingsFormGrid>
-                </SettingsCard>
-                <SettingsCard title="当前运行策略" description="这些值可在「运行与权限」中修改。">
-                  <SettingsFormGrid>
-                    <SettingsInfoRow label="文件权限" value={sandboxLabel[settings.sandbox]} />
-                    <SettingsInfoRow
-                      label="审批策略"
-                      value={approvalLabel[settings.approvalPolicy]}
-                    />
-                    <SettingsInfoRow
-                      label="Plan / Execute"
-                      value={settings.executionMode === "plan" ? "Plan" : "Execute"}
-                    />
-                    <SettingsInfoRow
-                      label="网络访问"
-                      value={settings.networkAccessEnabled ? "允许" : "禁止"}
-                    />
-                  </SettingsFormGrid>
-                </SettingsCard>
-                <SettingsCard
-                  title="对话工具"
-                  description="任务看板和审批审计以小弹框打开，不进入独立设置页。"
-                >
-                  <div className="space-y-3">
-                    <SettingsField label="当前工程">
-                      <SettingsProjectSelect
-                        projects={projects}
-                        value={settingsProjectId}
-                        onValueChange={setSettingsProjectId}
+                    ) : null}
+                  </SettingsCard>
+                  <SettingsCard
+                    title="Claude Code 运行时"
+                    actions={<ClientIcon client="claude-code" className="size-5" />}
+                    description="对话通过内置 Claude Agent SDK 调用，供应商配置相互独立。"
+                  >
+                    <SettingsFormGrid>
+                      <SettingsInfoRow
+                        label="内置 SDK"
+                        value={runtimeQuery.data?.claude?.sdkVersion || "未读取"}
                       />
-                    </SettingsField>
+                      <SettingsInfoRow
+                        label="内置 CLI"
+                        value={runtimeQuery.data?.claude?.bundledCliVersion || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        icon={Folder}
+                        label="系统 Claude 配置目录"
+                        value={runtimeQuery.data?.defaultClaudeHome || "未读取"}
+                      />
+                    </SettingsFormGrid>
+                  </SettingsCard>
+                  <SettingsCard
+                    title="主机资源"
+                    description="当前这台电脑的 CPU、内存和存储，每 30 秒自动刷新。"
+                  >
+                    <SettingsFormGrid>
+                      <SettingsUsageBar
+                        label="CPU"
+                        value={runtimeQuery.data?.host.cpu.usage ?? 0}
+                        detail={
+                          runtimeQuery.data
+                            ? `${runtimeQuery.data.host.cpu.cores} 核 · ${runtimeQuery.data.host.cpu.model} · 负载 ${runtimeQuery.data.host.cpu.load1.toFixed(2)}`
+                            : "未读取"
+                        }
+                      />
+                      <SettingsUsageBar
+                        label="内存"
+                        value={runtimeQuery.data?.host.memory.usage ?? 0}
+                        detail={
+                          runtimeQuery.data
+                            ? `${formatDataSize(runtimeQuery.data.host.memory.used)} / ${formatDataSize(runtimeQuery.data.host.memory.total)}`
+                            : "未读取"
+                        }
+                      />
+                      <SettingsUsageBar
+                        label="存储"
+                        value={runtimeQuery.data?.host.storage.usage ?? 0}
+                        detail={
+                          runtimeQuery.data
+                            ? `${formatDataSize(runtimeQuery.data.host.storage.used)} / ${formatDataSize(runtimeQuery.data.host.storage.total)}`
+                            : "未读取"
+                        }
+                      />
+                      <SettingsInfoRow
+                        label="系统"
+                        value={
+                          runtimeQuery.data
+                            ? `${runtimeQuery.data.host.platform} ${runtimeQuery.data.host.arch} · ${runtimeQuery.data.host.release} · 已运行 ${formatUptime(runtimeQuery.data.host.uptimeSec)}`
+                            : "未读取"
+                        }
+                      />
+                    </SettingsFormGrid>
+                  </SettingsCard>
+                  <SettingsCard title="系统信息" description="当前工作台标识和运行目录。">
+                    <SettingsFormGrid>
+                      <SettingsInfoRow label="工作台" value="Codex Omni" />
+                      <SettingsInfoRow
+                        label="供应商"
+                        value={
+                          defaultProvider ? (
+                            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span>{providers.length} 个</span>
+                              {providers
+                                .filter((provider) => provider.isDefault)
+                                .map((provider) => (
+                                  <span
+                                    key={provider.id}
+                                    className="inline-flex items-center gap-1.5"
+                                  >
+                                    <ClientIcon client={clientType(provider.kind)} />
+                                    {clientName(provider.kind)} 默认 {provider.name}
+                                  </span>
+                                ))}
+                            </span>
+                          ) : (
+                            "尚未配置"
+                          )
+                        }
+                      />
+                      <SettingsInfoRow
+                        icon={Folder}
+                        label="系统 CODEX_HOME"
+                        value={runtimeQuery.data?.defaultCodexHome || "未读取"}
+                      />
+                      <SettingsInfoRow
+                        icon={Folder}
+                        label="客户端目录"
+                        value={runtimeQuery.data?.clientsRoot || "未读取"}
+                      />
+                    </SettingsFormGrid>
+                  </SettingsCard>
+                  <SettingsCard title="当前运行策略" description="这些值可在「运行与权限」中修改。">
+                    <SettingsFormGrid>
+                      <SettingsInfoRow label="文件权限" value={sandboxLabel[settings.sandbox]} />
+                      <SettingsInfoRow
+                        label="审批策略"
+                        value={approvalLabel[settings.approvalPolicy]}
+                      />
+                      <SettingsInfoRow
+                        label="Plan / Execute"
+                        value={settings.executionMode === "plan" ? "Plan" : "Execute"}
+                      />
+                      <SettingsInfoRow
+                        label="网络访问"
+                        value={settings.networkAccessEnabled ? "允许" : "禁止"}
+                      />
+                    </SettingsFormGrid>
+                  </SettingsCard>
+                  <SettingsCard
+                    title="对话工具"
+                    description="任务看板和审批审计以小弹框打开，不进入独立设置页。"
+                  >
+                    <div className="space-y-3">
+                      <SettingsField label="当前工程">
+                        <SettingsProjectSelect
+                          projects={projects}
+                          value={settingsProjectId}
+                          onValueChange={setSettingsProjectId}
+                        />
+                      </SettingsField>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!settingsProjectId}
+                          onClick={() => setTaskBoardOpen(true)}
+                        >
+                          <ListChecks className="size-4" />
+                          任务看板
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setApprovalOpen(true)}
+                        >
+                          <ShieldQuestion className="size-4" />
+                          审批审计
+                        </Button>
+                      </div>
+                    </div>
+                  </SettingsCard>
+                  <SettingsCard
+                    title="项目工具"
+                    description="项目规则、Skills/MCP 和定时任务也用小弹框打开，不做成设置子菜单。"
+                  >
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="outline"
                         disabled={!settingsProjectId}
-                        onClick={() => setTaskBoardOpen(true)}
+                        onClick={() => setKnowledgeOpen(true)}
                       >
-                        <ListChecks className="size-4" />
-                        任务看板
+                        <BookOpen className="size-4" />
+                        项目规则
                       </Button>
-                      <Button type="button" variant="outline" onClick={() => setApprovalOpen(true)}>
-                        <ShieldQuestion className="size-4" />
-                        审批审计
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!settingsProjectId}
+                        onClick={() => setSkillsOpen(true)}
+                      >
+                        <Blocks className="size-4" />
+                        Skills / MCP
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!settingsProjectId}
+                        onClick={() => setScheduleOpen(true)}
+                      >
+                        <Clock3 className="size-4" />
+                        定时任务
                       </Button>
                     </div>
-                  </div>
-                </SettingsCard>
+                  </SettingsCard>
+                </>
+              ) : null}
+
+              {active.id === "runtime" ? (
                 <SettingsCard
-                  title="项目工具"
-                  description="项目规则、Skills/MCP 和定时任务也用小弹框打开，不做成设置子菜单。"
+                  title="运行与权限"
+                  description="按客户端设置工具权限与能力，发送和重试策略由两种客户端共用。"
                 >
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!settingsProjectId}
-                      onClick={() => setKnowledgeOpen(true)}
-                    >
-                      <BookOpen className="size-4" />
-                      项目规则
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!settingsProjectId}
-                      onClick={() => setSkillsOpen(true)}
-                    >
-                      <Blocks className="size-4" />
-                      Skills / MCP
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!settingsProjectId}
-                      onClick={() => setScheduleOpen(true)}
-                    >
-                      <Clock3 className="size-4" />
-                      定时任务
-                    </Button>
-                  </div>
+                  <Tabs
+                    value={runtimeClient}
+                    onValueChange={(value) => setRuntimeClient(clientType(value))}
+                    className="mb-3"
+                  >
+                    <TabsList className="h-8 rounded-lg">
+                      <TabsTrigger value="codex">
+                        <ClientIcon client="codex" /> Codex
+                      </TabsTrigger>
+                      <TabsTrigger value="claude-code">
+                        <ClientIcon client="claude-code" /> Claude Code
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <RuntimeSettingsTabs
+                    settings={draft}
+                    onChange={setDraft}
+                    clientType={runtimeClient}
+                  />
                 </SettingsCard>
-              </>
-            ) : null}
+              ) : null}
 
-            {active.id === "runtime" ? (
-              <SettingsCard
-                title="运行与权限"
-                description="按客户端设置工具权限与能力，发送和重试策略由两种客户端共用。"
-              >
-                <Tabs
-                  value={runtimeClient}
-                  onValueChange={(value) => setRuntimeClient(clientType(value))}
-                  className="mb-3"
-                >
-                  <TabsList className="h-8 rounded-lg">
-                    <TabsTrigger value="codex">
-                      <ClientIcon client="codex" /> Codex
-                    </TabsTrigger>
-                    <TabsTrigger value="claude-code">
-                      <ClientIcon client="claude-code" /> Claude Code
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                <RuntimeSettingsTabs
-                  settings={draft}
-                  onChange={setDraft}
-                  clientType={runtimeClient}
-                />
-              </SettingsCard>
-            ) : null}
-
-            {active.id === "appearance" ? (
-              <SettingsCard title="界面与对话" description="只影响当前浏览器中的工作台显示。">
-                <SettingsFormGrid>
-                  <SettingsSelect
-                    label="工作区字号"
-                    hint="应用到侧栏、时间线和输入区。"
-                    value={String(draft.uiFontSize) as `${WorkspaceSettings["uiFontSize"]}`}
-                    onValueChange={(value) =>
-                      setDraft({
-                        ...draft,
-                        uiFontSize: Number(value) as WorkspaceSettings["uiFontSize"]
-                      })
-                    }
-                    options={[
-                      { value: "13", label: "13 · 紧凑" },
-                      { value: "14", label: "14 · 默认" },
-                      { value: "15", label: "15 · 稍大" },
-                      { value: "16", label: "16 · 大" },
-                      { value: "18", label: "18 · 更大" }
-                    ]}
-                  />
-                  <SettingsInfoRow
-                    label="主题"
-                    value={theme === "system" ? "跟随系统" : theme === "dark" ? "深色" : "浅色"}
-                  />
-                  <SettingsSelect
-                    label="时间线"
-                    hint="折叠合并思考和执行；平铺列出全部原始事件；展开则同时打开卡片。"
-                    value={draft.timelineView}
-                    onValueChange={(value) => setDraft({ ...draft, timelineView: value })}
-                    options={[
-                      { value: "folded", label: "折叠 · 合并思考和连续执行" },
-                      { value: "flat", label: "平铺 · 列出全部原始 Think 和工具" },
-                      { value: "expanded", label: "展开 · 列出并打开全部原始事件" }
-                    ]}
-                  />
-                  <SettingsSwitchField
-                    label="显示 reasoning 事件"
-                    description="折叠模式下是否展示思考卡片。平铺和展开会始终显示。"
-                    checked={draft.showReasoning}
-                    onCheckedChange={(checked) => setDraft({ ...draft, showReasoning: checked })}
-                  />
-                  <SettingsSwitchField
-                    label="默认展开工具调用"
-                    description="新的工具卡片默认展开详细输出。"
-                    checked={draft.expandToolCalls}
-                    onCheckedChange={(checked) => setDraft({ ...draft, expandToolCalls: checked })}
-                  />
-                  <SettingsSwitchField
-                    label="显示 Provider 标签"
-                    description="在消息上标注当前供应商。"
-                    checked={draft.showProviderLabels}
-                    onCheckedChange={(checked) =>
-                      setDraft({ ...draft, showProviderLabels: checked })
-                    }
-                  />
-                  <SettingsSwitchField
-                    label="Enter 发送消息"
-                    description="关闭后使用 Ctrl/Cmd + Enter 发送。"
-                    checked={draft.sendWithEnter}
-                    onCheckedChange={(checked) => setDraft({ ...draft, sendWithEnter: checked })}
-                  />
-                </SettingsFormGrid>
-              </SettingsCard>
-            ) : null}
-
-            {active.id === "updates" ? <SettingsUpdatesSection /> : null}
-
-            {active.id === "providers" ? (
-              <>
-                <SettingsCard
-                  title="供应商与模型"
-                  description="在此选择默认模型，或打开供应商管理进行新增、编辑和测试连接。"
-                  actions={
-                    <Button type="button" size="sm" onClick={() => setProviderOpen(true)}>
-                      <KeyRound className="size-4" />
-                      管理供应商
-                    </Button>
-                  }
-                >
-                  {providers.length ? (
-                    <div className="space-y-2">
-                      {providers.map((provider) => (
-                        <div
-                          key={provider.id}
-                          className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3"
-                        >
-                          <ClientIcon client={clientType(provider.kind)} labelled />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-sm font-medium">{provider.name}</p>
-                              {provider.isDefault ? <Badge variant="secondary">默认</Badge> : null}
-                              <Badge variant="outline">
-                                {homeModeLabel[provider.homeMode ?? "managed"]}
-                              </Badge>
-                            </div>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {provider.baseUrl || provider.runtimeHome || "未配置 Base URL"}
-                            </p>
-                          </div>
-                          <label className="grid min-w-40 gap-1">
-                            <span className="text-[11px] text-muted-foreground">默认模型</span>
-                            <Select
-                              value={provider.model || "__none__"}
-                              onValueChange={(value) =>
-                                void updateProviderModel(
-                                  provider,
-                                  value === "__none__" ? "" : value
-                                )
-                              }
-                            >
-                              <SelectTrigger className="w-full min-w-40">
-                                <SelectValue placeholder="未设置模型" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">未设置模型</SelectItem>
-                                {provider.models.map((model) => (
-                                  <SelectItem key={model} value={model}>
-                                    {model}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
-                      还没有供应商，点击「管理供应商」添加。
-                    </p>
-                  )}
-                </SettingsCard>
-                <SettingsCard
-                  title="供应商配置模板"
-                  description="新增托管供应商时使用。支持 {{name}}、{{model}}、{{baseUrl}}、{{apiKey}} 占位符，不要把真实密钥写进模板。"
-                >
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <label className="grid gap-1 text-sm font-medium">
-                      config.toml 模板
-                      <Textarea
-                        className="min-h-48 font-mono text-xs"
-                        value={draft.providerConfigTemplate}
-                        onChange={(event) =>
-                          setDraft({ ...draft, providerConfigTemplate: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="grid gap-1 text-sm font-medium">
-                      auth.json 模板
-                      <Textarea
-                        className="min-h-48 font-mono text-xs"
-                        value={draft.providerAuthTemplate}
-                        onChange={(event) =>
-                          setDraft({ ...draft, providerAuthTemplate: event.target.value })
-                        }
-                      />
-                    </label>
-                  </div>
-                </SettingsCard>
-              </>
-            ) : null}
-
-            {active.id === "templates" ? (
-              <>
-                <SettingsCard
-                  title="已保存模板"
-                  description="保存后可在输入框用斜杠命令展开。模板可用 {{input}}、{{date}}、{{project}}、{{session}}。"
-                >
-                  {(templatesQuery.data ?? []).length ? (
-                    <div className="space-y-2">
-                      {(templatesQuery.data ?? []).map((template) => (
-                        <div
-                          key={template.id}
-                          className="flex items-start gap-3 rounded-xl border px-3 py-3"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <strong className="text-sm font-medium">{template.name}</strong>
-                              {template.command ? (
-                                <code className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
-                                  {template.command}
-                                </code>
-                              ) : null}
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                              {template.content}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            aria-label={`编辑模板 ${template.name}`}
-                            onClick={() => {
-                              setEditingTemplateId(template.id);
-                              setTemplateName(template.name);
-                              setTemplateCommand(template.command ?? "");
-                              setTemplateContent(template.content);
-                            }}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            aria-label={`删除模板 ${template.name}`}
-                            onClick={() => {
-                              if (editingTemplateId === template.id) resetTemplateForm();
-                              deleteTemplate.mutate(template.id);
-                            }}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">还没有模板。</p>
-                  )}
-                </SettingsCard>
-                <SettingsCard title={editingTemplateId ? "编辑模板" : "新建模板"}>
+              {active.id === "appearance" ? (
+                <SettingsCard title="界面与对话" description="只影响当前浏览器中的工作台显示。">
                   <SettingsFormGrid>
-                    <SettingsField label="名称">
-                      <Input
-                        value={templateName}
-                        onChange={(event) => setTemplateName(event.target.value)}
-                        placeholder="代码审查"
-                      />
-                    </SettingsField>
-                    <SettingsField label="斜杠命令" hint="例如 /review">
-                      <Input
-                        className="font-mono"
-                        value={templateCommand}
-                        onChange={(event) => setTemplateCommand(event.target.value)}
-                        placeholder="/review"
-                      />
-                    </SettingsField>
-                    <SettingsField label="模板内容" span="full">
-                      <Textarea
-                        className="min-h-28"
-                        value={templateContent}
-                        onChange={(event) => setTemplateContent(event.target.value)}
-                        placeholder="请审查 {{project}} 在 {{date}} 的变更"
-                      />
-                    </SettingsField>
-                  </SettingsFormGrid>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {editingTemplateId ? (
-                      <Button type="button" variant="outline" onClick={resetTemplateForm}>
-                        取消编辑
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      disabled={
-                        !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
+                    <SettingsSelect
+                      label="工作区字号"
+                      hint="应用到侧栏、时间线和输入区。"
+                      value={String(draft.uiFontSize) as `${WorkspaceSettings["uiFontSize"]}`}
+                      onValueChange={(value) =>
+                        setDraft({
+                          ...draft,
+                          uiFontSize: Number(value) as WorkspaceSettings["uiFontSize"]
+                        })
                       }
-                      onClick={() => saveTemplate.mutate()}
-                    >
-                      <Plus className="size-4" />
-                      {editingTemplateId ? "更新模板" : "保存模板"}
-                    </Button>
-                  </div>
+                      options={[
+                        { value: "13", label: "13 · 紧凑" },
+                        { value: "14", label: "14 · 默认" },
+                        { value: "15", label: "15 · 稍大" },
+                        { value: "16", label: "16 · 大" },
+                        { value: "18", label: "18 · 更大" }
+                      ]}
+                    />
+                    <SettingsInfoRow
+                      label="主题"
+                      value={theme === "system" ? "跟随系统" : theme === "dark" ? "深色" : "浅色"}
+                    />
+                    <SettingsSelect
+                      label="时间线"
+                      hint="折叠合并思考和执行；平铺列出全部原始事件；展开则同时打开卡片。"
+                      value={draft.timelineView}
+                      onValueChange={(value) => setDraft({ ...draft, timelineView: value })}
+                      options={[
+                        { value: "folded", label: "折叠 · 合并思考和连续执行" },
+                        { value: "flat", label: "平铺 · 列出全部原始 Think 和工具" },
+                        { value: "expanded", label: "展开 · 列出并打开全部原始事件" }
+                      ]}
+                    />
+                    <SettingsSwitchField
+                      label="显示 reasoning 事件"
+                      description="折叠模式下是否展示思考卡片。平铺和展开会始终显示。"
+                      checked={draft.showReasoning}
+                      onCheckedChange={(checked) => setDraft({ ...draft, showReasoning: checked })}
+                    />
+                    <SettingsSwitchField
+                      label="默认展开工具调用"
+                      description="新的工具卡片默认展开详细输出。"
+                      checked={draft.expandToolCalls}
+                      onCheckedChange={(checked) =>
+                        setDraft({ ...draft, expandToolCalls: checked })
+                      }
+                    />
+                    <SettingsSwitchField
+                      label="显示 Provider 标签"
+                      description="在消息上标注当前供应商。"
+                      checked={draft.showProviderLabels}
+                      onCheckedChange={(checked) =>
+                        setDraft({ ...draft, showProviderLabels: checked })
+                      }
+                    />
+                    <SettingsSwitchField
+                      label="Enter 发送消息"
+                      description="关闭后使用 Ctrl/Cmd + Enter 发送。"
+                      checked={draft.sendWithEnter}
+                      onCheckedChange={(checked) => setDraft({ ...draft, sendWithEnter: checked })}
+                    />
+                  </SettingsFormGrid>
                 </SettingsCard>
-              </>
-            ) : null}
+              ) : null}
 
-            {active.id === "account" ? (
-              <SettingsCard title="当前账户" description="退出后需要重新登录才能访问工作区。">
-                <SettingsFormGrid>
-                  <SettingsInfoRow
-                    label="用户名"
-                    value={sessionQuery.data?.user?.username || "已登录"}
-                  />
-                  <SettingsInfoRow
-                    label="角色"
-                    value={sessionQuery.data?.user?.role === "admin" ? "管理员" : "用户"}
-                  />
-                </SettingsFormGrid>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="mt-6"
-                  onClick={async () => {
-                    await api("/api/auth/logout", { method: "POST" });
-                    window.location.assign("/");
-                  }}
-                >
-                  <LogOut className="size-4" />
-                  退出登录
-                </Button>
-              </SettingsCard>
-            ) : null}
+              {active.id === "updates" ? <SettingsUpdatesSection /> : null}
+
+              {active.id === "providers" ? (
+                <>
+                  <SettingsCard
+                    title="供应商与模型"
+                    description="在此选择默认模型，或打开供应商管理进行新增、编辑和测试连接。"
+                    actions={
+                      <Button type="button" size="sm" onClick={() => setProviderOpen(true)}>
+                        <KeyRound className="size-4" />
+                        管理供应商
+                      </Button>
+                    }
+                  >
+                    {providers.length ? (
+                      <div className="space-y-2">
+                        {providers.map((provider) => (
+                          <div
+                            key={provider.id}
+                            className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3"
+                          >
+                            <ClientIcon client={clientType(provider.kind)} labelled />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium">{provider.name}</p>
+                                {provider.isDefault ? (
+                                  <Badge variant="secondary">默认</Badge>
+                                ) : null}
+                                <Badge variant="outline">
+                                  {homeModeLabel[provider.homeMode ?? "managed"]}
+                                </Badge>
+                              </div>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {provider.baseUrl || provider.runtimeHome || "未配置 Base URL"}
+                              </p>
+                            </div>
+                            <label className="grid min-w-40 gap-1">
+                              <span className="text-[11px] text-muted-foreground">默认模型</span>
+                              <Select
+                                value={provider.model || "__none__"}
+                                onValueChange={(value) =>
+                                  void updateProviderModel(
+                                    provider,
+                                    value === "__none__" ? "" : value
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="w-full min-w-40">
+                                  <SelectValue placeholder="未设置模型" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">未设置模型</SelectItem>
+                                  {provider.models.map((model) => (
+                                    <SelectItem key={model} value={model}>
+                                      {model}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
+                        还没有供应商，点击「管理供应商」添加。
+                      </p>
+                    )}
+                  </SettingsCard>
+                  <SettingsCard
+                    title="供应商配置模板"
+                    description="新增托管供应商时使用。支持 {{name}}、{{model}}、{{baseUrl}}、{{apiKey}} 占位符，不要把真实密钥写进模板。"
+                  >
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      <label className="grid gap-1 text-sm font-medium">
+                        config.toml 模板
+                        <Textarea
+                          className="min-h-48 font-mono text-xs"
+                          value={draft.providerConfigTemplate}
+                          onChange={(event) =>
+                            setDraft({ ...draft, providerConfigTemplate: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-medium">
+                        auth.json 模板
+                        <Textarea
+                          className="min-h-48 font-mono text-xs"
+                          value={draft.providerAuthTemplate}
+                          onChange={(event) =>
+                            setDraft({ ...draft, providerAuthTemplate: event.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                  </SettingsCard>
+                </>
+              ) : null}
+
+              {active.id === "templates" ? (
+                <>
+                  <SettingsCard
+                    title="已保存模板"
+                    description="保存后可在输入框用斜杠命令展开。模板可用 {{input}}、{{date}}、{{project}}、{{session}}。"
+                  >
+                    {(templatesQuery.data ?? []).length ? (
+                      <div className="space-y-2">
+                        {(templatesQuery.data ?? []).map((template) => (
+                          <div
+                            key={template.id}
+                            className="flex items-start gap-3 rounded-xl border px-3 py-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <strong className="text-sm font-medium">{template.name}</strong>
+                                {template.command ? (
+                                  <code className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
+                                    {template.command}
+                                  </code>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                                {template.content}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              aria-label={`编辑模板 ${template.name}`}
+                              onClick={() => {
+                                setEditingTemplateId(template.id);
+                                setTemplateName(template.name);
+                                setTemplateCommand(template.command ?? "");
+                                setTemplateContent(template.content);
+                              }}
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              aria-label={`删除模板 ${template.name}`}
+                              onClick={() => {
+                                if (editingTemplateId === template.id) resetTemplateForm();
+                                deleteTemplate.mutate(template.id);
+                              }}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">还没有模板。</p>
+                    )}
+                  </SettingsCard>
+                  <SettingsCard title={editingTemplateId ? "编辑模板" : "新建模板"}>
+                    <SettingsFormGrid>
+                      <SettingsField label="名称">
+                        <Input
+                          value={templateName}
+                          onChange={(event) => setTemplateName(event.target.value)}
+                          placeholder="代码审查"
+                        />
+                      </SettingsField>
+                      <SettingsField label="斜杠命令" hint="例如 /review">
+                        <Input
+                          className="font-mono"
+                          value={templateCommand}
+                          onChange={(event) => setTemplateCommand(event.target.value)}
+                          placeholder="/review"
+                        />
+                      </SettingsField>
+                      <SettingsField label="模板内容" span="full">
+                        <Textarea
+                          className="min-h-28"
+                          value={templateContent}
+                          onChange={(event) => setTemplateContent(event.target.value)}
+                          placeholder="请审查 {{project}} 在 {{date}} 的变更"
+                        />
+                      </SettingsField>
+                    </SettingsFormGrid>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {editingTemplateId ? (
+                        <Button type="button" variant="outline" onClick={resetTemplateForm}>
+                          取消编辑
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        disabled={
+                          !templateName.trim() || !templateContent.trim() || saveTemplate.isPending
+                        }
+                        onClick={() => saveTemplate.mutate()}
+                      >
+                        <Plus className="size-4" />
+                        {editingTemplateId ? "更新模板" : "保存模板"}
+                      </Button>
+                    </div>
+                  </SettingsCard>
+                </>
+              ) : null}
+
+              {active.id === "account" ? (
+                <SettingsCard title="当前账户" description="退出后需要重新登录才能访问工作区。">
+                  <SettingsFormGrid>
+                    <SettingsInfoRow
+                      label="用户名"
+                      value={sessionQuery.data?.user?.username || "已登录"}
+                    />
+                    <SettingsInfoRow
+                      label="角色"
+                      value={sessionQuery.data?.user?.role === "admin" ? "管理员" : "用户"}
+                    />
+                  </SettingsFormGrid>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="mt-6"
+                    onClick={async () => {
+                      await api("/api/auth/logout", { method: "POST" });
+                      window.location.assign("/");
+                    }}
+                  >
+                    <LogOut className="size-4" />
+                    退出登录
+                  </Button>
+                </SettingsCard>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

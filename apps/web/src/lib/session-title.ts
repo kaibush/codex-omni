@@ -28,6 +28,24 @@ export function listHistoricalSessions<T extends { title: string }>(sessions: T[
 
 export type SessionListSort = "created" | "updated";
 
+const SESSION_SORT_KEY = "codex-omni:session-sort";
+
+export function readSessionListSort(): SessionListSort {
+  try {
+    return localStorage.getItem(SESSION_SORT_KEY) === "updated" ? "updated" : "created";
+  } catch {
+    return "created";
+  }
+}
+
+export function writeSessionListSort(sort: SessionListSort) {
+  try {
+    localStorage.setItem(SESSION_SORT_KEY, sort);
+  } catch {
+    // private browsing
+  }
+}
+
 export function sessionRecency(session: {
   createdAt: number;
   updatedAt?: number;

@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -88,6 +97,7 @@ import {
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
   encodeTerminalComposerChunks,
+  insertComposerNewline,
   encodeTerminalModifiedInput,
   TERMINAL_COMPOSER_SUBMIT_DELAY_MS,
   filterCommandHistory,
@@ -145,8 +155,12 @@ function fileDragHandlers(
       event.dataTransfer.dropEffect = "copy";
       setDragActive(true);
     },
-    onDragLeave: (event: { currentTarget: EventTarget & { contains: (node: Node) => boolean }; relatedTarget: EventTarget | null; }) => {
-      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    onDragLeave: (event: {
+      currentTarget: EventTarget & { contains: (node: Node) => boolean };
+      relatedTarget: EventTarget | null;
+    }) => {
+      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))
+        return;
       setDragActive(false);
     },
     onDrop: (event: { dataTransfer: DataTransfer; preventDefault: () => void }) => {
@@ -281,61 +295,88 @@ function TerminalChatViewport({
   const addAttachmentsRef = useRef<(files: FileLike[]) => Promise<void>>(async () => {});
   const pendingSubmitTimer = useRef<number | null>(null);
 
-  const sendRaw = useCallback((data: string) => {
-    if (!data) return;
-    const ws = socket.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "terminal.input", terminalId: session.id, data }));
-  }, [session.id]);
+  const sendRaw = useCallback(
+    (data: string) => {
+      if (!data) return;
+      const ws = socket.current;
+      if (ws?.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: "terminal.input", terminalId: session.id, data }));
+    },
+    [session.id]
+  );
   const flushPendingComposerSubmit = useCallback(() => {
     if (pendingSubmitTimer.current == null) return;
     window.clearTimeout(pendingSubmitTimer.current);
     pendingSubmitTimer.current = null;
     sendRaw("\r");
   }, [sendRaw]);
-  const sendComposerPayload = useCallback((value: string, autoEnter: boolean) => {
-    const chunks = encodeTerminalComposerChunks(value, autoEnter);
-    if (!chunks.length) return;
-    flushPendingComposerSubmit();
-    sendRaw(chunks[0]!);
-    if (chunks.length < 2) return;
-    pendingSubmitTimer.current = window.setTimeout(() => {
-      pendingSubmitTimer.current = null;
-      sendRaw(chunks[1]!);
-    }, TERMINAL_COMPOSER_SUBMIT_DELAY_MS);
-  }, [flushPendingComposerSubmit, sendRaw]);
+  const sendComposerPayload = useCallback(
+    (value: string, autoEnter: boolean) => {
+      const chunks = encodeTerminalComposerChunks(value, autoEnter);
+      if (!chunks.length) return;
+      flushPendingComposerSubmit();
+      sendRaw(chunks[0]!);
+      if (chunks.length < 2) return;
+      pendingSubmitTimer.current = window.setTimeout(() => {
+        pendingSubmitTimer.current = null;
+        sendRaw(chunks[1]!);
+      }, TERMINAL_COMPOSER_SUBMIT_DELAY_MS);
+    },
+    [flushPendingComposerSubmit, sendRaw]
+  );
 
-  const sendInput = useCallback((rawData: string, applyLatchedModifiers = true) => {
-    flushPendingComposerSubmit();
-    const data = applyLatchedModifiers
-      ? encodeTerminalModifiedInput(rawData, { ctrl: ctrlRef.current, alt: altRef.current, shift: shiftRef.current })
-      : rawData;
-    if (applyLatchedModifiers) {
-      if (ctrlRef.current && !stickyRef.current.ctrl) {
-        ctrlRef.current = false;
-        setCtrl(false);
+  const sendInput = useCallback(
+    (rawData: string, applyLatchedModifiers = true) => {
+      flushPendingComposerSubmit();
+      const data = applyLatchedModifiers
+        ? encodeTerminalModifiedInput(rawData, {
+            ctrl: ctrlRef.current,
+            alt: altRef.current,
+            shift: shiftRef.current
+          })
+        : rawData;
+      if (applyLatchedModifiers) {
+        if (ctrlRef.current && !stickyRef.current.ctrl) {
+          ctrlRef.current = false;
+          setCtrl(false);
+        }
+        if (altRef.current && !stickyRef.current.alt) {
+          altRef.current = false;
+          setAlt(false);
+        }
+        if (shiftRef.current && !stickyRef.current.shift) {
+          shiftRef.current = false;
+          setShift(false);
+        }
       }
-      if (altRef.current && !stickyRef.current.alt) {
-        altRef.current = false;
-        setAlt(false);
-      }
-      if (shiftRef.current && !stickyRef.current.shift) {
-        shiftRef.current = false;
-        setShift(false);
-      }
-    }
-    sendRaw(data);
-  }, [flushPendingComposerSubmit, sendRaw]);
+      sendRaw(data);
+    },
+    [flushPendingComposerSubmit, sendRaw]
+  );
   const sendInputRef = useRef(sendInput);
   sendInputRef.current = sendInput;
 
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-  useEffect(() => { ctrlRef.current = ctrl; }, [ctrl]);
-  useEffect(() => { altRef.current = alt; }, [alt]);
-  useEffect(() => { shiftRef.current = shift; }, [shift]);
-  useEffect(() => { stickyRef.current = sticky; }, [sticky]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  useEffect(() => {
+    ctrlRef.current = ctrl;
+  }, [ctrl]);
+  useEffect(() => {
+    altRef.current = alt;
+  }, [alt]);
+  useEffect(() => {
+    shiftRef.current = shift;
+  }, [shift]);
+  useEffect(() => {
+    stickyRef.current = sticky;
+  }, [sticky]);
   useEffect(() => {
     try {
-      window.localStorage.setItem("codex-omni:terminal-chat-composer-open", composerOpen ? "1" : "0");
+      window.localStorage.setItem(
+        "codex-omni:terminal-chat-composer-open",
+        composerOpen ? "1" : "0"
+      );
     } catch {
       // Storage can be unavailable in private browsing.
     }
@@ -358,7 +399,10 @@ function TerminalChatViewport({
     try {
       const stored = window.localStorage.getItem(`terminal-command-history:${session.id}`);
       const parsed: unknown = stored ? JSON.parse(stored) : null;
-      if (Array.isArray(parsed)) setCommandHistory(parsed.filter((item): item is string => typeof item === "string").slice(0, 200));
+      if (Array.isArray(parsed))
+        setCommandHistory(
+          parsed.filter((item): item is string => typeof item === "string").slice(0, 200)
+        );
     } catch {
       setCommandHistory([]);
     }
@@ -381,7 +425,9 @@ function TerminalChatViewport({
   const loadCommandHistory = async () => {
     setHistoryLoading(true);
     try {
-      const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/history?limit=5000`);
+      const result = await api<{ items: TerminalHistoryItem[] }>(
+        `/api/terminal-sessions/${session.id}/history?limit=5000`
+      );
       const serverCommands = result.items
         .filter((item) => item.kind === "input")
         .map((item) => item.data.replace(/[\r\n]+$/g, "").trim())
@@ -391,7 +437,10 @@ function TerminalChatViewport({
           .filter((item, index, list) => item && list.indexOf(item) === index)
           .slice(0, 200);
         try {
-          window.localStorage.setItem(`terminal-command-history:${session.id}`, JSON.stringify(next));
+          window.localStorage.setItem(
+            `terminal-command-history:${session.id}`,
+            JSON.stringify(next)
+          );
         } catch {
           // Storage can be unavailable in private browsing.
         }
@@ -443,7 +492,12 @@ function TerminalChatViewport({
           lineRef.current?.focus();
           return;
         }
-        if (shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+        if (
+          shouldFocusTerminalAfterChromeAction({
+            pointerType: lastPointerType.current,
+            coarsePointer: isCoarsePointer()
+          })
+        ) {
           terminal.current?.focus();
         }
       }, 0);
@@ -467,9 +521,21 @@ function TerminalChatViewport({
     const onPointerDown = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (historyOpen && (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target))) return;
-      if (shortcutOpen && (shortcutPanelRef.current?.contains(target) || shortcutButtonRef.current?.contains(target))) return;
-      if (searchOpen && (searchPanelRef.current?.contains(target) || searchButtonRef.current?.contains(target))) return;
+      if (
+        historyOpen &&
+        (historyPanelRef.current?.contains(target) || historyButtonRef.current?.contains(target))
+      )
+        return;
+      if (
+        shortcutOpen &&
+        (shortcutPanelRef.current?.contains(target) || shortcutButtonRef.current?.contains(target))
+      )
+        return;
+      if (
+        searchOpen &&
+        (searchPanelRef.current?.contains(target) || searchButtonRef.current?.contains(target))
+      )
+        return;
       setHistoryOpen(false);
       setShortcutOpen(false);
       setSearchOpen(false);
@@ -509,14 +575,22 @@ function TerminalChatViewport({
     instance.loadAddon(fit);
     instance.open(element);
     terminal.current = instance;
-    if (active && shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) instance.focus();
+    if (active && shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() }))
+      instance.focus();
     const detachTouchScroll = attachTerminalTouchScroll(element, () => terminal.current);
     const fitTerminal = () => {
       if (!canFitTerminal(element.clientWidth, element.clientHeight)) return;
       try {
         fit.fit();
         if (socket.current?.readyState === WebSocket.OPEN) {
-          socket.current.send(JSON.stringify({ type: "terminal.resize", terminalId: session.id, cols: instance.cols, rows: instance.rows }));
+          socket.current.send(
+            JSON.stringify({
+              type: "terminal.resize",
+              terminalId: session.id,
+              cols: instance.cols,
+              rows: instance.rows
+            })
+          );
         }
       } catch {
         // Hidden while switching workspace tabs.
@@ -550,7 +624,13 @@ function TerminalChatViewport({
       ws.onopen = () => {
         attempts.current = 0;
         setConnected(true);
-        ws.send(JSON.stringify({ type: "terminal.subscribe", terminalId: session.id, lastSeq: lastSeq.current }));
+        ws.send(
+          JSON.stringify({
+            type: "terminal.subscribe",
+            terminalId: session.id,
+            lastSeq: lastSeq.current
+          })
+        );
         fitTerminal();
       };
       ws.onmessage = (event) => {
@@ -558,13 +638,18 @@ function TerminalChatViewport({
         if (message.terminalId && message.terminalId !== session.id) return;
         if (message.type === "terminal.snapshot") {
           const output = String(message.payload?.output ?? "");
-          const nextPid = typeof message.payload?.terminal?.pid === "number" ? message.payload.terminal.pid : null;
-          const reset = freshTerminal || shouldResetTerminalSnapshot({
-            replay: Boolean(message.payload?.replay),
-            truncated: Boolean(message.payload?.truncated),
-            previousPid: lastPidRef.current,
-            nextPid
-          });
+          const nextPid =
+            typeof message.payload?.terminal?.pid === "number"
+              ? message.payload.terminal.pid
+              : null;
+          const reset =
+            freshTerminal ||
+            shouldResetTerminalSnapshot({
+              replay: Boolean(message.payload?.replay),
+              truncated: Boolean(message.payload?.truncated),
+              previousPid: lastPidRef.current,
+              nextPid
+            });
           freshTerminal = false;
           if (reset) {
             instance.reset();
@@ -588,11 +673,17 @@ function TerminalChatViewport({
         } else if (message.type === "terminal.output") {
           if (typeof message.seq === "number" && message.seq <= lastSeq.current) return;
           instance.write(String(message.payload?.data ?? ""));
-          outputRef.current = `${outputRef.current}${String(message.payload?.data ?? "")}`.slice(-4 * 1024 * 1024);
+          outputRef.current = `${outputRef.current}${String(message.payload?.data ?? "")}`.slice(
+            -4 * 1024 * 1024
+          );
           if (typeof message.seq === "number") lastSeq.current = message.seq;
         } else if (message.type === "terminal.exit") {
           lastPidRef.current = null;
-          applyChange({ state: "exited", pid: null, lastExitCode: message.payload?.exitCode ?? null });
+          applyChange({
+            state: "exited",
+            pid: null,
+            lastExitCode: message.payload?.exitCode ?? null
+          });
           instance.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n");
         } else if (message.type === "terminal.state") {
           applyChange(message.payload ?? {});
@@ -605,8 +696,7 @@ function TerminalChatViewport({
             }
             lastPidRef.current = nextPid;
           }
-        }
-        else if (message.type === "terminal.marker") {
+        } else if (message.type === "terminal.marker") {
           const text = String(message.payload?.text ?? "状态更新");
           if (text.includes("已重启")) {
             instance.reset();
@@ -622,7 +712,10 @@ function TerminalChatViewport({
         if (disposed || !pageVisibleRef.current) return;
         setConnected(false);
         attempts.current += 1;
-        reconnect.current = window.setTimeout(connect, Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4)));
+        reconnect.current = window.setTimeout(
+          connect,
+          Math.min(8000, 500 * 2 ** Math.min(attempts.current, 4))
+        );
       };
       ws.onerror = () => setConnected(false);
     };
@@ -678,22 +771,37 @@ function TerminalChatViewport({
     return scheduleTerminalFit(() => {
       fitRef.current();
       refreshTerminal(terminal.current);
-      if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() })) terminal.current?.focus();
+      if (shouldFocusTerminalAfterChromeAction({ coarsePointer: isCoarsePointer() }))
+        terminal.current?.focus();
     });
   }, [active]);
 
   const focusTerminalIfAppropriate = () => {
-    if (shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+    if (
+      shouldFocusTerminalAfterChromeAction({
+        pointerType: lastPointerType.current,
+        coarsePointer: isCoarsePointer()
+      })
+    ) {
       terminal.current?.focus();
       return;
     }
     terminal.current?.blur();
   };
-  const rememberChromePointer = (event: { preventDefault: () => void; pointerType: string; clientX: number }) => {
+  const rememberChromePointer = (event: {
+    preventDefault: () => void;
+    pointerType: string;
+    clientX: number;
+  }) => {
     if (shouldPreventChromePointerDefault(event.pointerType)) event.preventDefault();
     lastPointerType.current = event.pointerType;
     chromePointerStartX.current = event.clientX;
-    if (!shouldFocusTerminalAfterChromeAction({ pointerType: event.pointerType, coarsePointer: isCoarsePointer() })) {
+    if (
+      !shouldFocusTerminalAfterChromeAction({
+        pointerType: event.pointerType,
+        coarsePointer: isCoarsePointer()
+      })
+    ) {
       terminal.current?.blur();
     }
   };
@@ -768,8 +876,24 @@ function TerminalChatViewport({
     },
     onDoubleClick: () => toggleModifier(key, true)
   });
-  const shortcut = (label: string, data: string, title?: string, repeat = false, className = padKeyClass, applyModifiers = true) => (
-    <button type="button" className={className} title={title ?? label} aria-label={title ?? label} {...chromeActivateProps(() => { sendInput(data, applyModifiers); focusTerminalIfAppropriate(); }, repeat)}>
+  const shortcut = (
+    label: string,
+    data: string,
+    title?: string,
+    repeat = false,
+    className = padKeyClass,
+    applyModifiers = true
+  ) => (
+    <button
+      type="button"
+      className={className}
+      title={title ?? label}
+      aria-label={title ?? label}
+      {...chromeActivateProps(() => {
+        sendInput(data, applyModifiers);
+        focusTerminalIfAppropriate();
+      }, repeat)}
+    >
       {label}
     </button>
   );
@@ -786,11 +910,15 @@ function TerminalChatViewport({
     const start = Math.max(0, buffer.viewportY);
     const lines: string[] = [];
     const end = Math.min(buffer.length, start + term.rows);
-    for (let index = start; index < end; index += 1) lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
+    for (let index = start; index < end; index += 1)
+      lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
     return joinVisibleLines(lines);
   };
   const copyFromTerminal = () => {
-    const payload = terminalCopyPayload(terminal.current?.getSelection() ?? "", readVisibleBufferText());
+    const payload = terminalCopyPayload(
+      terminal.current?.getSelection() ?? "",
+      readVisibleBufferText()
+    );
     if (!payload.text) {
       toast.error(payload.message);
       return;
@@ -812,11 +940,14 @@ function TerminalChatViewport({
     setPasteDraft("");
     setPasteOpen(true);
     if (!navigator.clipboard?.readText) return;
-    void navigator.clipboard.readText().then((value) => {
-      if (value) setPasteDraft(value);
-    }).catch(() => {
-      // iOS / insecure origins cannot read the clipboard; the dialog is the fallback.
-    });
+    void navigator.clipboard
+      .readText()
+      .then((value) => {
+        if (value) setPasteDraft(value);
+      })
+      .catch(() => {
+        // iOS / insecure origins cannot read the clipboard; the dialog is the fallback.
+      });
   };
   const pasteIntoTerminal = () => {
     openPasteDialog();
@@ -921,7 +1052,13 @@ function TerminalChatViewport({
       }
       rememberCommand(command);
       sendComposerPayload(command, autoEnter);
-      if (!autoEnter && shouldFocusTerminalAfterChromeAction({ pointerType: lastPointerType.current, coarsePointer: isCoarsePointer() })) {
+      if (
+        !autoEnter &&
+        shouldFocusTerminalAfterChromeAction({
+          pointerType: lastPointerType.current,
+          coarsePointer: isCoarsePointer()
+        })
+      ) {
         window.setTimeout(() => terminal.current?.focus(), 0);
       }
       setDraft("");
@@ -931,7 +1068,9 @@ function TerminalChatViewport({
     })();
   };
   const downloadLog = () => {
-    const blob = new Blob([outputRef.current || readVisibleBufferText()], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([outputRef.current || readVisibleBufferText()], {
+      type: "text/plain;charset=utf-8"
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -949,7 +1088,9 @@ function TerminalChatViewport({
       return;
     }
     try {
-      const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/transcript?q=${encodeURIComponent(query)}&limit=100`);
+      const result = await api<{ items: TerminalHistoryItem[] }>(
+        `/api/terminal-sessions/${session.id}/transcript?q=${encodeURIComponent(query)}&limit=100`
+      );
       setSearchHits(result.items);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "搜索终端输出失败");
@@ -959,8 +1100,13 @@ function TerminalChatViewport({
     if (loadingEarlier || firstSeqRef.current <= 1) return;
     setLoadingEarlier(true);
     try {
-      const result = await api<{ items: TerminalHistoryItem[] }>(`/api/terminal-sessions/${session.id}/history?beforeSeq=${firstSeqRef.current}&limit=2000`);
-      const older = result.items.filter((item) => item.kind === "output").map((item) => item.data).join("");
+      const result = await api<{ items: TerminalHistoryItem[] }>(
+        `/api/terminal-sessions/${session.id}/history?beforeSeq=${firstSeqRef.current}&limit=2000`
+      );
+      const older = result.items
+        .filter((item) => item.kind === "output")
+        .map((item) => item.data)
+        .join("");
       if (!older) {
         firstSeqRef.current = 1;
         setFirstSeq(1);
@@ -983,30 +1129,95 @@ function TerminalChatViewport({
   };
 
   const visibleHistory = filterCommandHistory(commandHistory, historyQuery);
-  const modifierChord = [ctrl ? "Ctrl" : null, alt ? "Alt" : null, shift ? "Shift" : null].filter(Boolean).join("+");
+  const modifierChord = [ctrl ? "Ctrl" : null, alt ? "Alt" : null, shift ? "Shift" : null]
+    .filter(Boolean)
+    .join("+");
+  const insertNewline = () => {
+    const field = lineRef.current;
+    const value = field?.value ?? draft;
+    const next = insertComposerNewline(value, field?.selectionStart, field?.selectionEnd);
+    setDraft(next.value);
+    field?.focus();
+    window.setTimeout(() => {
+      const target = lineRef.current;
+      if (!target) return;
+      target.focus();
+      target.setSelectionRange(next.cursor, next.cursor);
+    }, 0);
+  };
+  const newlineActivateProps = {
+    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      rememberChromePointer(event);
+    },
+    onPointerUp: (event: PointerEvent<HTMLButtonElement>) => {
+      if (chromePointerMovedTooFar(chromePointerStartX.current, event.clientX)) return;
+      insertNewline();
+    },
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (event.detail > 0) return;
+      insertNewline();
+    }
+  };
 
   const padModifier = (pressed: boolean) =>
     `${modifierClass(pressed)} min-w-0 w-full px-1 text-[11px]`;
   const shortcutPad = (
     <div className="flex w-[18rem] flex-col gap-1.5 p-2">
       <div className="grid grid-cols-3 gap-1">
-        <button type="button" className={padModifier(ctrl)} aria-pressed={ctrl} title={sticky.ctrl ? "Ctrl 连续锁定，再点一次取消" : "Ctrl：点按后输入字母，例如 A 发送 Ctrl+A"} {...modifierButtonProps("ctrl")}>Ctrl{sticky.ctrl ? " *" : ""}</button>
-        <button type="button" className={padModifier(alt)} aria-pressed={alt} title={sticky.alt ? "Alt 连续锁定，再点一次取消" : "Alt：点按后输入字母，例如 X 发送 Alt+X"} {...modifierButtonProps("alt")}>Alt{sticky.alt ? " *" : ""}</button>
-        <button type="button" className={padModifier(shift)} aria-pressed={shift} title={sticky.shift ? "Shift 连续锁定，再点一次取消" : "Shift：点按后输入字母或方向键"} {...modifierButtonProps("shift")}>Shift{sticky.shift ? " *" : ""}</button>
+        <button
+          type="button"
+          className={padModifier(ctrl)}
+          aria-pressed={ctrl}
+          title={
+            sticky.ctrl ? "Ctrl 连续锁定，再点一次取消" : "Ctrl：点按后输入字母，例如 A 发送 Ctrl+A"
+          }
+          {...modifierButtonProps("ctrl")}
+        >
+          Ctrl{sticky.ctrl ? " *" : ""}
+        </button>
+        <button
+          type="button"
+          className={padModifier(alt)}
+          aria-pressed={alt}
+          title={
+            sticky.alt ? "Alt 连续锁定，再点一次取消" : "Alt：点按后输入字母，例如 X 发送 Alt+X"
+          }
+          {...modifierButtonProps("alt")}
+        >
+          Alt{sticky.alt ? " *" : ""}
+        </button>
+        <button
+          type="button"
+          className={padModifier(shift)}
+          aria-pressed={shift}
+          title={sticky.shift ? "Shift 连续锁定，再点一次取消" : "Shift：点按后输入字母或方向键"}
+          {...modifierButtonProps("shift")}
+        >
+          Shift{sticky.shift ? " *" : ""}
+        </button>
       </div>
       <label className="flex h-8 items-center rounded-lg border border-border bg-background px-2 dark:border-white/15 dark:bg-white/5">
-        {modifierChord ? <span className="mr-1 shrink-0 text-[11px] font-medium text-sky-700 dark:text-sky-300">{modifierChord}+</span> : null}
+        {modifierChord ? (
+          <span className="mr-1 shrink-0 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+            {modifierChord}+
+          </span>
+        ) : null}
         <input
           ref={comboRef}
           value={comboDraft}
-          aria-label={modifierChord ? `输入字符发送 ${modifierChord} 组合键` : "输入字符立即发送到终端"}
+          aria-label={
+            modifierChord ? `输入字符发送 ${modifierChord} 组合键` : "输入字符立即发送到终端"
+          }
           placeholder={modifierChord ? "输入 A" : "输入字符，例如 A"}
           autoCapitalize="none"
           autoCorrect="off"
           autoComplete="off"
           spellCheck={false}
           className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-          onCompositionStart={() => { comboComposing.current = true; }}
+          onCompositionStart={() => {
+            comboComposing.current = true;
+          }}
           onCompositionEnd={(event) => {
             comboComposing.current = false;
             sendComboValue(event.currentTarget.value);
@@ -1045,7 +1256,9 @@ function TerminalChatViewport({
         />
       </label>
       <p className="px-0.5 text-[11px] leading-4 text-muted-foreground">
-        {modifierChord ? `${modifierChord} 已按下，输入 A 即发送 ${modifierChord}+A` : "先点 Ctrl / Alt / Shift，再输入字符发送组合键"}
+        {modifierChord
+          ? `${modifierChord} 已按下，输入 A 即发送 ${modifierChord}+A`
+          : "先点 Ctrl / Alt / Shift，再输入字符发送组合键"}
       </p>
       <div className="grid grid-cols-4 gap-1">
         {shortcut("Esc", "\x1b", undefined, false, padKeyClass)}
@@ -1060,85 +1273,194 @@ function TerminalChatViewport({
         {shortcut("→", "\x1b[C", "方向右", true, padKeyClass)}
       </div>
       <div className="grid grid-cols-4 gap-1">
-        {(["C", "D", "Z", "L"] as const).map((key) => shortcut(`^${key}`, control(key), `Ctrl+${key}`, false, padKeyClass, false))}
+        <button
+          type="button"
+          className={padKeyClass}
+          title="在输入框换行，不立即发送。相当于 Shift+Enter"
+          aria-label="换行"
+          {...newlineActivateProps}
+        >
+          换行
+        </button>
+        {shortcut("回车", "\r", "向终端发送回车", false, padKeyClass, false)}
+        {shortcut("退格", "\x7f", "退格", true, padKeyClass, false)}
+        {shortcut("^U", control("U"), "Ctrl+U 清空当前行", false, padKeyClass, false)}
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {shortcut("^W", control("W"), "Ctrl+W 删除前一个词", false, padKeyClass, false)}
+        {shortcut("^K", control("K"), "Ctrl+K 删到行尾", false, padKeyClass, false)}
+        {shortcut("PgUp", "\x1b[5~", "上一页", false, padKeyClass, false)}
+        {shortcut("PgDn", "\x1b[6~", "下一页", false, padKeyClass, false)}
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {(["C", "D", "Z", "L"] as const).map((key) =>
+          shortcut(`^${key}`, control(key), `Ctrl+${key}`, false, padKeyClass, false)
+        )}
       </div>
       <div className="grid grid-cols-3 gap-1 border-t border-border pt-1 dark:border-white/10">
-        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="复制" aria-label="复制终端内容" {...chromeActivateProps(copyFromTerminal)}>
+        <button
+          type="button"
+          className={`${chromeIconClass} min-w-0 w-full`}
+          title="复制"
+          aria-label="复制终端内容"
+          {...chromeActivateProps(copyFromTerminal)}
+        >
           <Copy className="size-4" />
         </button>
-        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="粘贴" aria-label="粘贴" {...chromeActivateProps(pasteIntoTerminal)}>
+        <button
+          type="button"
+          className={`${chromeIconClass} min-w-0 w-full`}
+          title="粘贴"
+          aria-label="粘贴"
+          {...chromeActivateProps(pasteIntoTerminal)}
+        >
           <Clipboard className="size-4" />
         </button>
-        <button type="button" className={`${chromeIconClass} min-w-0 w-full`} title="清屏（Ctrl+L）" aria-label="清屏" {...chromeActivateProps(() => { sendInput("\x0c", false); focusTerminalIfAppropriate(); })}>
+        <button
+          type="button"
+          className={`${chromeIconClass} min-w-0 w-full`}
+          title="清屏（Ctrl+L）"
+          aria-label="清屏"
+          {...chromeActivateProps(() => {
+            sendInput("\x0c", false);
+            focusTerminalIfAppropriate();
+          })}
+        >
           <Eraser className="size-4" />
         </button>
       </div>
     </div>
   );
 
-  const dropHandlers = fileDragHandlers(setDragActive, (files) => { void addAttachments(files); });
+  const dropHandlers = fileDragHandlers(setDragActive, (files) => {
+    void addAttachments(files);
+  });
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col bg-background text-foreground dark:bg-[#090d14] dark:text-slate-100"
       {...dropHandlers}
     >
-      <div className={`relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300${searchOpen ? " z-30" : ""}`}>
+      <div
+        className={`relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-muted/70 px-1.5 text-[11px] text-muted-foreground dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300${searchOpen ? " z-30" : ""}`}
+      >
         <div className="flex min-w-0 flex-1 items-center gap-1">{tabBar}</div>
-        <span className={`hidden size-1.5 shrink-0 rounded-full sm:inline ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`} />
-        <span className="hidden min-w-0 max-w-[9rem] truncate sm:inline sm:max-w-[16rem]" title={statusLabel(session, connected)}>
-          {connected ? (session.pid ? `PID ${session.pid}` : "已连接") : "恢复中"}
-          {session.state === "running" ? <> · <LiveDuration startedAt={session.createdAt} /></> : null}
-        </span>
-        <span className="hidden min-w-0 max-w-[28%] truncate font-mono dark:text-slate-500 lg:inline" title={session.cwd}>{session.cwd}</span>
-        <div className="flex shrink-0 items-center gap-0.5">
-        <button
-          type="button"
-          className={`hidden h-8 shrink-0 items-center gap-1 rounded-lg px-2 hover:bg-accent disabled:opacity-40 sm:inline-flex dark:hover:bg-white/10 ${firstSeq > 1 ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground dark:text-slate-300"}`}
-          aria-label="加载更早输出"
-          title={firstSeq > 1 ? "仅显示最近输出，点击加载更早历史" : "已是最早输出"}
-          disabled={loadingEarlier || firstSeq <= 1}
-          {...chromeActivateProps(() => { void loadEarlier(); })}
+        <span
+          className={`hidden size-1.5 shrink-0 rounded-full sm:inline ${connected ? "bg-emerald-400" : "animate-pulse bg-amber-400"}`}
+        />
+        <span
+          className="hidden min-w-0 max-w-[9rem] truncate sm:inline sm:max-w-[16rem]"
+          title={statusLabel(session, connected)}
         >
-          {loadingEarlier ? <LoaderCircle className="size-3.5 animate-spin" /> : <ChevronUp className="size-3.5" />}
-          <span>{loadingEarlier ? "加载中" : "更早"}</span>
-        </button>
-        <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="缩小终端字体" title="缩小终端字体" disabled={!canDecreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, -1)))}>
-          <ZoomOut className="size-3.5" />
-        </button>
-        <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10" aria-label="放大终端字体" title="放大终端字体" disabled={!canIncreaseTerminalFontSize(fontSize)} {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}>
-          <ZoomIn className="size-3.5" />
-        </button>
-        <button ref={searchButtonRef} type="button" className={`${searchOpen ? "grid" : "hidden"} size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10`} aria-label={searchOpen ? "关闭搜索" : "搜索终端历史"} aria-expanded={searchOpen} title={searchOpen ? "关闭搜索" : "搜索终端历史"} {...chromeActivateProps(toggleSearch)}>
-          <Search className="size-3.5" />
-        </button>
-        <button type="button" className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10" aria-label="下载终端输出" {...chromeActivateProps(downloadLog)}>
-          <Download className="size-3.5" />
-        </button>
-        <div className="hidden sm:flex sm:items-center sm:gap-1">{sessionActions}</div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:hidden dark:text-slate-300 dark:hover:bg-white/10" aria-label="终端更多操作" title="更多操作">
-              <MoreHorizontal className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuItem disabled={loadingEarlier || firstSeq <= 1} onSelect={() => { void loadEarlier(); }}>
+          {connected ? (session.pid ? `PID ${session.pid}` : "已连接") : "恢复中"}
+          {session.state === "running" ? (
+            <>
+              {" "}
+              · <LiveDuration startedAt={session.createdAt} />
+            </>
+          ) : null}
+        </span>
+        <span
+          className="hidden min-w-0 max-w-[28%] truncate font-mono dark:text-slate-500 lg:inline"
+          title={session.cwd}
+        >
+          {session.cwd}
+        </span>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            className={`hidden h-8 shrink-0 items-center gap-1 rounded-lg px-2 hover:bg-accent disabled:opacity-40 sm:inline-flex dark:hover:bg-white/10 ${firstSeq > 1 ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground dark:text-slate-300"}`}
+            aria-label="加载更早输出"
+            title={firstSeq > 1 ? "仅显示最近输出，点击加载更早历史" : "已是最早输出"}
+            disabled={loadingEarlier || firstSeq <= 1}
+            {...chromeActivateProps(() => {
+              void loadEarlier();
+            })}
+          >
+            {loadingEarlier ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
               <ChevronUp className="size-3.5" />
-              {loadingEarlier ? "加载中" : "加载更早输出"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={toggleSearch}>
-              <Search className="size-3.5" />
-              {searchOpen ? "关闭搜索" : "搜索历史"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={downloadLog}>
-              <Download className="size-3.5" />
-              下载输出
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            )}
+            <span>{loadingEarlier ? "加载中" : "更早"}</span>
+          </button>
+          <button
+            type="button"
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10"
+            aria-label="缩小终端字体"
+            title="缩小终端字体"
+            disabled={!canDecreaseTerminalFontSize(fontSize)}
+            {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, -1)))}
+          >
+            <ZoomOut className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10"
+            aria-label="放大终端字体"
+            title="放大终端字体"
+            disabled={!canIncreaseTerminalFontSize(fontSize)}
+            {...chromeActivateProps(() => onFontSizeChange(stepTerminalFontSize(fontSize, 1)))}
+          >
+            <ZoomIn className="size-3.5" />
+          </button>
+          <button
+            ref={searchButtonRef}
+            type="button"
+            className={`${searchOpen ? "grid" : "hidden"} size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10`}
+            aria-label={searchOpen ? "关闭搜索" : "搜索终端历史"}
+            aria-expanded={searchOpen}
+            title={searchOpen ? "关闭搜索" : "搜索终端历史"}
+            {...chromeActivateProps(toggleSearch)}
+          >
+            <Search className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:grid dark:text-slate-300 dark:hover:bg-white/10"
+            aria-label="下载终端输出"
+            {...chromeActivateProps(downloadLog)}
+          >
+            <Download className="size-3.5" />
+          </button>
+          <div className="hidden sm:flex sm:items-center sm:gap-1">{sessionActions}</div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent sm:hidden dark:text-slate-300 dark:hover:bg-white/10"
+                aria-label="终端更多操作"
+                title="更多操作"
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuItem
+                disabled={loadingEarlier || firstSeq <= 1}
+                onSelect={() => {
+                  void loadEarlier();
+                }}
+              >
+                <ChevronUp className="size-3.5" />
+                {loadingEarlier ? "加载中" : "加载更早输出"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={toggleSearch}>
+                <Search className="size-3.5" />
+                {searchOpen ? "关闭搜索" : "搜索历史"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={downloadLog}>
+                <Download className="size-3.5" />
+                下载输出
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {searchOpen && (
-          <form ref={searchPanelRef} className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900" onSubmit={runSearch}>
+          <form
+            ref={searchPanelRef}
+            className="absolute right-2 top-9 z-20 w-[min(22rem,calc(100vw-1rem))] rounded-lg border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900"
+            onSubmit={runSearch}
+          >
             <div className="flex gap-1.5">
               <input
                 autoFocus
@@ -1152,257 +1474,394 @@ function TerminalChatViewport({
                 placeholder="搜索终端历史"
                 className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
               />
-              <Button type="submit" size="sm" className="h-8">搜索</Button>
-              <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0 rounded-lg" aria-label="关闭搜索" title="关闭搜索" onClick={closeSearch}>
+              <Button type="submit" size="sm" className="h-8">
+                搜索
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8 shrink-0 rounded-lg"
+                aria-label="关闭搜索"
+                title="关闭搜索"
+                onClick={closeSearch}
+              >
                 <X className="size-4" />
               </Button>
             </div>
             <div className="mt-2 max-h-52 overflow-y-auto text-[11px] text-muted-foreground dark:text-slate-300">
-              {searchHits.length ? searchHits.map((hit) => (
-                <div key={`${hit.seq}-${hit.createdAt}`} className="border-t border-border py-1.5 dark:border-white/10">
-                  <span className="mr-1 text-muted-foreground">#{hit.seq}</span>
-                  <span className="break-words">{hit.data.slice(0, 240)}</span>
-                </div>
-              )) : <span className="text-muted-foreground">输入关键词搜索</span>}
+              {searchHits.length ? (
+                searchHits.map((hit) => (
+                  <div
+                    key={`${hit.seq}-${hit.createdAt}`}
+                    className="border-t border-border py-1.5 dark:border-white/10"
+                  >
+                    <span className="mr-1 text-muted-foreground">#{hit.seq}</span>
+                    <span className="break-words">{hit.data.slice(0, 240)}</span>
+                  </div>
+                ))
+              ) : (
+                <span className="text-muted-foreground">输入关键词搜索</span>
+              )}
             </div>
           </form>
         )}
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {searchOpen ? (
-          <button type="button" className="absolute inset-0 z-20 bg-black/25 sm:bg-transparent" aria-label="关闭搜索" onClick={closeSearch} />
-        ) : null}
-        <div className="absolute inset-0 p-1">
-        <div ref={host} className="h-full touch-none overscroll-contain" />
-        {dragActive ? (
-          <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border border-dashed border-sky-400/70 bg-sky-500/10 text-sm text-sky-800 dark:border-sky-400/50 dark:text-sky-100">
-            松开鼠标即可添加附件
-          </div>
-        ) : null}
-        {!atBottom && (
-          <button type="button" className={`absolute right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100 ${composerOpen ? "bottom-3" : "bottom-14"}`} aria-label="回到底部" onClick={() => { terminal.current?.scrollToBottom(); setAtBottom(true); }}>
-            <ArrowDown className="size-4" />
-          </button>
-        )}
-        {!composerOpen ? (
           <button
             type="button"
-            className="absolute bottom-3 right-3 z-20 grid size-9 place-items-center rounded-lg border border-sky-400/40 bg-card/95 text-sky-700 shadow-lg dark:border-sky-400/40 dark:bg-slate-900/90 dark:text-sky-300"
-            aria-label="显示输入框"
-            title="显示输入框，发送文本给终端"
-            {...chromeActivateProps(toggleComposerOpen)}
-          >
-            <Keyboard className="size-4" />
-          </button>
+            className="absolute inset-0 z-20 bg-black/25 sm:bg-transparent"
+            aria-label="关闭搜索"
+            onClick={closeSearch}
+          />
         ) : null}
+        <div className="absolute inset-0 p-1">
+          <div ref={host} className="h-full touch-none overscroll-contain" />
+          {dragActive ? (
+            <div className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl border border-dashed border-sky-400/70 bg-sky-500/10 text-sm text-sky-800 dark:border-sky-400/50 dark:text-sky-100">
+              松开鼠标即可添加附件
+            </div>
+          ) : null}
+          {!atBottom && (
+            <button
+              type="button"
+              className={`absolute right-3 grid size-9 place-items-center rounded-lg border border-border bg-card/90 text-foreground shadow-lg dark:border-white/15 dark:bg-slate-900/90 dark:text-slate-100 ${composerOpen ? "bottom-3" : "bottom-14"}`}
+              aria-label="回到底部"
+              onClick={() => {
+                terminal.current?.scrollToBottom();
+                setAtBottom(true);
+              }}
+            >
+              <ArrowDown className="size-4" />
+            </button>
+          )}
+          {!composerOpen ? (
+            <button
+              type="button"
+              className="absolute bottom-3 right-3 z-20 grid size-9 place-items-center rounded-lg border border-sky-400/40 bg-card/95 text-sky-700 shadow-lg dark:border-sky-400/40 dark:bg-slate-900/90 dark:text-sky-300"
+              aria-label="显示输入框"
+              title="显示输入框，发送文本给终端"
+              {...chromeActivateProps(toggleComposerOpen)}
+            >
+              <Keyboard className="size-4" />
+            </button>
+          ) : null}
         </div>
       </div>
       {composerOpen ? (
-      <footer className={COMPOSER_DOCK_CLASS}>
-        <div className={COMPOSER_WIDTH_CLASS}>
-          <div className={COMPOSER_SHELL_CLASS} data-drop={dragActive ? "true" : "false"}>
-          {dragActive ? <div className="composer-drop-hint">松开鼠标即可添加附件</div> : null}
-          {attachments.length > 0 ? (
-            <div className="composer-attachments">
-              {attachments.map((item) => (
-                <div key={item.id} className="composer-attachment">
-                  {item.kind === "image" && item.previewUrl ? (
-                    <img src={item.previewUrl} alt="" />
-                  ) : item.kind === "image" ? (
-                    <Image className="size-4" />
-                  ) : (
-                    <FileText className="size-4" />
-                  )}
-                  <span className="min-w-0 truncate" title={item.name}>{item.name}</span>
-                  <span className="text-[10px] text-muted-foreground">{formatBytes(item.size)}</span>
-                  <button
-                    type="button"
-                    className="grid size-5 place-items-center rounded-full hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={`移除 ${item.name}`}
-                    onClick={() => setAttachments((current) => current.filter((file) => file.id !== item.id))}
-                  >
-                    <X className="size-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {attachError ? <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p> : null}
-          {preparingAttachments ? (
-            <p role="status" className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground">
-              <LoaderCircle className="size-3.5 animate-spin" />
-              正在处理附件，大图片会自动压缩…
-            </p>
-          ) : null}
-          <div className="relative">
-            {shortcutOpen ? (
-              <div ref={shortcutPanelRef} className="absolute bottom-full left-0 z-30 mb-2 rounded-xl border border-border bg-card shadow-xl dark:border-white/15 dark:bg-slate-900">
-                {shortcutPad}
-              </div>
-            ) : null}
-            {historyOpen ? (
-              <div ref={historyPanelRef} className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900">
-                <div className="flex items-center gap-1.5 rounded-lg bg-muted/60 px-2 dark:bg-white/5">
-                  <Search className="size-3.5 text-muted-foreground" />
-                  <input autoFocus value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="搜索命令历史" className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none" />
-                  {historyLoading ? <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" /> : visibleHistory.length ? <span className="text-[11px] text-muted-foreground">{visibleHistory.length}</span> : null}
-                </div>
-                <div className="mt-1 max-h-56 overflow-y-auto overscroll-contain">
-                  {visibleHistory.map((item, index) => (
-                    <button key={`${item}-${index}`} type="button" className="flex w-full items-start rounded-lg px-2 py-2 text-left font-mono text-xs hover:bg-muted" onClick={() => applyHistory(item)}>
-                      <span className="mr-2 shrink-0 text-muted-foreground">{index + 1}</span>
-                      <span className="min-w-0 break-words">{item}</span>
-                    </button>
+        <footer className={COMPOSER_DOCK_CLASS}>
+          <div className={COMPOSER_WIDTH_CLASS}>
+            <div className={COMPOSER_SHELL_CLASS} data-drop={dragActive ? "true" : "false"}>
+              {dragActive ? <div className="composer-drop-hint">松开鼠标即可添加附件</div> : null}
+              {attachments.length > 0 ? (
+                <div className="composer-attachments">
+                  {attachments.map((item) => (
+                    <div key={item.id} className="composer-attachment">
+                      {item.kind === "image" && item.previewUrl ? (
+                        <img src={item.previewUrl} alt="" />
+                      ) : item.kind === "image" ? (
+                        <Image className="size-4" />
+                      ) : (
+                        <FileText className="size-4" />
+                      )}
+                      <span className="min-w-0 truncate" title={item.name}>
+                        {item.name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatBytes(item.size)}
+                      </span>
+                      <button
+                        type="button"
+                        className="grid size-5 place-items-center rounded-full hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`移除 ${item.name}`}
+                        onClick={() =>
+                          setAttachments((current) => current.filter((file) => file.id !== item.id))
+                        }
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
                   ))}
-                  {!commandHistory.length ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无命令历史</p> : null}
-                  {commandHistory.length > 0 && visibleHistory.length === 0 ? <p className="px-2 py-3 text-center text-xs text-muted-foreground">没有匹配的命令</p> : null}
+                </div>
+              ) : null}
+              {attachError ? (
+                <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p>
+              ) : null}
+              {preparingAttachments ? (
+                <p
+                  role="status"
+                  className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground"
+                >
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                  正在处理附件，大图片会自动压缩…
+                </p>
+              ) : null}
+              <div className="relative">
+                {shortcutOpen ? (
+                  <div
+                    ref={shortcutPanelRef}
+                    className="absolute bottom-full left-0 z-30 mb-2 rounded-xl border border-border bg-card shadow-xl dark:border-white/15 dark:bg-slate-900"
+                  >
+                    {shortcutPad}
+                  </div>
+                ) : null}
+                {historyOpen ? (
+                  <div
+                    ref={historyPanelRef}
+                    className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-xl border border-border bg-card p-2 shadow-xl dark:border-white/15 dark:bg-slate-900"
+                  >
+                    <div className="flex items-center gap-1.5 rounded-lg bg-muted/60 px-2 dark:bg-white/5">
+                      <Search className="size-3.5 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        value={historyQuery}
+                        onChange={(event) => setHistoryQuery(event.target.value)}
+                        placeholder="搜索命令历史"
+                        className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none"
+                      />
+                      {historyLoading ? (
+                        <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
+                      ) : visibleHistory.length ? (
+                        <span className="text-[11px] text-muted-foreground">
+                          {visibleHistory.length}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 max-h-56 overflow-y-auto overscroll-contain">
+                      {visibleHistory.map((item, index) => (
+                        <button
+                          key={`${item}-${index}`}
+                          type="button"
+                          className="flex w-full items-start rounded-lg px-2 py-2 text-left font-mono text-xs hover:bg-muted"
+                          onClick={() => applyHistory(item)}
+                        >
+                          <span className="mr-2 shrink-0 text-muted-foreground">{index + 1}</span>
+                          <span className="min-w-0 break-words">{item}</span>
+                        </button>
+                      ))}
+                      {!commandHistory.length ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          暂无命令历史
+                        </p>
+                      ) : null}
+                      {commandHistory.length > 0 && visibleHistory.length === 0 ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          没有匹配的命令
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                <Textarea
+                  ref={lineRef}
+                  rows={2}
+                  value={draft}
+                  placeholder={
+                    autoEnter
+                      ? "发送到终端并回车。换行用快捷键或 Shift+Enter。"
+                      : "发送到终端，不自动回车。换行用快捷键或 Shift+Enter。"
+                  }
+                  aria-label="发送到终端"
+                  inputMode="text"
+                  enterKeyHint="send"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
+                  lang="zh-CN"
+                  className={`${COMPOSER_TEXTAREA_CLASS} font-mono`}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onPaste={(event) => {
+                    const files = filesFromClipboard(event.clipboardData);
+                    if (!files.length) return;
+                    event.preventDefault();
+                    void addAttachments(files);
+                  }}
+                  onCompositionStart={() => {
+                    lineComposing.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    lineComposing.current = false;
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      (ctrl || alt) &&
+                      !event.metaKey &&
+                      !lineComposing.current &&
+                      !event.nativeEvent.isComposing &&
+                      event.key.length === 1
+                    ) {
+                      event.preventDefault();
+                      sendInput(event.key);
+                      return;
+                    }
+                    const canCycleHistory =
+                      !draft.includes("\n") && !event.shiftKey && !event.ctrlKey && !event.metaKey;
+                    if (event.key === "ArrowUp" && canCycleHistory) {
+                      event.preventDefault();
+                      const current = commandHistory.findIndex((item) => item === draft);
+                      const next =
+                        commandHistory[
+                          current < 0 ? 0 : Math.min(current + 1, commandHistory.length - 1)
+                        ];
+                      if (next) setDraft(next);
+                      return;
+                    }
+                    if (event.key === "ArrowDown" && canCycleHistory) {
+                      event.preventDefault();
+                      const current = commandHistory.findIndex((item) => item === draft);
+                      const previous = current > 0 ? commandHistory[current - 1] : undefined;
+                      if (previous !== undefined) setDraft(previous);
+                      else if (current === 0) setDraft("");
+                      return;
+                    }
+                    if (
+                      !shouldSubmitTerminalKeyboard({
+                        key: event.key,
+                        shiftKey: event.shiftKey,
+                        isComposing: event.nativeEvent.isComposing || lineComposing.current,
+                        keyCode: event.nativeEvent.keyCode
+                      })
+                    )
+                      return;
+                    event.preventDefault();
+                    submitLine();
+                  }}
+                />
+              </div>
+              <div className="composer-toolbar terminal-composer-toolbar">
+                <div className="composer-context">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className={COMPOSER_ICON_BUTTON_CLASS}
+                    aria-label="隐藏输入框"
+                    title="隐藏输入框，终端仍可直通操作"
+                    {...chromeActivateProps(toggleComposerOpen)}
+                  >
+                    <PanelBottomClose className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={autoEnter ? "secondary" : "outline"}
+                    className={COMPOSER_ICON_BUTTON_CLASS}
+                    aria-label={autoEnter ? "发送时自动回车" : "发送时不回车"}
+                    aria-pressed={autoEnter}
+                    title={
+                      autoEnter
+                        ? "发送时自动回车，点击改为不回车"
+                        : "发送时不回车，点击改为自动回车"
+                    }
+                    onClick={() => setAutoEnter((value) => !value)}
+                  >
+                    <CornerDownLeft className="size-4" />
+                  </Button>
+                  <span ref={shortcutButtonRef} className="inline-flex shrink-0">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={shortcutOpen || ctrl || alt || shift ? "secondary" : "outline"}
+                      className={COMPOSER_ICON_BUTTON_CLASS}
+                      aria-label="终端快捷键"
+                      aria-haspopup="dialog"
+                      aria-expanded={shortcutOpen}
+                      title="终端快捷键"
+                      onClick={toggleShortcuts}
+                    >
+                      <Command className="size-4" />
+                    </Button>
+                  </span>
+                </div>
+                <div className="composer-actions">
+                  <input
+                    ref={attachInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = event.target.files ? [...event.target.files] : [];
+                      event.target.value = "";
+                      void addAttachments(files);
+                    }}
+                  />
+                  <PromptTemplatePicker
+                    disabled={uploading}
+                    onInsert={(text) => setDraft((current) => joinInsertedTemplate(current, text))}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className={COMPOSER_ICON_BUTTON_CLASS}
+                    aria-label="添加附件"
+                    title="添加附件，也可拖入或粘贴文件"
+                    disabled={uploading || preparingAttachments}
+                    onClick={() => attachInputRef.current?.click()}
+                  >
+                    <Paperclip className="size-4" />
+                  </Button>
+                  <span ref={historyButtonRef} className="inline-flex shrink-0">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={historyOpen ? "secondary" : "outline"}
+                      className={COMPOSER_ICON_BUTTON_CLASS}
+                      aria-label="命令历史"
+                      aria-expanded={historyOpen}
+                      title="命令历史"
+                      onClick={toggleHistory}
+                    >
+                      {historyLoading ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : (
+                        <HistoryIcon className="size-4" />
+                      )}
+                    </Button>
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 shrink-0 rounded-lg px-2 text-xs"
+                    aria-label="换行"
+                    title="在输入框换行，不立即发送。相当于 Shift+Enter"
+                    {...newlineActivateProps}
+                  >
+                    换行
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    className={COMPOSER_ICON_BUTTON_CLASS}
+                    aria-label="发送到终端"
+                    title="发送到终端"
+                    onClick={submitLine}
+                    disabled={
+                      uploading ||
+                      preparingAttachments ||
+                      (!draft.trim() && attachments.length === 0)
+                    }
+                  >
+                    {uploading || preparingAttachments ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Send className="size-4" />
+                    )}
+                  </Button>
                 </div>
               </div>
-            ) : null}
-            <Textarea
-              ref={lineRef}
-              rows={2}
-              value={draft}
-              placeholder={autoEnter ? "发送到终端并回车，Shift+Enter 换行。也可直接操作终端。" : "发送到终端，不自动回车。也可直接操作终端。"}
-              aria-label="发送到终端"
-              inputMode="text"
-              enterKeyHint="send"
-              autoCapitalize="none"
-              autoCorrect="off"
-              autoComplete="off"
-              spellCheck={false}
-              lang="zh-CN"
-              className={`${COMPOSER_TEXTAREA_CLASS} font-mono`}
-              onChange={(event) => setDraft(event.target.value)}
-              onPaste={(event) => {
-                const files = filesFromClipboard(event.clipboardData);
-                if (!files.length) return;
-                event.preventDefault();
-                void addAttachments(files);
-              }}
-              onCompositionStart={() => { lineComposing.current = true; }}
-              onCompositionEnd={() => { lineComposing.current = false; }}
-              onKeyDown={(event) => {
-                if ((ctrl || alt) && !event.metaKey && !lineComposing.current && !event.nativeEvent.isComposing && event.key.length === 1) {
-                  event.preventDefault();
-                  sendInput(event.key);
-                  return;
-                }
-                const canCycleHistory = !draft.includes("\n") && !event.shiftKey && !event.ctrlKey && !event.metaKey;
-                if (event.key === "ArrowUp" && canCycleHistory) {
-                  event.preventDefault();
-                  const current = commandHistory.findIndex((item) => item === draft);
-                  const next = commandHistory[current < 0 ? 0 : Math.min(current + 1, commandHistory.length - 1)];
-                  if (next) setDraft(next);
-                  return;
-                }
-                if (event.key === "ArrowDown" && canCycleHistory) {
-                  event.preventDefault();
-                  const current = commandHistory.findIndex((item) => item === draft);
-                  const previous = current > 0 ? commandHistory[current - 1] : undefined;
-                  if (previous !== undefined) setDraft(previous);
-                  else if (current === 0) setDraft("");
-                  return;
-                }
-                if (!shouldSubmitTerminalKeyboard({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing || lineComposing.current, keyCode: event.nativeEvent.keyCode })) return;
-                event.preventDefault();
-                submitLine();
-              }}
-            />
-          </div>
-          <div className="composer-toolbar terminal-composer-toolbar">
-            <div className="composer-context">
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className={COMPOSER_ICON_BUTTON_CLASS}
-                aria-label="隐藏输入框"
-                title="隐藏输入框，终端仍可直通操作"
-                {...chromeActivateProps(toggleComposerOpen)}
-              >
-                <PanelBottomClose className="size-4" />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant={autoEnter ? "secondary" : "outline"}
-                className={COMPOSER_ICON_BUTTON_CLASS}
-                aria-label={autoEnter ? "发送时自动回车" : "发送时不回车"}
-                aria-pressed={autoEnter}
-                title={autoEnter ? "发送时自动回车，点击改为不回车" : "发送时不回车，点击改为自动回车"}
-                onClick={() => setAutoEnter((value) => !value)}
-              >
-                <CornerDownLeft className="size-4" />
-              </Button>
-              <span ref={shortcutButtonRef} className="inline-flex shrink-0">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant={shortcutOpen || ctrl || alt || shift ? "secondary" : "outline"}
-                  className={COMPOSER_ICON_BUTTON_CLASS}
-                  aria-label="终端快捷键"
-                  aria-haspopup="dialog"
-                  aria-expanded={shortcutOpen}
-                  title="终端快捷键"
-                  onClick={toggleShortcuts}
-                >
-                  <Command className="size-4" />
-                </Button>
-              </span>
-            </div>
-            <div className="composer-actions">
-              <input
-                ref={attachInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(event) => {
-                  const files = event.target.files ? [...event.target.files] : [];
-                  event.target.value = "";
-                  void addAttachments(files);
-                }}
-              />
-              <PromptTemplatePicker
-                disabled={uploading}
-                onInsert={(text) => setDraft((current) => joinInsertedTemplate(current, text))}
-              />
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className={COMPOSER_ICON_BUTTON_CLASS}
-                aria-label="添加附件"
-                title="添加附件，也可拖入或粘贴文件"
-                disabled={uploading || preparingAttachments}
-                onClick={() => attachInputRef.current?.click()}
-              >
-                <Paperclip className="size-4" />
-              </Button>
-              <span ref={historyButtonRef} className="inline-flex shrink-0">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant={historyOpen ? "secondary" : "outline"}
-                  className={COMPOSER_ICON_BUTTON_CLASS}
-                  aria-label="命令历史"
-                  aria-expanded={historyOpen}
-                  title="命令历史"
-                  onClick={toggleHistory}
-                >
-                  {historyLoading ? <LoaderCircle className="size-4 animate-spin" /> : <HistoryIcon className="size-4" />}
-                </Button>
-              </span>
-              <Button type="button" size="icon" className={COMPOSER_ICON_BUTTON_CLASS} aria-label="发送到终端" title="发送到终端" onClick={submitLine} disabled={uploading || preparingAttachments || (!draft.trim() && attachments.length === 0)}>
-                {uploading || preparingAttachments ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              </Button>
             </div>
           </div>
-          </div>
-        </div>
-      </footer>
+        </footer>
       ) : null}
-      <Dialog open={pasteOpen} onOpenChange={(open) => { if (!open) closePasteDialog(); }}>
+      <Dialog
+        open={pasteOpen}
+        onOpenChange={(open) => {
+          if (!open) closePasteDialog();
+        }}
+      >
         <DialogContent
           className="sm:max-w-lg"
           onOpenAutoFocus={(event) => {
@@ -1427,8 +1886,22 @@ function TerminalChatViewport({
             className="min-h-40 w-full resize-y rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm text-foreground outline-none dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
           />
           <DialogFooter>
-            <Button type="button" variant="outline" className="h-8 rounded-lg" {...chromeActivateProps(closePasteDialog)}>取消</Button>
-            <Button type="button" className="h-8 rounded-lg" disabled={!pasteDraft} {...chromeActivateProps(submitPasteDialog)}>发送到终端</Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 rounded-lg"
+              {...chromeActivateProps(closePasteDialog)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              className="h-8 rounded-lg"
+              disabled={!pasteDraft}
+              {...chromeActivateProps(submitPasteDialog)}
+            >
+              发送到终端
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1460,14 +1933,30 @@ export function TerminalChatPanel({
     persistTerminalFontSize(size);
     setFontSize(size);
   };
-  const sessions = useQuery({ queryKey: ["terminal-chat-sessions", project.id], queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`), refetchInterval: 5000 });
+  const sessions = useQuery({
+    queryKey: ["terminal-chat-sessions", project.id],
+    queryFn: () => api<SessionList>(`/api/projects/${project.id}/terminal-sessions`),
+    refetchInterval: 5000
+  });
   const [manageProfilesOpen, setManageProfilesOpen] = useState(false);
-  const profiles = useQuery({ queryKey: ["terminal-profiles"], queryFn: () => api<{ profiles: TerminalProfile[] }>("/api/terminal-profiles") });
+  const profiles = useQuery({
+    queryKey: ["terminal-profiles"],
+    queryFn: () => api<{ profiles: TerminalProfile[] }>("/api/terminal-profiles")
+  });
   const profileItems = profiles.data?.profiles ?? [];
   const create = useMutation({
-    mutationFn: (profileId: string) => api<{ session: Session; terminal: TerminalChatSession }>(`/api/projects/${project.id}/terminal-sessions`, { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }),
+    mutationFn: (profileId: string) =>
+      api<{ session: Session; terminal: TerminalChatSession }>(
+        `/api/projects/${project.id}/terminal-sessions`,
+        { method: "POST", body: JSON.stringify({ profileId, restartPolicy: "manual" }) }
+      ),
     onSuccess: (result) => {
-      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({ items: [result.terminal, ...(current?.items ?? []).filter((item) => item.id !== result.terminal.id)] }));
+      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => ({
+        items: [
+          result.terminal,
+          ...(current?.items ?? []).filter((item) => item.id !== result.terminal.id)
+        ]
+      }));
       void queryClient.invalidateQueries({ queryKey: ["sessions", project.id] });
       setSelectedId(result.terminal.id);
       onOpenSession?.(result.session.id);
@@ -1475,30 +1964,63 @@ export function TerminalChatPanel({
     onError: (error) => toast.error(error instanceof Error ? error.message : "创建终端对话失败")
   });
   const restart = useMutation({
-    mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/restart`, { method: "POST" }),
-    onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已重启"); },
+    mutationFn: (id: string) =>
+      api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/restart`, {
+        method: "POST"
+      }),
+    onSuccess: (result) => {
+      update(result.terminal.id, result.terminal);
+      toast.success("终端已重启");
+    },
     onError: (error) => toast.error(error instanceof Error ? error.message : "重启终端失败")
   });
   const stop = useMutation({
-    mutationFn: (id: string) => api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/stop`, { method: "POST" }),
-    onSuccess: (result) => { update(result.terminal.id, result.terminal); toast.success("终端已停止"); },
+    mutationFn: (id: string) =>
+      api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${id}/stop`, {
+        method: "POST"
+      }),
+    onSuccess: (result) => {
+      update(result.terminal.id, result.terminal);
+      toast.success("终端已停止");
+    },
     onError: (error) => toast.error(error instanceof Error ? error.message : "停止终端失败")
   });
   const items = sessions.data?.items ?? [];
-  const selected = items.find((item) => item.id === selectedId) ?? items.find((item) => item.sessionId === sessionId) ?? items[0] ?? null;
-  const update = useCallback((id: string, next: Partial<TerminalChatSession>) => queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) => current ? { items: current.items.map((item) => item.id === id ? { ...item, ...next } : item) } : current), [project.id, queryClient]);
+  const selected =
+    items.find((item) => item.id === selectedId) ??
+    items.find((item) => item.sessionId === sessionId) ??
+    items[0] ??
+    null;
+  const update = useCallback(
+    (id: string, next: Partial<TerminalChatSession>) =>
+      queryClient.setQueryData<SessionList>(["terminal-chat-sessions", project.id], (current) =>
+        current
+          ? { items: current.items.map((item) => (item.id === id ? { ...item, ...next } : item)) }
+          : current
+      ),
+    [project.id, queryClient]
+  );
   const configure = useMutation({
     mutationFn: (input: { id: string; restartPolicy: "manual" | "on-unexpected-exit" }) =>
-      api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${input.id}`, { method: "PUT", body: JSON.stringify({ restartPolicy: input.restartPolicy }) }),
+      api<{ terminal: TerminalChatSession }>(`/api/terminal-sessions/${input.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ restartPolicy: input.restartPolicy })
+      }),
     onSuccess: (result) => update(result.terminal.id, result.terminal),
     onError: (error) => toast.error(error instanceof Error ? error.message : "更新重启策略失败")
   });
   const tabLabels = useMemo(
-    () => numberedDuplicateTitles(items.map((item) => ({ id: item.sessionId, title: item.title, createdAt: item.createdAt }))),
+    () =>
+      numberedDuplicateTitles(
+        items.map((item) => ({ id: item.sessionId, title: item.title, createdAt: item.createdAt }))
+      ),
     [items]
   );
   useEffect(() => {
-    const matched = items.find((item) => item.sessionId === sessionId) ?? items.find((item) => item.id === selectedId) ?? items[0];
+    const matched =
+      items.find((item) => item.sessionId === sessionId) ??
+      items.find((item) => item.id === selectedId) ??
+      items[0];
     if (matched) {
       if (matched.id !== selectedId) setSelectedId(matched.id);
       return;
@@ -1513,10 +2035,14 @@ export function TerminalChatPanel({
         return pruned.length === current.length ? current : pruned;
       }
       const next = [selected.id, ...pruned.filter((id) => id !== selected.id)].slice(0, 8);
-      return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+      return next.length === current.length && next.every((id, index) => id === current[index])
+        ? current
+        : next;
     });
   }, [items, selected]);
-  const visitedItems = items.filter((item) => item.id === selected?.id || visitedIds.includes(item.id));
+  const visitedItems = items.filter(
+    (item) => item.id === selected?.id || visitedIds.includes(item.id)
+  );
   const closeTab = (item: TerminalChatSession) => {
     setSwitcherOpen(false);
     onDeleteSession({
@@ -1550,46 +2076,62 @@ export function TerminalChatPanel({
               className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-left text-xs text-foreground"
               aria-label="选择终端对话"
             >
-              <span className={`size-1.5 shrink-0 rounded-full ${selected?.state === "running" ? "bg-emerald-500" : selected?.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-              <span className="min-w-0 flex-1 truncate">{selected ? shellTitle(selected) : "终端对话"}</span>
+              <span
+                className={`size-1.5 shrink-0 rounded-full ${selected?.state === "running" ? "bg-emerald-500" : selected?.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`}
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {selected ? shellTitle(selected) : "终端对话"}
+              </span>
               {items.length > 1 ? (
-                <span className="shrink-0 text-muted-foreground">{selectedIndex + 1}/{items.length}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {selectedIndex + 1}/{items.length}
+                </span>
               ) : null}
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[min(20rem,calc(100vw-1.5rem))]">
-            {items.length ? items.map((item) => (
-              <div key={item.id} className="flex items-center gap-1 px-1">
-                <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => openShell(item)}>
-                  <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
-                  <span className="min-w-0 flex-1 truncate">{shellTitle(item)}</span>
-                </DropdownMenuItem>
-                <button
-                  type="button"
-                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={`关闭 ${shellTitle(item)}`}
-                  disabled={deletingSessions}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    closeTab(item);
-                  }}
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            )) : (
+            {items.length ? (
+              items.map((item) => (
+                <div key={item.id} className="flex items-center gap-1 px-1">
+                  <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => openShell(item)}>
+                    <span
+                      className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{shellTitle(item)}</span>
+                  </DropdownMenuItem>
+                  <button
+                    type="button"
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`关闭 ${shellTitle(item)}`}
+                    disabled={deletingSessions}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeTab(item);
+                    }}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ))
+            ) : (
               <DropdownMenuItem disabled>还没有终端对话</DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            {profileItems.length ? profileItems.map((profile) => (
-              <DropdownMenuItem key={profile.id} disabled={create.isPending} onSelect={() => createFromProfile(profile.id)}>
-                <Plus className="size-3.5" />
-                新建 {profile.name}
-              </DropdownMenuItem>
-            )) : (
+            {profileItems.length ? (
+              profileItems.map((profile) => (
+                <DropdownMenuItem
+                  key={profile.id}
+                  disabled={create.isPending}
+                  onSelect={() => createFromProfile(profile.id)}
+                >
+                  <Plus className="size-3.5" />
+                  新建 {profile.name}
+                </DropdownMenuItem>
+              ))
+            ) : (
               <DropdownMenuItem disabled>还没有启动命令</DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={() => setManageProfilesOpen(true)}>
@@ -1599,11 +2141,17 @@ export function TerminalChatPanel({
             {selected ? (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem disabled={restart.isPending} onSelect={() => restart.mutate(selected.id)}>
+                <DropdownMenuItem
+                  disabled={restart.isPending}
+                  onSelect={() => restart.mutate(selected.id)}
+                >
                   <RotateCcw className="size-3.5" />
                   重启当前终端
                 </DropdownMenuItem>
-                <DropdownMenuItem disabled={stop.isPending} onSelect={() => stop.mutate(selected.id)}>
+                <DropdownMenuItem
+                  disabled={stop.isPending}
+                  onSelect={() => stop.mutate(selected.id)}
+                >
                   <Square className="size-3.5" />
                   停止当前终端
                 </DropdownMenuItem>
@@ -1631,7 +2179,9 @@ export function TerminalChatPanel({
               className="flex h-full items-center gap-1 px-1.5"
               onClick={() => openShell(item)}
             >
-              <span className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`} />
+              <span
+                className={`size-1.5 rounded-full ${item.state === "running" ? "bg-emerald-500" : item.state === "needs_attention" ? "bg-red-500" : "bg-muted-foreground"}`}
+              />
               <span className="max-w-40 truncate">{shellTitle(item)}</span>
             </button>
             <button
@@ -1651,8 +2201,31 @@ export function TerminalChatPanel({
         creating={create.isPending}
         onManage={() => setManageProfilesOpen(true)}
       />
-      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="新建终端对话" onClick={() => createFromProfile()} disabled={create.isPending}>{create.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}</Button>
-      <Button type="button" size="icon" variant="ghost" className="hidden size-8 sm:grid" aria-label="刷新终端对话" onClick={() => void sessions.refetch()}><RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} /></Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="hidden size-8 sm:grid"
+        aria-label="新建终端对话"
+        onClick={() => createFromProfile()}
+        disabled={create.isPending}
+      >
+        {create.isPending ? (
+          <LoaderCircle className="size-3.5 animate-spin" />
+        ) : (
+          <Plus className="size-3.5" />
+        )}
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="hidden size-8 sm:grid"
+        aria-label="刷新终端对话"
+        onClick={() => void sessions.refetch()}
+      >
+        <RefreshCw className={`size-3.5 ${sessions.isFetching ? "animate-spin" : ""}`} />
+      </Button>
     </>
   );
   const sessionActions = selected ? (
@@ -1662,13 +2235,36 @@ export function TerminalChatPanel({
         className="h-7 max-w-28 rounded-lg border border-border bg-background px-1.5 text-[11px] sm:max-w-36"
         value={selected.restartPolicy}
         disabled={configure.isPending}
-        onChange={(event) => configure.mutate({ id: selected.id, restartPolicy: event.target.value as "manual" | "on-unexpected-exit" })}
+        onChange={(event) =>
+          configure.mutate({
+            id: selected.id,
+            restartPolicy: event.target.value as "manual" | "on-unexpected-exit"
+          })
+        }
       >
         <option value="manual">手动重启</option>
         <option value="on-unexpected-exit">异常退出自动重启</option>
       </select>
-      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="重启终端对话" onClick={() => restart.mutate(selected.id)}><RotateCcw className="size-3.5" /></Button>
-      <Button type="button" size="icon" variant="ghost" className="size-7" aria-label="停止终端对话" onClick={() => stop.mutate(selected.id)}><Square className="size-3.5" /></Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        aria-label="重启终端对话"
+        onClick={() => restart.mutate(selected.id)}
+      >
+        <RotateCcw className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        aria-label="停止终端对话"
+        onClick={() => stop.mutate(selected.id)}
+      >
+        <Square className="size-3.5" />
+      </Button>
     </>
   ) : null;
   return (
@@ -1703,8 +2299,13 @@ export function TerminalChatPanel({
             <div>
               <BotMessageSquare className="mx-auto size-10 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium">新建一个终端对话</p>
-              <p className="mt-1 text-xs text-muted-foreground">关闭页面不会停止服务端的 CLI 进程。</p>
-              <Button className="mt-4" size="sm" onClick={() => createFromProfile()}><Plus className="size-4" />新建终端对话</Button>
+              <p className="mt-1 text-xs text-muted-foreground">
+                关闭页面不会停止服务端的 CLI 进程。
+              </p>
+              <Button className="mt-4" size="sm" onClick={() => createFromProfile()}>
+                <Plus className="size-4" />
+                新建终端对话
+              </Button>
             </div>
           </div>
         </>

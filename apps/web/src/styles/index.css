@@ -238,6 +238,25 @@ input[type="checkbox"] {
   background: color-mix(in oklab, var(--background) 90%, transparent);
   backdrop-filter: blur(16px);
 }
+.workspace-header-views {
+  scrollbar-width: none;
+}
+.workspace-header-views::-webkit-scrollbar {
+  display: none;
+}
+.settings-page-header {
+  min-height: calc(3rem + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: 0.375rem;
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+}
+@media (min-width: 640px) {
+  .settings-page-header {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+}
 .files-panel {
   background: transparent;
 }
@@ -1745,6 +1764,11 @@ button.user-attachment-path {
   .workspace-header {
     min-height: calc(var(--app-header-height, 3.5rem) + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+  .workspace-header-views {
+    overflow-x: auto;
   }
   .composer-chip-optional,
   .command-kbd,
@@ -2115,6 +2139,29 @@ button.user-attachment-path {
 .timeline-recent-toggle.is-open {
   background: var(--muted);
 }
+.workspace-recent-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 33;
+  pointer-events: none;
+}
+.workspace-recent-layer .timeline-outline,
+.workspace-recent-layer .timeline-outline-scrim {
+  pointer-events: auto;
+}
+.workspace-recent-layer .timeline-recent.timeline-outline {
+  top: 0.5rem;
+}
+@media (max-width: 767px) {
+  .workspace-shell.is-sidebar-open .workspace-recent-layer {
+    display: none;
+  }
+  .workspace-recent-layer .timeline-outline {
+    top: 0.5rem;
+    right: max(0.5rem, env(safe-area-inset-right));
+    max-height: min(70dvh, calc(100% - 1rem - env(safe-area-inset-bottom)));
+  }
+}
 .timeline-outline-scrim {
   display: none;
   margin: 0;
@@ -2348,10 +2395,10 @@ button.user-attachment-path {
   }
   .timeline-outline {
     top: 3.1rem;
-    right: 0.5rem;
-    left: 0.5rem;
+    right: max(0.5rem, env(safe-area-inset-right));
+    left: max(0.5rem, env(safe-area-inset-left));
     width: auto;
-    max-height: min(70dvh, calc(100% - 3.75rem));
+    max-height: min(70dvh, calc(100% - 3.75rem - env(safe-area-inset-bottom)));
   }
   .timeline-recent.timeline-outline {
     width: auto;

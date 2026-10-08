@@ -34,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeSwitch } from "@/components/theme-switch";
+import { RecentSessionsToggle } from "./RecentSessionsSwitcher";
 import { api } from "@/lib/api";
 import { copyMenuItemProps } from "@/lib/clipboard";
 import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
@@ -75,7 +76,9 @@ export function WorkspaceHeader({
   exportSession,
   copySession,
   onDeleteSession,
-  deletingSessions
+  deletingSessions,
+  recentOpen,
+  onToggleRecent
 }: {
   sidebar: boolean;
   isMobile: boolean;
@@ -122,120 +125,128 @@ export function WorkspaceHeader({
   copySession: (id: string) => void;
   onDeleteSession: (session: Session) => void;
   deletingSessions: boolean;
+  recentOpen: boolean;
+  onToggleRecent: () => void;
 }) {
   return (
-    <header className="workspace-header flex shrink-0 items-center gap-3 px-3 sm:px-5">
-      {(!sidebar || isMobile) && (
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 shrink-0"
-          aria-label="打开项目侧栏"
-          onClick={() => setSidebar(true)}
-        >
-          <Menu className="size-4" />
-        </Button>
-      )}
-      <div className="min-w-0 flex-1">
-        <h1 className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
-          {activeSession ? (
-            <>
-              <SessionIcon session={activeSession} labelled />
-              {renamingSessionId === activeSession.id ? (
-                <Input
-                  autoFocus
-                  value={renameDraft}
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onBlur={() => saveSessionTitle(activeSession.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") saveSessionTitle(activeSession.id);
-                    if (event.key === "Escape") {
-                      setRenamingSessionId("");
-                      setRenameDraft("");
-                    }
-                  }}
-                  className="h-7 min-w-0 max-w-md px-2 text-sm"
-                  aria-label="编辑 Session 标题"
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="min-w-0 truncate text-left hover:text-primary"
-                  onDoubleClick={() => beginRenameSession(activeSession)}
-                  title="双击重命名"
-                >
-                  {sessionDisplayTitle ?? activeSession.title}
-                </button>
-              )}
-              {runState && (
-                <span
-                  className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
-                    runState.reconnecting
-                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                      : runState.status === "running"
-                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        : runState.status === "completed"
-                          ? "bg-muted text-muted-foreground"
-                          : runState.status === "cancelled"
+    <header className="workspace-header flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-5 sm:py-0">
+      <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
+        {(!sidebar || isMobile) && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 shrink-0"
+            aria-label="打开项目侧栏"
+            onClick={() => setSidebar(true)}
+          >
+            <Menu className="size-4" />
+          </Button>
+        )}
+        <div className="min-w-0 flex-1">
+          <h1 className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
+            {activeSession ? (
+              <>
+                <SessionIcon session={activeSession} labelled />
+                {renamingSessionId === activeSession.id ? (
+                  <Input
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onBlur={() => saveSessionTitle(activeSession.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") saveSessionTitle(activeSession.id);
+                      if (event.key === "Escape") {
+                        setRenamingSessionId("");
+                        setRenameDraft("");
+                      }
+                    }}
+                    className="h-7 min-w-0 max-w-md px-2 text-sm"
+                    aria-label="编辑 Session 标题"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-left hover:text-primary"
+                    onDoubleClick={() => beginRenameSession(activeSession)}
+                    title="双击重命名"
+                  >
+                    {sessionDisplayTitle ?? activeSession.title}
+                  </button>
+                )}
+                {runState && (
+                  <span
+                    className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
+                      runState.reconnecting
+                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        : runState.status === "running"
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          : runState.status === "completed"
                             ? "bg-muted text-muted-foreground"
-                            : runState.status === "interrupted"
-                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                              : "bg-destructive/10 text-destructive"
-                  }`}
-                >
-                  {runState.status === "running" && (
-                    <LoaderCircle className="size-3 animate-spin" />
-                  )}
-                  {runState.reconnecting
-                    ? `重连中 ${runState.reconnecting.attempt}/${runState.reconnecting.maxAttempts}`
-                    : taskStatusLabel(runState.status)}
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="min-w-0 truncate">{activeProject.name}</span>
-          )}
-        </h1>
-        <p
-          className="mt-0.5 hidden truncate text-[11px] leading-4 text-muted-foreground sm:block"
-          title={[
-            activeProject.displayPath,
-            activeSession?.createdAt ? `会话 ${formatDateTime(activeSession.createdAt)}` : "",
-            selectedProvider?.runtimeHome
-              ? `客户端目录 ${selectedProvider.runtimeHome}`
-              : runtimeClientHome
-                ? `客户端目录 ${runtimeClientHome}`
-                : ""
-          ]
-            .filter(Boolean)
-            .join("\n")}
-        >
-          {[
-            activeProject.displayPath,
-            activeSession?.createdAt
-              ? `会话 ${formatCompactDateTime(activeSession.createdAt)}`
-              : "",
-            runState && runState.status !== "running" && runElapsed ? `耗时 ${runElapsed}` : "",
-            runFirstResponse ? `首响 ${runFirstResponse}` : "",
-            runTokenLabel ? `tokens ${runTokenLabel}` : "",
-            selectedProvider?.runtimeHome ?? runtimeClientHome
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-          {runState?.status === "running" ? (
-            <>
-              {" · 耗时 "}
-              <LiveDuration startedAt={runState.startedAt} />
-            </>
-          ) : null}
-        </p>
+                            : runState.status === "cancelled"
+                              ? "bg-muted text-muted-foreground"
+                              : runState.status === "interrupted"
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                : "bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    {runState.status === "running" && (
+                      <LoaderCircle className="size-3 animate-spin" />
+                    )}
+                    {runState.reconnecting
+                      ? `重连中 ${runState.reconnecting.attempt}/${runState.reconnecting.maxAttempts}`
+                      : taskStatusLabel(runState.status)}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="min-w-0 truncate">{activeProject.name}</span>
+            )}
+          </h1>
+          <p
+            className="mt-0.5 hidden truncate text-[11px] leading-4 text-muted-foreground sm:block"
+            title={[
+              activeProject.displayPath,
+              activeSession?.createdAt ? `会话 ${formatDateTime(activeSession.createdAt)}` : "",
+              selectedProvider?.runtimeHome
+                ? `客户端目录 ${selectedProvider.runtimeHome}`
+                : runtimeClientHome
+                  ? `客户端目录 ${runtimeClientHome}`
+                  : ""
+            ]
+              .filter(Boolean)
+              .join("\n")}
+          >
+            {[
+              activeProject.displayPath,
+              activeSession?.createdAt
+                ? `会话 ${formatCompactDateTime(activeSession.createdAt)}`
+                : "",
+              runState && runState.status !== "running" && runElapsed ? `耗时 ${runElapsed}` : "",
+              runFirstResponse ? `首响 ${runFirstResponse}` : "",
+              runTokenLabel ? `tokens ${runTokenLabel}` : "",
+              selectedProvider?.runtimeHome ?? runtimeClientHome
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            {runState?.status === "running" ? (
+              <>
+                {" · 耗时 "}
+                <LiveDuration startedAt={runState.startedAt} />
+              </>
+            ) : null}
+          </p>
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="workspace-header-actions order-2 flex shrink-0 items-center gap-1 sm:order-3">
+        <RecentSessionsToggle tone="header" open={recentOpen} onToggle={onToggleRecent} />
+        <ThemeSwitch />
+      </div>
+      <div className="workspace-header-views order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto sm:order-2 sm:w-auto sm:overflow-visible">
         <Tabs
           value={workspaceView}
           onValueChange={(value) => changeWorkspaceView(value as WorkspaceView)}
         >
-          <TabsList>
+          <TabsList className="shrink-0">
             <TabsTrigger value="chat" className="px-2.5 text-xs sm:px-3">
               <MessageSquareText />
               <span className="hidden sm:inline">对话</span>
@@ -252,12 +263,17 @@ export function WorkspaceHeader({
               <GitCompare />
               <span className="hidden sm:inline">{gitCount ? `Git ${gitCount}` : "Git"}</span>
             </TabsTrigger>
-            <TabsTrigger value="terminal" className="px-2.5 text-xs sm:px-3">
-              <TerminalSquare />
-              <span className="hidden sm:inline">终端</span>
-            </TabsTrigger>
           </TabsList>
         </Tabs>
+        {workspaceView === "terminal" ? (
+          <span
+            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-muted px-2.5 text-xs font-medium text-foreground"
+            aria-current="page"
+          >
+            <TerminalSquare className="size-3.5" />
+            终端
+          </span>
+        ) : null}
         {activeSession ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -265,7 +281,7 @@ export function WorkspaceHeader({
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-8"
+                className="size-8 shrink-0"
                 aria-label="Session 更多操作"
               >
                 <MoreHorizontal className="size-4" />
@@ -274,6 +290,9 @@ export function WorkspaceHeader({
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onSelect={() => beginRenameSession(activeSession)}>
                 <Pencil /> 重命名
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => changeWorkspaceView("terminal")}>
+                <TerminalSquare /> 打开终端
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void forkSessionFrom()}>
                 <GitFork /> 从此处分叉
@@ -369,7 +388,6 @@ export function WorkspaceHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <ThemeSwitch />
       </div>
     </header>
   );

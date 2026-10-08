@@ -75,7 +75,14 @@ export function scheduleTerminalFit(fit: () => void, onReady?: () => void) {
 }
 
 export function refreshTerminal(
-  term: { rows: number; refresh: (start: number, end: number) => void; clearTextureAtlas?: () => void } | null | undefined
+  term:
+    | {
+        rows: number;
+        refresh: (start: number, end: number) => void;
+        clearTextureAtlas?: () => void;
+      }
+    | null
+    | undefined
 ) {
   if (!term || term.rows <= 0) return;
   try {
@@ -93,7 +100,8 @@ export function shouldResetTerminalSnapshot(input: {
   nextPid?: number | null;
 }) {
   if (!input.replay || input.truncated) return true;
-  if (input.previousPid != null && input.nextPid != null && input.previousPid !== input.nextPid) return true;
+  if (input.previousPid != null && input.nextPid != null && input.previousPid !== input.nextPid)
+    return true;
   if (input.previousPid != null && input.nextPid == null) return true;
   return false;
 }
@@ -179,6 +187,21 @@ export const terminalKeyboardFieldProps = {
   lang: "zh-CN",
   name: "codex-omni-terminal-keyboard"
 };
+
+export function insertComposerNewline(
+  value: string,
+  start: number | null | undefined,
+  end: number | null | undefined
+): { value: string; cursor: number } {
+  const length = value.length;
+  const from = start == null || Number.isNaN(start) ? length : Math.min(Math.max(0, start), length);
+  const rawEnd = end == null || Number.isNaN(end) ? from : Math.min(Math.max(0, end), length);
+  const to = Math.max(from, rawEnd);
+  return {
+    value: `${value.slice(0, from)}\n${value.slice(to)}`,
+    cursor: from + 1
+  };
+}
 
 export function shouldSubmitTerminalKeyboard(event: {
   key: string;

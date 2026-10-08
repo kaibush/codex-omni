@@ -6,6 +6,7 @@ export type PaletteAction =
   | { type: "new-session" }
   | { type: "new-project" }
   | { type: "open-view"; view: "chat" | "files" | "git" | "terminal" | "terminal-chat" }
+  | { type: "open-recent-sessions" }
   | { type: "open-settings" }
   | { type: "open-providers" }
   | { type: "open-running-center" }
@@ -71,6 +72,14 @@ export const PALETTE_COMMANDS: PaletteItem[] = [
     subtitle: "切换到聊天时间线",
     keywords: ["chat", "对话", "消息", "dkdh", "dh"],
     action: { type: "open-view", view: "chat" }
+  },
+  {
+    id: "cmd:recent-sessions",
+    group: "command",
+    title: "最近对话",
+    subtitle: "打开全部工程的最近对话",
+    keywords: ["recent", "history", "最近", "最近对话", "历史", "zjdh", "lsdh"],
+    action: { type: "open-recent-sessions" }
   },
   {
     id: "cmd:open-terminal-chat",

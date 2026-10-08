@@ -32,6 +32,7 @@ import {
   Settings,
   ShieldQuestion,
   Star,
+  TerminalSquare,
   Trash2,
   Wifi,
   WifiOff
@@ -60,7 +61,8 @@ import {
   loadExpandedProjectIds,
   persistExpandedProjectIds,
   toggleExpandedProjectId,
-  type ConnectionState
+  type ConnectionState,
+  type WorkspaceView
 } from "./workspace-model";
 
 function SettingsToolsMenu({
@@ -156,6 +158,7 @@ export function WorkspaceSidebar({
   sessionDisplayTitles,
   sessionGroups,
   sessionId,
+  workspaceView,
   sessionLoading,
   providerNames,
   sessionsPending,
@@ -222,13 +225,17 @@ export function WorkspaceSidebar({
   beginRenameProject: (project: Project) => void;
   beginChangeProjectPath: (project: Project) => void;
   updateProject: {
-    mutate: (input: { id: string; changes: { name?: string; path?: string; pinned?: boolean } }) => void;
+    mutate: (input: {
+      id: string;
+      changes: { name?: string; path?: string; pinned?: boolean };
+    }) => void;
   };
   deleteProject: { mutate: (id: string) => void };
   projectSessions: Session[];
   sessionDisplayTitles?: Map<string, string>;
   sessionGroups: Array<{ key: string; label: string; items: Session[] }>;
   sessionId: string;
+  workspaceView: WorkspaceView;
   sessionLoading: boolean;
   providerNames: Map<string, string>;
   sessionsPending: boolean;
@@ -273,12 +280,19 @@ export function WorkspaceSidebar({
   providersCount: number;
   host?: HostInfo | undefined;
 }) {
-  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() => loadExpandedProjectIds());
+  const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>(() =>
+    loadExpandedProjectIds()
+  );
   const [selectingSessions, setSelectingSessions] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const currentProjectExpanded = Boolean(projectId) && expandedProjectIds.includes(projectId);
   const openHome = () => {
     openWorkspace("", "", false, "chat");
+    if (isMobile) setSidebar(false);
+  };
+  const openTerminal = () => {
+    if (!projectId) return;
+    openWorkspace(projectId, sessionId, false, "terminal");
     if (isMobile) setSidebar(false);
   };
   useEffect(() => {
@@ -290,9 +304,12 @@ export function WorkspaceSidebar({
     setSelectingSessions(false);
     setSelectedSessionIds([]);
   }, [currentProjectExpanded]);
-  const visibleSessionIds = sessionGroups.flatMap((group) => group.items.map((session) => session.id));
+  const visibleSessionIds = sessionGroups.flatMap((group) =>
+    group.items.map((session) => session.id)
+  );
   const allVisibleSelected =
-    visibleSessionIds.length > 0 && visibleSessionIds.every((id) => selectedSessionIds.includes(id));
+    visibleSessionIds.length > 0 &&
+    visibleSessionIds.every((id) => selectedSessionIds.includes(id));
   const toggleSessionSelected = (id: string) => {
     setSelectedSessionIds((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -415,6 +432,21 @@ export function WorkspaceSidebar({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right">搜索所有</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant={workspaceView === "terminal" ? "secondary" : "ghost"}
+                    className="size-8 shrink-0"
+                    disabled={!projectId}
+                    aria-label="打开终端"
+                    onClick={openTerminal}
+                  >
+                    <TerminalSquare className="size-4 shrink-0" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">终端</TooltipContent>
               </Tooltip>
               <div className="mt-1 flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-auto">
                 {projectList.map((project) => {
@@ -541,6 +573,20 @@ export function WorkspaceSidebar({
                 </button>
                 <button
                   type="button"
+                  className={`mt-1 flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs disabled:pointer-events-none disabled:opacity-50 ${
+                    workspaceView === "terminal"
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                  disabled={!projectId}
+                  aria-label="打开终端"
+                  onClick={openTerminal}
+                >
+                  <TerminalSquare className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate">终端</span>
+                </button>
+                <button
+                  type="button"
                   className={`mt-1 flex h-7 w-full items-center gap-2 rounded-lg px-2.5 text-left text-xs ${
                     showArchived
                       ? "bg-primary/10 font-medium text-primary"
@@ -616,53 +662,57 @@ export function WorkspaceSidebar({
                         />
                       ) : (
                         <>
-                        <button
-                          type="button"
-                          aria-label={expandedProjectIds.includes(project.id) ? `折叠 ${project.name}` : `展开 ${project.name}`}
-                          aria-expanded={expandedProjectIds.includes(project.id)}
-                          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleProjectExpanded(project.id);
-                          }}
-                        >
-                          {expandedProjectIds.includes(project.id) ? (
-                            <ChevronDown className="size-3" />
-                          ) : (
-                            <ChevronRight className="size-3" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            openWorkspace(project.id, "", false, "chat");
-                            setExpandedProjectIds((current) => {
-                              if (current.includes(project.id)) return current;
-                              const next = [...current, project.id];
-                              persistExpandedProjectIds(next);
-                              return next;
-                            });
-                            if (isMobile) setSidebar(false);
-                          }}
-                          onDoubleClick={(event) => {
-                            event.preventDefault();
-                            beginRenameProject(project);
-                          }}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
-                        >
-                          <Folder className="size-4 text-primary" />
-                          <span className="min-w-0 truncate">
-                            <span className="block truncate">
-                              {project.pinnedAt ? "★ " : ""}
-                              {project.name}
+                          <button
+                            type="button"
+                            aria-label={
+                              expandedProjectIds.includes(project.id)
+                                ? `折叠 ${project.name}`
+                                : `展开 ${project.name}`
+                            }
+                            aria-expanded={expandedProjectIds.includes(project.id)}
+                            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleProjectExpanded(project.id);
+                            }}
+                          >
+                            {expandedProjectIds.includes(project.id) ? (
+                              <ChevronDown className="size-3" />
+                            ) : (
+                              <ChevronRight className="size-3" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openWorkspace(project.id, "", false, "chat");
+                              setExpandedProjectIds((current) => {
+                                if (current.includes(project.id)) return current;
+                                const next = [...current, project.id];
+                                persistExpandedProjectIds(next);
+                                return next;
+                              });
+                              if (isMobile) setSidebar(false);
+                            }}
+                            onDoubleClick={(event) => {
+                              event.preventDefault();
+                              beginRenameProject(project);
+                            }}
+                            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
+                          >
+                            <Folder className="size-4 text-primary" />
+                            <span className="min-w-0 truncate">
+                              <span className="block truncate">
+                                {project.pinnedAt ? "★ " : ""}
+                                {project.name}
+                              </span>
+                              <span className="block truncate text-[10px] font-normal text-muted-foreground">
+                                {formatCompactDateTime(
+                                  projectSort === "updated" ? project.updatedAt : project.createdAt
+                                )}
+                              </span>
                             </span>
-                            <span className="block truncate text-[10px] font-normal text-muted-foreground">
-                              {formatCompactDateTime(
-                                projectSort === "updated" ? project.updatedAt : project.createdAt
-                              )}
-                            </span>
-                          </span>
-                        </button>
+                          </button>
                         </>
                       )}
                       <button
@@ -789,268 +839,277 @@ export function WorkspaceSidebar({
                             {group.items.map((s) => {
                               const displayTitle = sessionDisplayTitles?.get(s.id) ?? s.title;
                               return (
-                              <div
-                                key={s.id}
-                                className={`session-row group my-px flex min-h-8 w-full items-center gap-0.5 rounded-md px-1 py-0.5 text-xs ${
-                                  s.id === sessionId ? "active" : "text-muted-foreground"
-                                } ${s.archivedAt ? "opacity-75" : ""}`}
-                                style={
-                                  s.color
-                                    ? {
-                                        boxShadow: `inset 3px 0 0 ${SESSION_COLORS.find((item) => item.id === s.color)?.swatch ?? "transparent"}`
-                                      }
-                                    : undefined
-                                }
-                              >
-                                {selectingSessions ? (
-                                  <input
-                                    type="checkbox"
-                                    className="ml-1 size-4 shrink-0 accent-primary"
-                                    checked={selectedSessionIds.includes(s.id)}
-                                    aria-label={`选择 ${displayTitle}`}
-                                    onChange={() => toggleSessionSelected(s.id)}
-                                    onClick={(event) => event.stopPropagation()}
-                                  />
-                                ) : null}
-                                {(() => {
-                                  const Icon = sessionIcon(s.icon);
-                                  return Icon ? (
-                                    <Icon className="ml-1 size-3.5 shrink-0" />
-                                  ) : (
-                                    <span
-                                      title={
-                                        s.status === "running"
-                                          ? "任务进行中"
-                                          : s.status === "failed"
-                                            ? "任务异常中断"
-                                            : s.status === "cancelled"
-                                              ? "已手动终止"
-                                              : s.status === "interrupted"
-                                                ? "任务未完成（已中断）"
-                                                : "空闲"
-                                      }
-                                      className={`ml-1 size-1.5 shrink-0 rounded-full ${
-                                        s.status === "running"
-                                          ? "animate-pulse bg-emerald-500"
-                                          : s.status === "failed"
-                                            ? "bg-red-500"
-                                            : s.status === "cancelled"
-                                              ? "bg-muted-foreground"
-                                              : s.status === "interrupted"
-                                                ? "bg-amber-500"
-                                                : "bg-border"
-                                      }`}
+                                <div
+                                  key={s.id}
+                                  className={`session-row group my-px flex min-h-8 w-full items-center gap-0.5 rounded-md px-1 py-0.5 text-xs ${
+                                    s.id === sessionId ? "active" : "text-muted-foreground"
+                                  } ${s.archivedAt ? "opacity-75" : ""}`}
+                                  style={
+                                    s.color
+                                      ? {
+                                          boxShadow: `inset 3px 0 0 ${SESSION_COLORS.find((item) => item.id === s.color)?.swatch ?? "transparent"}`
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  {selectingSessions ? (
+                                    <input
+                                      type="checkbox"
+                                      className="ml-1 size-4 shrink-0 accent-primary"
+                                      checked={selectedSessionIds.includes(s.id)}
+                                      aria-label={`选择 ${displayTitle}`}
+                                      onChange={() => toggleSessionSelected(s.id)}
+                                      onClick={(event) => event.stopPropagation()}
                                     />
-                                  );
-                                })()}
-                                {renamingSessionId === s.id ? (
-                                  <Input
-                                    autoFocus
-                                    value={renameDraft}
-                                    onChange={(event) => setRenameDraft(event.target.value)}
-                                    onBlur={() => saveSessionTitle(s.id)}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter") saveSessionTitle(s.id);
-                                      if (event.key === "Escape") {
-                                        setRenamingSessionId("");
-                                        setRenameDraft("");
-                                      }
-                                    }}
-                                    className="h-7 min-w-0 flex-1 px-2 text-xs"
-                                    aria-label="重命名 Session"
-                                  />
-                                ) : (
-                                  <button
-                                    type="button"
-                                    title={displayTitle}
-                                    onClick={() => {
-                                      if (selectingSessions) {
-                                        toggleSessionSelected(s.id);
-                                        return;
-                                      }
-                                      openWorkspace(projectId, s.id, false, s.kind === "terminal-chat" ? "terminal-chat" : "chat");
-                                      if (isMobile) setSidebar(false);
-                                    }}
-                                    onDoubleClick={() => {
-                                      if (!selectingSessions) beginRenameSession(s);
-                                    }}
-                                    onContextMenu={(event) => {
-                                      event.preventDefault();
-                                      if (!selectingSessions) beginRenameSession(s);
-                                    }}
-                                    onTouchStart={() => {
-                                      if (!selectingSessions) startSessionLongPress(s);
-                                    }}
-                                    onTouchEnd={cancelSessionLongPress}
-                                    onTouchMove={cancelSessionLongPress}
-                                    onTouchCancel={cancelSessionLongPress}
-                                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
-                                  >
-                                    <SessionIcon session={s} className="size-3.5" labelled />
-                                    <span className="min-w-0 flex-1">
-                                      <span className="flex items-center gap-1">
-                                        {s.pinnedAt ? (
-                                          <Pin className="size-3 shrink-0 text-primary" />
-                                        ) : null}
-                                        <span className="truncate">{displayTitle}</span>
-                                        {s.id === sessionId && sessionLoading && (
-                                          <LoaderCircle className="size-3 shrink-0 animate-spin text-primary" />
-                                        )}
-                                      </span>
-                                      <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-                                        <span
-                                          className="truncate font-mono"
-                                          title={`${sessionSort === "created" ? "创建于" : "更新于"} ${formatDateTime(sessionListTime(s, sessionSort))}`}
-                                        >
-                                          {formatCompactDateTime(sessionListTime(s, sessionSort))}
-                                        </span>
-                                        {s.providerId ? (
-                                          <span className="truncate">
-                                            · {providerNames.get(s.providerId)}
-                                          </span>
-                                        ) : null}
-                                      </span>
-                                    </span>
-                                  </button>
-                                )}
-                                {!selectingSessions ? <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
+                                  ) : null}
+                                  {(() => {
+                                    const Icon = sessionIcon(s.icon);
+                                    return Icon ? (
+                                      <Icon className="ml-1 size-3.5 shrink-0" />
+                                    ) : (
+                                      <span
+                                        title={
+                                          s.status === "running"
+                                            ? "任务进行中"
+                                            : s.status === "failed"
+                                              ? "任务异常中断"
+                                              : s.status === "cancelled"
+                                                ? "已手动终止"
+                                                : s.status === "interrupted"
+                                                  ? "任务未完成（已中断）"
+                                                  : "空闲"
+                                        }
+                                        className={`ml-1 size-1.5 shrink-0 rounded-full ${
+                                          s.status === "running"
+                                            ? "animate-pulse bg-emerald-500"
+                                            : s.status === "failed"
+                                              ? "bg-red-500"
+                                              : s.status === "cancelled"
+                                                ? "bg-muted-foreground"
+                                                : s.status === "interrupted"
+                                                  ? "bg-amber-500"
+                                                  : "bg-border"
+                                        }`}
+                                      />
+                                    );
+                                  })()}
+                                  {renamingSessionId === s.id ? (
+                                    <Input
+                                      autoFocus
+                                      value={renameDraft}
+                                      onChange={(event) => setRenameDraft(event.target.value)}
+                                      onBlur={() => saveSessionTitle(s.id)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") saveSessionTitle(s.id);
+                                        if (event.key === "Escape") {
+                                          setRenamingSessionId("");
+                                          setRenameDraft("");
+                                        }
+                                      }}
+                                      className="h-7 min-w-0 flex-1 px-2 text-xs"
+                                      aria-label="重命名 Session"
+                                    />
+                                  ) : (
                                     <button
                                       type="button"
-                                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
-                                      aria-label={`${displayTitle} 的更多操作`}
+                                      title={displayTitle}
+                                      onClick={() => {
+                                        if (selectingSessions) {
+                                          toggleSessionSelected(s.id);
+                                          return;
+                                        }
+                                        openWorkspace(
+                                          projectId,
+                                          s.id,
+                                          false,
+                                          s.kind === "terminal-chat" ? "terminal-chat" : "chat"
+                                        );
+                                        if (isMobile) setSidebar(false);
+                                      }}
+                                      onDoubleClick={() => {
+                                        if (!selectingSessions) beginRenameSession(s);
+                                      }}
+                                      onContextMenu={(event) => {
+                                        event.preventDefault();
+                                        if (!selectingSessions) beginRenameSession(s);
+                                      }}
+                                      onTouchStart={() => {
+                                        if (!selectingSessions) startSessionLongPress(s);
+                                      }}
+                                      onTouchEnd={cancelSessionLongPress}
+                                      onTouchMove={cancelSessionLongPress}
+                                      onTouchCancel={cancelSessionLongPress}
+                                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left"
                                     >
-                                      <MoreHorizontal className="size-3.5" />
+                                      <SessionIcon session={s} className="size-3.5" labelled />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="flex items-center gap-1">
+                                          {s.pinnedAt ? (
+                                            <Pin className="size-3 shrink-0 text-primary" />
+                                          ) : null}
+                                          <span className="truncate">{displayTitle}</span>
+                                          {s.id === sessionId && sessionLoading && (
+                                            <LoaderCircle className="size-3 shrink-0 animate-spin text-primary" />
+                                          )}
+                                        </span>
+                                        <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                                          <span
+                                            className="truncate font-mono"
+                                            title={`${sessionSort === "created" ? "创建于" : "更新于"} ${formatDateTime(sessionListTime(s, sessionSort))}`}
+                                          >
+                                            {formatCompactDateTime(sessionListTime(s, sessionSort))}
+                                          </span>
+                                          {s.providerId ? (
+                                            <span className="truncate">
+                                              · {providerNames.get(s.providerId)}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </span>
                                     </button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="w-48">
-                                    <DropdownMenuItem onSelect={() => beginRenameSession(s)}>
-                                      <Pencil /> 重命名
-                                    </DropdownMenuItem>
-                                    <div className="flex flex-wrap gap-1 px-2 py-1.5">
-                                      {SESSION_COLORS.map((color) => (
+                                  )}
+                                  {!selectingSessions ? (
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
                                         <button
-                                          key={color.id}
                                           type="button"
-                                          className={`size-4 rounded-full ${color.className} ${s.color === color.id ? "ring-2 ring-offset-1 ring-foreground" : ""}`}
-                                          aria-label={`颜色 ${color.id}`}
-                                          onClick={() =>
+                                          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
+                                          aria-label={`${displayTitle} 的更多操作`}
+                                        >
+                                          <MoreHorizontal className="size-3.5" />
+                                        </button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="w-48">
+                                        <DropdownMenuItem onSelect={() => beginRenameSession(s)}>
+                                          <Pencil /> 重命名
+                                        </DropdownMenuItem>
+                                        <div className="flex flex-wrap gap-1 px-2 py-1.5">
+                                          {SESSION_COLORS.map((color) => (
+                                            <button
+                                              key={color.id}
+                                              type="button"
+                                              className={`size-4 rounded-full ${color.className} ${s.color === color.id ? "ring-2 ring-offset-1 ring-foreground" : ""}`}
+                                              aria-label={`颜色 ${color.id}`}
+                                              onClick={() =>
+                                                updateSession.mutate({
+                                                  id: s.id,
+                                                  changes: {
+                                                    color: s.color === color.id ? null : color.id
+                                                  }
+                                                })
+                                              }
+                                            />
+                                          ))}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1 px-2 pb-1.5">
+                                          {SESSION_ICONS.map((item) => {
+                                            const Icon = item.icon;
+                                            return (
+                                              <button
+                                                key={item.id}
+                                                type="button"
+                                                className={`grid size-6 place-items-center rounded-md ${s.icon === item.id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                                                aria-label={item.label}
+                                                onClick={() =>
+                                                  updateSession.mutate({
+                                                    id: s.id,
+                                                    changes: {
+                                                      icon: s.icon === item.id ? null : item.id
+                                                    }
+                                                  })
+                                                }
+                                              >
+                                                <Icon className="size-3.5" />
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                        <DropdownMenuItem
+                                          onSelect={() => {
+                                            const next = window.prompt(
+                                              "标签，用逗号分隔",
+                                              (s.tags ?? []).join(", ")
+                                            );
+                                            if (next == null) return;
                                             updateSession.mutate({
                                               id: s.id,
                                               changes: {
-                                                color: s.color === color.id ? null : color.id
+                                                tags: next
+                                                  .split(/[,，]/)
+                                                  .map((item) => item.trim())
+                                                  .filter(Boolean)
+                                                  .slice(0, 8)
                                               }
+                                            });
+                                          }}
+                                        >
+                                          标签
+                                          {(s.tags ?? []).length
+                                            ? ` · ${(s.tags ?? []).join(" / ")}`
+                                            : ""}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() => {
+                                            void forkSessionFrom(undefined, s.id);
+                                          }}
+                                        >
+                                          <GitFork /> 从此处分叉
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() =>
+                                            updateSession.mutate({
+                                              id: s.id,
+                                              changes: { pinned: !s.pinnedAt }
                                             })
                                           }
-                                        />
-                                      ))}
-                                    </div>
-                                    <div className="flex flex-wrap gap-1 px-2 pb-1.5">
-                                      {SESSION_ICONS.map((item) => {
-                                        const Icon = item.icon;
-                                        return (
-                                          <button
-                                            key={item.id}
-                                            type="button"
-                                            className={`grid size-6 place-items-center rounded-md ${s.icon === item.id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted"}`}
-                                            aria-label={item.label}
-                                            onClick={() =>
-                                              updateSession.mutate({
-                                                id: s.id,
-                                                changes: {
-                                                  icon: s.icon === item.id ? null : item.id
-                                                }
-                                              })
-                                            }
-                                          >
-                                            <Icon className="size-3.5" />
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        const next = window.prompt(
-                                          "标签，用逗号分隔",
-                                          (s.tags ?? []).join(", ")
-                                        );
-                                        if (next == null) return;
-                                        updateSession.mutate({
-                                          id: s.id,
-                                          changes: {
-                                            tags: next
-                                              .split(/[,，]/)
-                                              .map((item) => item.trim())
-                                              .filter(Boolean)
-                                              .slice(0, 8)
-                                          }
-                                        });
-                                      }}
-                                    >
-                                      标签
-                                      {(s.tags ?? []).length
-                                        ? ` · ${(s.tags ?? []).join(" / ")}`
-                                        : ""}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        void forkSessionFrom(undefined, s.id);
-                                      }}
-                                    >
-                                      <GitFork /> 从此处分叉
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        updateSession.mutate({
-                                          id: s.id,
-                                          changes: { pinned: !s.pinnedAt }
-                                        })
-                                      }
-                                    >
-                                      {s.pinnedAt ? <PinOff /> : <Pin />}
-                                      {s.pinnedAt ? "取消置顶" : "置顶"}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={() => archiveSession(s, !s.archivedAt)}
-                                    >
-                                      {s.archivedAt ? <ArchiveRestore /> : <Archive />}
-                                      {s.archivedAt ? "恢复归档" : "归档"}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    {s.kind !== "terminal-chat" ? (
-                                      <DropdownMenuItem onSelect={() => copySession(s.id)}>
-                                        <Copy /> 复制对话
-                                      </DropdownMenuItem>
-                                    ) : null}
-                                    <DropdownMenuItem
-                                      onSelect={() => exportSession(s.id, "markdown")}
-                                    >
-                                      <Download /> 导出 Markdown
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onSelect={() => exportSession(s.id, "json")}>
-                                      <Download /> 导出 JSON
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      {...copyMenuItemProps(s.id, (copied) =>
-                                        copied
-                                          ? toast.success("已复制 Session ID")
-                                          : toast.error("复制失败，请长按选择 Session ID")
-                                      )}
-                                    >
-                                      <Copy /> 复制 Session ID
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      disabled={deletingSessions}
-                                      onSelect={() => onDeleteSessions([s])}
-                                    >
-                                      <Trash2 /> 删除
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu> : null}
-                              </div>
-                            );
+                                        >
+                                          {s.pinnedAt ? <PinOff /> : <Pin />}
+                                          {s.pinnedAt ? "取消置顶" : "置顶"}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() => archiveSession(s, !s.archivedAt)}
+                                        >
+                                          {s.archivedAt ? <ArchiveRestore /> : <Archive />}
+                                          {s.archivedAt ? "恢复归档" : "归档"}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        {s.kind !== "terminal-chat" ? (
+                                          <DropdownMenuItem onSelect={() => copySession(s.id)}>
+                                            <Copy /> 复制对话
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                        <DropdownMenuItem
+                                          onSelect={() => exportSession(s.id, "markdown")}
+                                        >
+                                          <Download /> 导出 Markdown
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onSelect={() => exportSession(s.id, "json")}
+                                        >
+                                          <Download /> 导出 JSON
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          {...copyMenuItemProps(s.id, (copied) =>
+                                            copied
+                                              ? toast.success("已复制 Session ID")
+                                              : toast.error("复制失败，请长按选择 Session ID")
+                                          )}
+                                        >
+                                          <Copy /> 复制 Session ID
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          variant="destructive"
+                                          disabled={deletingSessions}
+                                          onSelect={() => onDeleteSessions([s])}
+                                        >
+                                          <Trash2 /> 删除
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  ) : null}
+                                </div>
+                              );
                             })}
                             {group.key === "archived" && group.items.length === 0 ? (
                               <p className="px-2 py-3 text-[11px] text-muted-foreground">
@@ -1084,7 +1143,9 @@ export function WorkspaceSidebar({
                       type="button"
                       className="h-8 shrink-0 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                       disabled={!visibleSessionIds.length || deletingSessions}
-                      onClick={() => setSelectedSessionIds(allVisibleSelected ? [] : visibleSessionIds)}
+                      onClick={() =>
+                        setSelectedSessionIds(allVisibleSelected ? [] : visibleSessionIds)
+                      }
                     >
                       {allVisibleSelected ? "取消全选" : "全选"}
                     </button>
@@ -1123,11 +1184,17 @@ export function WorkspaceSidebar({
                     <span title={`${host.cpu.cores} 核 · ${host.cpu.usage}%`}>
                       {host.cpu.cores} 核 · {host.cpu.usage}%
                     </span>
-                    <span title={`内存 ${formatDataSize(host.memory.used, true)}/${formatDataSize(host.memory.total, true)}`}>
-                      内存 {formatDataSize(host.memory.used, true)}/{formatDataSize(host.memory.total, true)}
+                    <span
+                      title={`内存 ${formatDataSize(host.memory.used, true)}/${formatDataSize(host.memory.total, true)}`}
+                    >
+                      内存 {formatDataSize(host.memory.used, true)}/
+                      {formatDataSize(host.memory.total, true)}
                     </span>
-                    <span title={`存储 ${formatDataSize(host.storage.used, true)}/${formatDataSize(host.storage.total, true)}`}>
-                      存储 {formatDataSize(host.storage.used, true)}/{formatDataSize(host.storage.total, true)}
+                    <span
+                      title={`存储 ${formatDataSize(host.storage.used, true)}/${formatDataSize(host.storage.total, true)}`}
+                    >
+                      存储 {formatDataSize(host.storage.used, true)}/
+                      {formatDataSize(host.storage.total, true)}
                     </span>
                   </button>
                 ) : null}

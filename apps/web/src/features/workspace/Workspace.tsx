@@ -59,9 +59,11 @@ import {
 } from "@/lib/composer-selection";
 import {
   isPlaceholderSessionTitle,
+  readSessionListSort,
   sortSessions,
   sortSessionsByLatest,
   titleFromFirstMessage,
+  writeSessionListSort,
   type SessionListSort
 } from "@/lib/session-title";
 import {
@@ -109,7 +111,10 @@ import {
   mergeSessionOutline
 } from "@/features/workspace/timeline-outline";
 import { ChangeProjectPathDialog } from "@/features/workspace/ChangeProjectPathDialog";
-import { DeleteSessionsDialog, type SessionToDelete } from "@/features/workspace/DeleteSessionsDialog";
+import {
+  DeleteSessionsDialog,
+  type SessionToDelete
+} from "@/features/workspace/DeleteSessionsDialog";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
@@ -142,6 +147,7 @@ import {
   type FileSearchMatch,
   type OpenFileRequest
 } from "@/features/workspace/file-workspace";
+import { RecentSessionsOverlay } from "@/features/workspace/RecentSessionsSwitcher";
 import { RunningCenterDialog, useActiveRuns } from "@/features/workspace/RunningCenterDialog";
 import { ProjectKnowledgeDialog } from "@/features/workspace/ProjectKnowledgeDialog";
 import { ScheduleDialog } from "@/features/workspace/ScheduleDialog";
@@ -306,19 +312,10 @@ export function Workspace() {
       // private browsing
     }
   }, [projectSort]);
-  const [sessionSort, setSessionSort] = useState<SessionListSort>(() => {
-    try {
-      return localStorage.getItem("codex-omni:session-sort") === "updated" ? "updated" : "created";
-    } catch {
-      return "created";
-    }
-  });
+  const [sessionSort, setSessionSort] = useState<SessionListSort>(readSessionListSort);
+  const [recentOpen, setRecentOpen] = useState(false);
   useEffect(() => {
-    try {
-      localStorage.setItem("codex-omni:session-sort", sessionSort);
-    } catch {
-      // private browsing
-    }
+    writeSessionListSort(sessionSort);
   }, [sessionSort]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [renamingProjectId, setRenamingProjectId] = useState("");
@@ -1705,6 +1702,11 @@ export function Workspace() {
       setRunningCenterOpen(true);
       return;
     }
+    if (action.type === "open-recent-sessions") {
+      setRecentOpen(true);
+      if (isMobile) setSidebar(false);
+      return;
+    }
     if (action.type === "open-tasks") {
       setTaskBoardOpen(true);
       return;
@@ -1817,9 +1819,7 @@ export function Workspace() {
           projectId,
           next?.id ?? "",
           true,
-          next?.kind === "terminal-chat" || terminalChat
-            ? "terminal-chat"
-            : "chat"
+          next?.kind === "terminal-chat" || terminalChat ? "terminal-chat" : "chat"
         );
       }
       for (const id of result.deleted) void qc.removeQueries({ queryKey: ["session", id] });
@@ -2636,6 +2636,7 @@ export function Workspace() {
         sessionDisplayTitles={sessionDisplayTitles}
         sessionGroups={sessionGroups}
         sessionId={sessionId}
+        workspaceView={workspaceView}
         sessionLoading={sessionLoading}
         providerNames={providerNames}
         sessionsPending={sessions.isPending}
@@ -2715,6 +2716,14 @@ export function Workspace() {
               copySession={(id) => void copySession(id)}
               onDeleteSession={(session) => requestDeleteSessions([session])}
               deletingSessions={deleteSessions.isPending}
+              recentOpen={recentOpen}
+              onToggleRecent={() => {
+                setRecentOpen((open) => {
+                  const next = !open;
+                  if (next && isMobile) setSidebar(false);
+                  return next;
+                });
+              }}
             />
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               {workspaceView !== "terminal-chat" && (
@@ -2779,12 +2788,12 @@ export function Workspace() {
                         : "chat"
                     )
                   }
-                  onOpenRecentSession={(nextProjectId, nextSessionId) => {
-                    openWorkspace(nextProjectId, nextSessionId, false, "chat");
+                  recentOpen={recentOpen}
+                  onCloseRecent={() => setRecentOpen(false)}
+                  onShowRecent={() => {
+                    setRecentOpen(true);
                     if (isMobile) setSidebar(false);
                   }}
-                  sessionSort={sessionSort}
-                  onSessionSort={setSessionSort}
                   runState={runState}
                   connection={connection}
                   sendNotice={sendNotice}
@@ -2933,6 +2942,23 @@ export function Workspace() {
                   </Suspense>
                 </div>
               ) : null}
+              <RecentSessionsOverlay
+                open={recentOpen}
+                activeSessionId={sessionId || undefined}
+                sort={sessionSort}
+                onSort={setSessionSort}
+                onClose={() => setRecentOpen(false)}
+                onOpen={(nextProjectId, nextSessionId, kind) => {
+                  setRecentOpen(false);
+                  openWorkspace(
+                    nextProjectId,
+                    nextSessionId,
+                    false,
+                    kind === "terminal-chat" ? "terminal-chat" : "chat"
+                  );
+                  if (isMobile) setSidebar(false);
+                }}
+              />
             </div>
           </>
         ) : (

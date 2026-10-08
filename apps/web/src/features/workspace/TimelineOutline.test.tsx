@@ -54,10 +54,8 @@ describe("timeline chrome layout", () => {
     const css = readFileSync(join(dir, "../../styles/index.css"), "utf8");
     expect(timeline).toContain("timeline-chrome");
     expect(timeline).toContain("TimelineOutlineToggle");
-    expect(timeline).toContain("RecentSessionsToggle");
-    expect(timeline.indexOf("<TimelineOutlineToggle")).toBeLessThan(
-      timeline.indexOf("<RecentSessionsToggle")
-    );
+    expect(timeline).not.toContain("RecentSessionsToggle");
+    expect(timeline).toContain("全部最近对话");
     expect(timeline).toContain("timeline-view-toggle");
     expect(timeline).not.toMatch(/chat-content-width[\s\S]*timeline-view-float/);
     expect(css).toContain(".chat-pane:has(.timeline-chrome) .chat-scroll");

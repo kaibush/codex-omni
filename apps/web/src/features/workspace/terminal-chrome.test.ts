@@ -17,6 +17,7 @@ import {
   chromePointerMovedTooFar,
   composeTerminalAttachmentCommand,
   encodeTerminalComposerChunks,
+  insertComposerNewline,
   encodeTerminalComposerPayload,
   encodeTerminalKeyboardSubmit,
   encodeTerminalModifiedInput,
@@ -99,7 +100,9 @@ describe("terminal font size", () => {
     localStorage.setItem(TERMINAL_FONT_SIZE_STORAGE_KEY, "16");
     expect(loadTerminalFontSize(390)).toBe(16);
     persistTerminalFontSize(99);
-    expect(localStorage.getItem(TERMINAL_FONT_SIZE_STORAGE_KEY)).toBe(String(TERMINAL_FONT_SIZE_MAX));
+    expect(localStorage.getItem(TERMINAL_FONT_SIZE_STORAGE_KEY)).toBe(
+      String(TERMINAL_FONT_SIZE_MAX)
+    );
     expect(loadTerminalFontSize(390)).toBe(TERMINAL_FONT_SIZE_MAX);
   });
 });
@@ -120,8 +123,12 @@ describe("terminal fit helpers", () => {
     const atlas: boolean[] = [];
     refreshTerminal({
       rows: 24,
-      refresh: (start, end) => { refresh.push([start, end]); },
-      clearTextureAtlas: () => { atlas.push(true); }
+      refresh: (start, end) => {
+        refresh.push([start, end]);
+      },
+      clearTextureAtlas: () => {
+        atlas.push(true);
+      }
     });
     expect(atlas).toEqual([true]);
     expect(refresh).toEqual([[0, 23]]);
@@ -138,7 +145,10 @@ describe("terminal fit helpers", () => {
     globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
     try {
       const calls: string[] = [];
-      const cancel = scheduleTerminalFit(() => calls.push("fit"), () => calls.push("ready"));
+      const cancel = scheduleTerminalFit(
+        () => calls.push("fit"),
+        () => calls.push("ready")
+      );
       expect(frames).toHaveLength(1);
       frames[0]!(0);
       expect(frames).toHaveLength(2);
@@ -247,6 +257,13 @@ describe("terminal keyboard field", () => {
       spellCheck: false,
       lang: "zh-CN"
     });
+  });
+
+  it("inserts a newline into the composer without sending", () => {
+    expect(insertComposerNewline("ls", 2, 2)).toEqual({ value: "ls\n", cursor: 3 });
+    expect(insertComposerNewline("abcd", 1, 3)).toEqual({ value: "a\nd", cursor: 2 });
+    expect(insertComposerNewline("", null, null)).toEqual({ value: "\n", cursor: 1 });
+    expect(insertComposerNewline("ab", undefined, undefined)).toEqual({ value: "ab\n", cursor: 3 });
   });
 
   it("submits on Enter but not while composing Chinese", () => {

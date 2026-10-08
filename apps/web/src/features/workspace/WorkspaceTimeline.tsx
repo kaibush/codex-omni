@@ -1,5 +1,4 @@
 import type { ApprovalResponse } from "@codex-omni/protocol";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -14,6 +13,7 @@ import {
   ArrowDown,
   CircleAlert,
   Clock3,
+  History,
   LoaderCircle,
   MessageSquarePlus,
   MessageSquareText,
@@ -28,16 +28,13 @@ import {
   shouldPauseLiveFollowFromPointer,
   shouldPauseLiveFollowFromWheel
 } from "@/lib/live-follow";
-import { api } from "@/lib/api";
-import type { SessionListSort } from "@/lib/session-title";
 import { formatCompactDateTime, isScrolledToBottom } from "@/lib/utils";
 import { isThreadGoalLocked, type ThreadGoal } from "@/lib/thread-goal";
-import type { RecentRun, Session, SessionOutlineItem, TimelineItem } from "@/types";
+import type { Session, SessionOutlineItem, TimelineItem } from "@/types";
 import { EventCard } from "./EventCard";
 import { ThreadGoalBanner } from "./ThreadGoalBanner";
 import { VirtualTimeline } from "./VirtualTimeline";
 import { TimelineErrorBoundary } from "./TimelineErrorBoundary";
-import { RecentSessionsPanel, RecentSessionsToggle } from "./RecentSessionsSwitcher";
 import { TimelineOutlinePanel, TimelineOutlineToggle, useTimelineOutline } from "./TimelineOutline";
 import { RunStatusBubble } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
@@ -129,9 +126,9 @@ export function WorkspaceTimeline({
   recentSessions,
   sessionsPending,
   onOpenSession,
-  onOpenRecentSession,
-  sessionSort,
-  onSessionSort,
+  recentOpen = false,
+  onCloseRecent,
+  onShowRecent,
   runState,
   connection,
   sendNotice,
@@ -193,9 +190,9 @@ export function WorkspaceTimeline({
   recentSessions: Session[];
   sessionsPending: boolean;
   onOpenSession: (sessionId: string) => void;
-  onOpenRecentSession: (projectId: string, sessionId: string) => void;
-  sessionSort: SessionListSort;
-  onSessionSort: (sort: SessionListSort) => void;
+  recentOpen?: boolean;
+  onCloseRecent?: () => void;
+  onShowRecent?: () => void;
   runState: RunState | null;
   connection: ConnectionState;
   sendNotice: string;
@@ -226,14 +223,10 @@ export function WorkspaceTimeline({
   const latestSession = recentSessions[0];
   const viewToggle = useAutoHide();
   const outline = useTimelineOutline(outlineItems);
-  const [recentOpen, setRecentOpen] = useState(false);
-  const recentSessionsQuery = useQuery({
-    queryKey: ["recent-run-sessions", 20, sessionSort],
-    queryFn: () => api<RecentRun[]>(`/api/runs/recent-sessions?limit=20&sort=${sessionSort}`),
-    enabled: recentOpen,
-    placeholderData: keepPreviousData,
-    refetchInterval: recentOpen ? 10_000 : false
-  });
+  useEffect(() => {
+    if (!recentOpen) return;
+    outline.setOutlineOpen(false);
+  }, [recentOpen]);
   const pointerScroll = useRef<{
     id: number;
     clientY: number;
@@ -382,18 +375,10 @@ export function WorkspaceTimeline({
               onToggle={() => {
                 const next = !outline.open;
                 outline.setOutlineOpen(next);
-                if (next) setRecentOpen(false);
+                if (next) onCloseRecent?.();
               }}
             />
           ) : null}
-          <RecentSessionsToggle
-            open={recentOpen}
-            onToggle={() => {
-              const next = !recentOpen;
-              setRecentOpen(next);
-              if (next) outline.setOutlineOpen(false);
-            }}
-          />
         </div>
       ) : null}
       <TimelineOutlinePanel
@@ -402,26 +387,6 @@ export function WorkspaceTimeline({
         activeId={highlightMessageId}
         onJump={(id) => outline.jump(id, onJumpOutline)}
         onClose={() => outline.setOutlineOpen(false)}
-      />
-      <RecentSessionsPanel
-        open={recentOpen}
-        items={recentSessionsQuery.data ?? []}
-        sort={sessionSort}
-        onSort={onSessionSort}
-        pending={recentSessionsQuery.isLoading}
-        error={
-          recentSessionsQuery.isError
-            ? recentSessionsQuery.error instanceof Error
-              ? recentSessionsQuery.error.message
-              : "最近对话加载失败"
-            : ""
-        }
-        activeSessionId={sessionId}
-        onOpen={(nextProjectId, nextSessionId) => {
-          setRecentOpen(false);
-          onOpenRecentSession(nextProjectId, nextSessionId);
-        }}
-        onClose={() => setRecentOpen(false)}
       />
       {isThreadGoalLocked(threadGoal) && threadGoal && onClearThreadGoal ? (
         <ThreadGoalBanner
@@ -736,6 +701,12 @@ export function WorkspaceTimeline({
                       <MessageSquarePlus className="size-4" />
                       新建对话
                     </Button>
+                    {onShowRecent ? (
+                      <Button variant="outline" onClick={onShowRecent}>
+                        <History className="size-4" />
+                        全部最近对话
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
                 {sessionsPending ? (

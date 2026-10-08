@@ -9,6 +9,9 @@ describe("terminal search ui", () => {
     expect(source).toContain("const closeSearch = () => {");
     expect(source).toContain('aria-label="关闭搜索"');
     expect(source).toContain("{searchOpen ? \"关闭搜索\" : \"搜索历史\"}");
-    expect(source).toContain("searchOpen && (searchPanelRef.current?.contains(target) || searchButtonRef.current?.contains(target))");
+    expect(source).toContain("searchOpen &&");
+    expect(source).toContain(
+      "(searchPanelRef.current?.contains(target) || searchButtonRef.current?.contains(target))"
+    );
   });
 });
