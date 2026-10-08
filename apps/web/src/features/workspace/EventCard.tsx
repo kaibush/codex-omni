@@ -70,6 +70,7 @@ import {
 } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 import { BoundedImage } from "./BoundedImage";
+import { ImagePreviewDialog } from "./ImagePreviewDialog";
 import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
 import { VirtualLog } from "./VirtualLog";
@@ -521,13 +522,15 @@ function ViewImageCard({
   projectId,
   projectPath,
   projectDisplayPath,
-  onOpenFile
+  onOpenFile,
+  onPreview
 }: {
   path: string;
   projectId?: string | undefined;
   projectPath?: string | undefined;
   projectDisplayPath?: string | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
+  onPreview?: (() => void) | undefined;
 }) {
   const [failed, setFailed] = useState(false);
   const src = projectImageSrc(projectId, path, projectPath, projectDisplayPath);
@@ -536,26 +539,43 @@ function ViewImageCard({
   return (
     <div className="plan-card">
       {src && !failed ? (
-        <BoundedImage
-          src={src}
-          alt={name}
-          className="notice-image"
-          onError={() => setFailed(true)}
-        />
+        <button
+          type="button"
+          className="block w-fit max-w-full cursor-zoom-in border-0 bg-transparent p-0"
+          aria-label={`预览 ${name}`}
+          onClick={() => onPreview?.()}
+        >
+          <BoundedImage
+            src={src}
+            alt={name}
+            className="notice-image"
+            onError={() => setFailed(true)}
+          />
+        </button>
       ) : null}
       <p className="plan-card-prompt font-mono text-xs text-muted-foreground">{path}</p>
-      {onOpenFile ? (
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs disabled:opacity-50"
-          disabled={!openPath.trim()}
-          onClick={() => {
-            if (openPath.trim()) onOpenFile(path, null);
-          }}
+          disabled={!src}
+          onClick={() => onPreview?.()}
         >
-          在文件中打开
+          预览图片
         </button>
-      ) : null}
+        {onOpenFile ? (
+          <button
+            type="button"
+            className="h-8 self-start rounded-lg border border-border bg-card px-3 text-xs disabled:opacity-50"
+            disabled={!openPath.trim()}
+            onClick={() => {
+              if (openPath.trim()) onOpenFile(path, null);
+            }}
+          >
+            在文件中打开
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -770,6 +790,7 @@ function EventCardComponent({
 }: EventCardProps) {
   const client = item.data?.clientType ?? clientType;
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [open, setOpen] = useState(() => {
     if (item.kind === "reasoning") return defaultOpen;
     if (isRuntimePlaceholder(item.data, item.text)) return false;
@@ -1053,6 +1074,7 @@ function EventCardComponent({
   if (isTool && isViewImageTool(item.data)) {
     const path = viewImagePath(item.data);
     const name = path.split("/").filter(Boolean).at(-1) || path || "图片";
+    const src = projectImageSrc(projectId, path, projectPath, projectDisplayPath);
     return (
       <article
         data-message-id={item.id}
@@ -1076,7 +1098,13 @@ function EventCardComponent({
             projectPath={projectPath}
             projectDisplayPath={projectDisplayPath}
             onOpenFile={onOpenFile}
+            onPreview={() => {
+              if (src) setImagePreviewOpen(true);
+            }}
           />
+        ) : null}
+        {imagePreviewOpen && src ? (
+          <ImagePreviewDialog open src={src} alt={name} onOpenChange={setImagePreviewOpen} />
         ) : null}
       </article>
     );

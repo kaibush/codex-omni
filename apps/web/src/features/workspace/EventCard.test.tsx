@@ -567,6 +567,7 @@ describe("EventCard copy controls", () => {
       />
     );
     expect(relative).toContain("查看图片");
+    expect(relative).toContain("预览图片");
     expect(relative).toContain("在文件中打开");
     expect(relative).toContain(
       `/api/projects/proj-1/files/download?path=${encodeURIComponent(".codex-uploads/foo.png")}&amp;inline=1`
