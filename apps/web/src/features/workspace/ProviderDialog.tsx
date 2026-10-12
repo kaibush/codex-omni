@@ -19,11 +19,13 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Star,
   Trash2,
   X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogClose,
@@ -92,6 +94,7 @@ export function ProviderDialog({
   onRefresh?: () => Promise<void>;
 }) {
   const [clientFilter, setClientFilter] = useState<ClientType>("codex");
+  const [providerQuery, setProviderQuery] = useState("");
   const [editing, setEditing] = useState<ProviderInput>(empty);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -120,12 +123,20 @@ export function ProviderDialog({
     if (!open) {
       setFormOpen(false);
       setEditing(empty);
+      setProviderQuery("");
     }
   }, [open, initialClient]);
   const isClaude = editing.kind === "claude-code";
-  const visibleProviders = providers.filter(
-    (provider) => clientType(provider.kind) === clientFilter
-  );
+  const normalizedQuery = providerQuery.trim().toLowerCase();
+  const visibleProviders = providers.filter((provider) => {
+    if (clientType(provider.kind) !== clientFilter) return false;
+    if (!normalizedQuery) return true;
+    return [provider.name, provider.model, provider.baseUrl, ...(provider.models ?? [])]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
   const title = useMemo(() => (editing.id ? "编辑供应商" : "新增供应商"), [editing.id]);
   const begin = (provider?: Provider) => {
     const next = provider
@@ -372,6 +383,26 @@ export function ProviderDialog({
             <Plus className="size-4" /> 新增供应商
           </Button>
         </div>
+        <div className="relative shrink-0">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={providerQuery}
+            onChange={(event) => setProviderQuery(event.target.value)}
+            placeholder="搜索供应商名称、模型或地址"
+            aria-label="搜索供应商"
+            className="pr-8 pl-8"
+          />
+          {providerQuery ? (
+            <button
+              type="button"
+              aria-label="清除搜索"
+              className="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+              onClick={() => setProviderQuery("")}
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
           {visibleProviders.map((provider) => {
             const mode = homeModeLabel[provider.homeMode ?? "managed"];
@@ -506,7 +537,7 @@ export function ProviderDialog({
           })}
           {!visibleProviders.length ? (
             <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-              还没有配置供应商，请点击“新增供应商”。
+              {normalizedQuery ? "没有匹配的供应商" : "还没有配置供应商，请点击“新增供应商”。"}
             </p>
           ) : null}
         </div>

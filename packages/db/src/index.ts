@@ -799,7 +799,7 @@ export class Store {
   listProviders(): ProviderRow[] {
     return this.db
       .prepare(
-        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,name"
+        "SELECT id,name,kind,model,context_window as contextWindow,auto_compact_token_limit as autoCompactTokenLimit,models_json as modelsJson,base_url as baseUrl,api_key as apiKey,config_toml as configToml,auth_json as authJson,env_json as envJson,is_default as isDefault,home_mode as homeMode,settings_json as settingsJson,mcp_servers_json as mcpServersJson,created_at as createdAt,updated_at as updatedAt FROM providers ORDER BY is_default DESC,created_at DESC,id DESC"
       )
       .all() as ProviderRow[];
   }

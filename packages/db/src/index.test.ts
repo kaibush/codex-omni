@@ -241,6 +241,20 @@ describe("Store", () => {
     expect(store.deleteProvider(second.id)).toBe(true);
     expect(store.getProvider(first.id)?.isDefault).toBe(1);
   });
+  it("lists the default provider first and newer providers above older ones", () => {
+    store = new Store(":memory:");
+    const older = store.upsertProvider({ name: "Alpha" });
+    const newer = store.upsertProvider({ name: "Zulu" });
+    const preferred = store.upsertProvider({ name: "Middle", isDefault: 1 });
+    store.db.prepare("UPDATE providers SET created_at=? WHERE id=?").run(10, older.id);
+    store.db.prepare("UPDATE providers SET created_at=? WHERE id=?").run(30, newer.id);
+    store.db.prepare("UPDATE providers SET created_at=? WHERE id=?").run(20, preferred.id);
+    expect(store.listProviders().map((provider) => provider.name)).toEqual([
+      "Middle",
+      "Zulu",
+      "Alpha"
+    ]);
+  });
   it("stores provider configuration mode without a per-provider HOME", () => {
     store = new Store(":memory:");
     const managed = store.upsertProvider({ name: "Managed" });
