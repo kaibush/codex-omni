@@ -158,6 +158,7 @@ import {
   type WorkspaceSettings
 } from "@/features/workspace/SettingsDialog";
 import { WorkspaceComposer } from "@/features/workspace/WorkspaceComposer";
+import { HostResourceStatus } from "@/features/workspace/HostResourceStatus";
 import { WorkspaceHeader } from "@/features/workspace/WorkspaceHeader";
 import { WorkspaceHome } from "@/features/workspace/WorkspaceHome";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
@@ -2675,6 +2676,7 @@ export function Workspace() {
         {activeProject ? (
           <>
             <WorkspaceHeader
+              host={runtime.data?.host}
               sidebar={sidebar}
               isMobile={isMobile}
               setSidebar={setSidebar}
@@ -2963,7 +2965,7 @@ export function Workspace() {
           </>
         ) : (
           <>
-            <header className="workspace-header flex shrink-0 items-center gap-3 px-3 sm:px-5">
+            <header className="workspace-header flex shrink-0 flex-wrap items-center gap-3 px-3 py-1.5 sm:px-5 xl:flex-nowrap xl:py-0">
               {(!sidebar || isMobile) && (
                 <Button
                   size="icon"
@@ -2980,6 +2982,10 @@ export function Workspace() {
                 <p className="text-[11px] text-muted-foreground">选择对话，继续工作</p>
               </div>
               <ThemeSwitch />
+              <HostResourceStatus
+                host={runtime.data?.host}
+                className="w-full xl:order-none xl:w-auto"
+              />
             </header>
             {projectId && projects.isPending ? (
               <div

@@ -53,7 +53,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { copyMenuItemProps } from "@/lib/clipboard";
 import { requestSystemUpdateCheck } from "@/lib/system-update";
 import { sessionListTime, type SessionListSort } from "@/lib/session-title";
-import { formatCompactDateTime, formatDataSize, formatDateTime } from "@/lib/utils";
+import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import type { HostInfo, Project, Session } from "@/types";
 import { SESSION_COLORS, SESSION_ICONS, sessionIcon } from "./session-appearance";
 import {
@@ -1177,25 +1177,11 @@ export function WorkspaceSidebar({
                     type="button"
                     className="sidebar-host"
                     title="检查更新"
-                    aria-label={`检查更新 v${host.app.version}，${host.cpu.cores} 核 ${host.cpu.usage}%，内存 ${formatDataSize(host.memory.used, true)}/${formatDataSize(host.memory.total, true)}，存储 ${formatDataSize(host.storage.used, true)}/${formatDataSize(host.storage.total, true)}`}
+                    aria-label={`检查更新 v${host.app.version}`}
                     onClick={() => requestSystemUpdateCheck()}
                   >
                     <span title={`版本 v${host.app.version}`}>v{host.app.version}</span>
-                    <span title={`${host.cpu.cores} 核 · ${host.cpu.usage}%`}>
-                      {host.cpu.cores} 核 · {host.cpu.usage}%
-                    </span>
-                    <span
-                      title={`内存 ${formatDataSize(host.memory.used, true)}/${formatDataSize(host.memory.total, true)}`}
-                    >
-                      内存 {formatDataSize(host.memory.used, true)}/
-                      {formatDataSize(host.memory.total, true)}
-                    </span>
-                    <span
-                      title={`存储 ${formatDataSize(host.storage.used, true)}/${formatDataSize(host.storage.total, true)}`}
-                    >
-                      存储 {formatDataSize(host.storage.used, true)}/
-                      {formatDataSize(host.storage.total, true)}
-                    </span>
+                    <span>检查更新</span>
                   </button>
                 ) : null}
                 <div className="sidebar-status-strip" aria-label="工作台状态">

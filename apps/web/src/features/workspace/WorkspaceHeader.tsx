@@ -34,16 +34,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeSwitch } from "@/components/theme-switch";
+import { HostResourceStatus } from "./HostResourceStatus";
 import { RecentSessionsToggle } from "./RecentSessionsSwitcher";
 import { api } from "@/lib/api";
 import { copyMenuItemProps } from "@/lib/clipboard";
 import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import { taskStatusLabel } from "@/lib/task-state";
-import type { Project, Provider, Session, SessionCheckpoint } from "@/types";
+import type { HostInfo, Project, Provider, Session, SessionCheckpoint } from "@/types";
 import { LiveDuration } from "./WorkspaceStatus";
 import type { RunState, WorkspaceView } from "./workspace-model";
 
 export function WorkspaceHeader({
+  host,
   sidebar,
   isMobile,
   setSidebar,
@@ -80,6 +82,7 @@ export function WorkspaceHeader({
   recentOpen,
   onToggleRecent
 }: {
+  host?: HostInfo | undefined;
   sidebar: boolean;
   isMobile: boolean;
   setSidebar: Dispatch<SetStateAction<boolean>>;
@@ -129,7 +132,7 @@ export function WorkspaceHeader({
   onToggleRecent: () => void;
 }) {
   return (
-    <header className="workspace-header flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-5 sm:py-0">
+    <header className="workspace-header flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 sm:gap-3 sm:px-5 xl:flex-nowrap xl:py-0">
       <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
         {(!sidebar || isMobile) && (
           <Button
@@ -237,6 +240,7 @@ export function WorkspaceHeader({
           </p>
         </div>
       </div>
+      <HostResourceStatus host={host} className="order-4 w-full xl:order-2 xl:w-auto" />
       <div className="workspace-header-actions order-2 flex shrink-0 items-center gap-1 sm:order-3">
         <RecentSessionsToggle tone="header" open={recentOpen} onToggle={onToggleRecent} />
         <ThemeSwitch />
