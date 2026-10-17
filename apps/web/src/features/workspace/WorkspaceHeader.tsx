@@ -240,12 +240,11 @@ export function WorkspaceHeader({
           </p>
         </div>
       </div>
-      <HostResourceStatus host={host} className="order-4 w-full xl:order-2 xl:w-auto" />
       <div className="workspace-header-actions order-2 flex shrink-0 items-center gap-1 sm:order-3">
         <RecentSessionsToggle tone="header" open={recentOpen} onToggle={onToggleRecent} />
         <ThemeSwitch />
       </div>
-      <div className="workspace-header-views order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto sm:order-2 sm:w-auto sm:overflow-visible">
+      <div className="workspace-header-views order-3 flex w-full min-w-0 flex-wrap items-center gap-1 sm:order-2 sm:w-auto">
         <Tabs
           value={workspaceView}
           onValueChange={(value) => changeWorkspaceView(value as WorkspaceView)}
@@ -392,6 +391,7 @@ export function WorkspaceHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        <HostResourceStatus host={host} className="ml-auto pl-2" />
       </div>
     </header>
   );

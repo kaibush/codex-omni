@@ -15,7 +15,7 @@ export function HostResourceStatus({
       label: "CPU",
       icon: Cpu,
       usage: host.cpu.usage,
-      detail: `${host.cpu.cores} 核 · ${host.cpu.model}`
+      detail: `${host.cpu.cores} 核平均 · 1 秒采样 · ${host.cpu.model}`
     },
     {
       label: "内存",

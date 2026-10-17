@@ -34,9 +34,6 @@ export type HostInfo = {
   storage: HostResource & { path: string };
 };
 
-let lastCpu: CpuTimes | null = null;
-let lastCpuAt = 0;
-
 function readAppMeta() {
   return {
     name: "codex-omni",
@@ -71,21 +68,57 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function sampleCpuUsage(now = Date.now()) {
-  const current = readCpuTimes();
-  if (lastCpu && now - lastCpuAt >= 200) {
-    const usage = cpuUsageFromTimes(lastCpu, current);
-    lastCpu = current;
-    lastCpuAt = now;
-    return usage;
-  }
-  await delay(250);
-  const next = readCpuTimes();
-  const usage = cpuUsageFromTimes(current, next);
-  lastCpu = next;
-  lastCpuAt = Date.now();
-  return usage;
+// Linux includes guest time in user/nice already. Sum only the first eight
+// counters, treating I/O wait and hypervisor steal as unavailable, not execution.
+export function parseProcCpuTimes(text: string): CpuTimes | null {
+  const line = text.split("\n").find((line) => /^cpu\s/.test(line));
+  if (!line) return null;
+  const times = line.trim().split(/\s+/).slice(1, 9).map(Number);
+  if (times.length < 8 || times.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  return {
+    idle: times[3]! + times[4]! + times[7]!,
+    total: times.reduce((sum, value) => sum + value, 0)
+  };
 }
+
+async function readHostCpuTimes(): Promise<CpuTimes> {
+  if (process.platform === "linux") {
+    try {
+      const times = parseProcCpuTimes(await readFile("/proc/stat", "utf8"));
+      if (times) return times;
+    } catch {
+      // Non-Linux hosts and unavailable procfs fall back to Node's CPU counters.
+    }
+  }
+  return readCpuTimes();
+}
+
+export function createCpuUsageSampler(
+  read = readHostCpuTimes,
+  wait = delay,
+  now = () => performance.now()
+) {
+  let pending: Promise<number> | null = null;
+  let sampledAt = -Infinity;
+  let cached = 0;
+  return function sample(): Promise<number> {
+    if (pending) return pending;
+    if (now() - sampledAt < 1000) return Promise.resolve(cached);
+    pending = (async () => {
+      const previous = await read();
+      await wait(1000);
+      const current = await read();
+      cached = cpuUsageFromTimes(previous, current);
+      sampledAt = now();
+      return cached;
+    })().finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
+}
+
+export const sampleCpuUsage = createCpuUsageSampler();
 
 export async function readMemory(): Promise<HostResource> {
   const total = os.totalmem();
