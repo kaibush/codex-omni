@@ -33,7 +33,7 @@ export function HostResourceStatus({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground tabular-nums",
+        "flex h-8 shrink-0 flex-nowrap items-center gap-0.5 text-[10px] text-muted-foreground tabular-nums sm:gap-3 sm:text-[11px]",
         className
       )}
       aria-label="主机资源状态，每 30 秒刷新"
@@ -41,12 +41,11 @@ export function HostResourceStatus({
       {resources.map(({ label, icon: Icon, usage, detail }) => (
         <span
           key={label}
-          className="inline-flex shrink-0 items-center gap-1"
+          className="inline-flex shrink-0 items-center gap-0.5 sm:gap-1"
           title={`${label} ${usage}% · ${detail}`}
           aria-label={`${label} ${usage}% · ${detail}`}
         >
           <Icon className="size-3 shrink-0" aria-hidden="true" />
-          <span>{label}</span>
           <span>{usage}%</span>
         </span>
       ))}

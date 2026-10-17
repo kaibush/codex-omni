@@ -244,25 +244,46 @@ export function WorkspaceHeader({
         <RecentSessionsToggle tone="header" open={recentOpen} onToggle={onToggleRecent} />
         <ThemeSwitch />
       </div>
-      <div className="workspace-header-views order-3 flex w-full min-w-0 flex-wrap items-center gap-1 sm:order-2 sm:w-auto">
+      <div className="workspace-header-views order-3 flex w-full min-w-0 flex-nowrap items-center gap-1 overflow-x-auto sm:order-2 sm:w-auto">
         <Tabs
+          className="shrink-0"
           value={workspaceView}
           onValueChange={(value) => changeWorkspaceView(value as WorkspaceView)}
         >
           <TabsList className="shrink-0">
-            <TabsTrigger value="chat" className="px-2.5 text-xs sm:px-3">
+            <TabsTrigger
+              title="对话"
+              aria-label="对话"
+              value="chat"
+              className="px-1.5 text-xs sm:px-3"
+            >
               <MessageSquareText />
               <span className="hidden sm:inline">对话</span>
             </TabsTrigger>
-            <TabsTrigger value="terminal-chat" className="px-2.5 text-xs sm:px-3">
+            <TabsTrigger
+              title="终端对话"
+              aria-label="终端对话"
+              value="terminal-chat"
+              className="px-1.5 text-xs sm:px-3"
+            >
               <BotMessageSquare />
               <span className="hidden sm:inline">终端对话</span>
             </TabsTrigger>
-            <TabsTrigger value="files" className="px-2.5 text-xs sm:px-3">
+            <TabsTrigger
+              title="文件"
+              aria-label="文件"
+              value="files"
+              className="px-1.5 text-xs sm:px-3"
+            >
               <Files />
               <span className="hidden sm:inline">{dirtyCount ? `文件 ${dirtyCount}` : "文件"}</span>
             </TabsTrigger>
-            <TabsTrigger value="git" className="px-2.5 text-xs sm:px-3">
+            <TabsTrigger
+              title="Git"
+              aria-label="Git"
+              value="git"
+              className="px-1.5 text-xs sm:px-3"
+            >
               <GitCompare />
               <span className="hidden sm:inline">{gitCount ? `Git ${gitCount}` : "Git"}</span>
             </TabsTrigger>
@@ -284,7 +305,7 @@ export function WorkspaceHeader({
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-8 shrink-0"
+                className="size-7 shrink-0 sm:size-8"
                 aria-label="Session 更多操作"
               >
                 <MoreHorizontal className="size-4" />
@@ -391,7 +412,7 @@ export function WorkspaceHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <HostResourceStatus host={host} className="ml-auto pl-2" />
+        <HostResourceStatus host={host} className="ml-auto sm:pl-2" />
       </div>
     </header>
   );
