@@ -1,6 +1,8 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowUpDown, Check, History, LoaderCircle } from "lucide-react";
 import { SessionIcon } from "@/components/SessionIcon";
+import { Badge } from "@/components/ui/badge";
+import { useActiveRuns } from "./RunningCenterDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { type SessionListSort } from "@/lib/session-title";
-import { formatCompactDateTime, formatDateTime } from "@/lib/utils";
+import { cn, formatCompactDateTime, formatDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
 
 export const recentRunStatusLabel: Record<RecentRun["status"], string> = {
@@ -21,22 +23,37 @@ export const recentRunStatusLabel: Record<RecentRun["status"], string> = {
   interrupted: "已中断"
 };
 
-export function RecentSessionsToggle({
+export function RecentSessionsToggle(
+  props: Omit<Parameters<typeof RecentSessionsToggleView>[0], "runningCount">
+) {
+  const activeRuns = useActiveRuns();
+  return <RecentSessionsToggleView {...props} runningCount={activeRuns.data?.length ?? 0} />;
+}
+
+export function RecentSessionsToggleView({
   open,
   onToggle,
-  tone = "float"
+  tone = "float",
+  runningCount = 0
 }: {
   open: boolean;
   onToggle: () => void;
   tone?: "float" | "header";
+  runningCount?: number;
 }) {
-  const label = open ? "收起最近对话" : "最近对话";
+  const label = `${open ? "收起最近对话" : "最近对话"}${runningCount > 0 ? `，运行中 ${runningCount}` : ""}`;
+  const count =
+    runningCount > 0 ? (
+      <Badge variant="success" className="rounded-lg px-1.5" aria-hidden="true">
+        {runningCount}
+      </Badge>
+    ) : null;
   if (tone === "header") {
     return (
       <Button
         type="button"
         variant="ghost"
-        className={`h-8 shrink-0 rounded-lg px-2 ${open ? "bg-muted" : ""}`}
+        className={cn("h-8 shrink-0 rounded-lg px-2", open && "bg-muted")}
         aria-pressed={open}
         aria-expanded={open}
         aria-label={label}
@@ -45,6 +62,7 @@ export function RecentSessionsToggle({
       >
         <History className="size-4" />
         <span className="hidden lg:inline">最近</span>
+        {count}
       </Button>
     );
   }
@@ -53,7 +71,11 @@ export function RecentSessionsToggle({
       type="button"
       size="icon"
       variant="outline"
-      className={`timeline-recent-toggle ${open ? "is-open" : ""}`}
+      className={cn(
+        "timeline-recent-toggle",
+        runningCount > 0 && "!w-auto gap-1 px-2",
+        open && "is-open"
+      )}
       aria-pressed={open}
       aria-expanded={open}
       aria-label={label}
@@ -61,6 +83,7 @@ export function RecentSessionsToggle({
       onClick={onToggle}
     >
       <History className="size-4" />
+      {count}
     </Button>
   );
 }

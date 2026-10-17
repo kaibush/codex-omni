@@ -1833,7 +1833,7 @@ function FilesWorkspace({
           }
         }}
       >
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1">
+        <div className="file-editor-toolbar flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-border px-1 py-1">
           <button
             type="button"
             className="panel-icon-button !size-7 md:hidden"
@@ -1886,7 +1886,7 @@ function FilesWorkspace({
             })}
           </div>
           {activeTab && (
-            <div className="ml-auto flex shrink-0 items-center gap-1 pr-1">
+            <div className="file-editor-actions ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-1 pr-1">
               {!isMediaPreview(activeTab.previewKind) && (
                 <Button
                   type="button"

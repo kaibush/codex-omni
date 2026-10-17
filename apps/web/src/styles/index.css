@@ -723,6 +723,15 @@ button.composer-chip:hover,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.file-editor-actions > button {
+  flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  .file-editor-actions {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
 .file-tab-bar {
   display: flex;
   min-width: 0;

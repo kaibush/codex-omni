@@ -3,11 +3,16 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { formatCompactDateTime } from "@/lib/utils";
 import type { RecentRun } from "@/types";
-import { RecentSessionsPanel, RecentSessionsToggle } from "./RecentSessionsSwitcher";
+import {
+  RecentSessionsToggle as ConnectedRecentSessionsToggle,
+  RecentSessionsPanel,
+  RecentSessionsToggleView as RecentSessionsToggle
+} from "./RecentSessionsSwitcher";
 
 const run: RecentRun = {
   id: "run-1",
@@ -28,6 +33,43 @@ const run: RecentRun = {
 };
 
 describe("RecentSessionsSwitcher", () => {
+  it("reads the shared active-runs cache while closed and reflects completion", () => {
+    const client = new QueryClient();
+    const render = () =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={client}>
+          <ConnectedRecentSessionsToggle open={false} tone="header" onToggle={() => undefined} />
+        </QueryClientProvider>
+      );
+    client.setQueryData(["active-runs"], [{ id: "run-1" }, { id: "run-2" }]);
+    expect(render()).toContain('aria-label="最近对话，运行中 2"');
+    client.setQueryData(["active-runs"], []);
+    expect(render()).not.toContain('data-slot="badge"');
+    client.clear();
+  });
+
+  it("shows the active run count even when the recent list is closed", () => {
+    const html = renderToStaticMarkup(
+      <RecentSessionsToggle
+        open={false}
+        tone="header"
+        runningCount={3}
+        onToggle={() => undefined}
+      />
+    );
+    expect(html).toContain('aria-label="最近对话，运行中 3"');
+    expect(html).toContain('data-slot="badge"');
+    const idle = renderToStaticMarkup(
+      <RecentSessionsToggle
+        open={false}
+        tone="header"
+        runningCount={0}
+        onToggle={() => undefined}
+      />
+    );
+    expect(idle).not.toContain('data-slot="badge"');
+  });
+
   it("renders a fixed recent-sessions button beside the outline", () => {
     const html = renderToStaticMarkup(
       <RecentSessionsToggle open={false} onToggle={() => undefined} />
