@@ -39,7 +39,7 @@ export function switchSessionProvider(store: Store, sessionId: string, providerI
     return fail("请等待当前任务结束后切换供应商", 409);
   if (store.listQueuedTurns(sessionId).length)
     return fail("请先处理或移除待发送队列后切换供应商", 409);
-  const updated = store.updateSession(sessionId, { providerId });
+  const updated = store.updateSession(sessionId, { providerId, model: provider.model });
   if (store.hasMessageRole(sessionId, "user"))
     store.addMessage({
       sessionId,
@@ -66,4 +66,17 @@ export function runtimeHistoryContext(store: Store, sessionId: string, providerI
   // Text snapshots are reserved for explicitly created forks/continuations.
   // Provider switches resume the current native thread, including tool history.
   return buildForkContext(session.parentSessionId ?? sessionId, store.conversationSince(sessionId));
+}
+
+export function updateSessionModel(
+  store: Store,
+  sessionId: string,
+  providerId: string,
+  model: string | null
+) {
+  const session = store.getSession(sessionId);
+  if (!session) return fail("Session not found", 404);
+  if (session.kind !== "chat") return fail("终端会话不能选择 SDK 模型");
+  if (session.providerId !== providerId) return fail("对话供应商已变更，请刷新后重新选择模型", 409);
+  return store.updateSession(sessionId, { model });
 }

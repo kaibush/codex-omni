@@ -58,6 +58,7 @@ export type SessionRow = {
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
   providerId: string | null;
+  model: string | null;
   parentSessionId: string | null;
   continuationMode: string | null;
   lastMessageAt: number | null;
@@ -633,6 +634,16 @@ export class Store {
     if (!terminalSessionColumns.has("command")) {
       this.db.exec("ALTER TABLE terminal_sessions ADD COLUMN command TEXT NOT NULL DEFAULT ''");
     }
+    if (!sessionColumns.has("model")) {
+      this.db.transaction(() => {
+        this.db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
+        this.db.exec(`UPDATE sessions SET model=COALESCE(
+          (SELECT r.model FROM runs r WHERE r.session_id=sessions.id
+            AND r.provider_id=sessions.provider_id ORDER BY r.started_at DESC,r.id DESC LIMIT 1),
+          (SELECT p.model FROM providers p WHERE p.id=sessions.provider_id)
+        )`);
+      })();
+    }
     const runColumns = new Set(
       (this.db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>).map(
         (column) => column.name
@@ -981,7 +992,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -1012,7 +1023,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.model,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -1131,7 +1142,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -1163,6 +1174,7 @@ export class Store {
     kind?: "chat" | "terminal-chat";
     clientType?: "codex" | "claude-code";
     providerId?: string | null;
+    model?: string | null;
     parentSessionId?: string | null;
     continuationMode?: string | null;
   }): SessionRow {
@@ -1176,7 +1188,7 @@ export class Store {
       id = nanoid();
     this.db
       .prepare(
-        "INSERT INTO sessions(id,project_id,title,status,kind,client_type,provider_id,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "INSERT INTO sessions(id,project_id,title,status,kind,client_type,provider_id,model,parent_session_id,continuation_mode,pinned_at,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
       )
       .run(
         id,
@@ -1186,6 +1198,7 @@ export class Store {
         input.kind ?? "chat",
         clientType,
         input.providerId ?? null,
+        input.model ?? provider?.model ?? null,
         input.parentSessionId ?? null,
         input.continuationMode ?? null,
         null,
@@ -1334,6 +1347,7 @@ export class Store {
         | "threadId"
         | "status"
         | "providerId"
+        | "model"
         | "title"
         | "pinnedAt"
         | "archivedAt"
@@ -1762,6 +1776,7 @@ export class Store {
         projectId: source.projectId,
         title: `${source.title} (分叉)`,
         providerId: source.providerId,
+        model: source.model,
         clientType: source.clientType,
         parentSessionId: source.id,
         continuationMode: "fork"

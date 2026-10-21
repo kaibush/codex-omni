@@ -346,6 +346,41 @@ describe("provider runtime settings HTTP contract", () => {
       ).toBe(400);
     }
     expect((await call(`/api/projects/${projectId}/sessions`)).body).toHaveLength(1);
+    const secondSession = await call(`/api/projects/${projectId}/sessions`, "POST", {
+      providerId: id,
+      model: "model-y"
+    });
+    expect(secondSession.body.model).toBe("model-y");
+    expect(
+      (
+        await call(`/api/sessions/${sessionId}/model`, "PUT", {
+          providerId: id,
+          model: "model-x"
+        })
+      ).response.status
+    ).toBe(200);
+    expect((await call(`/api/sessions/${sessionId}`)).body).toMatchObject({
+      session: { model: "model-x" }
+    });
+    expect((await call(`/api/sessions/${secondSession.body.id}`)).body).toMatchObject({
+      session: { model: "model-y" }
+    });
+    expect(
+      (
+        await call(`/api/sessions/${sessionId}/model`, "PUT", {
+          providerId: claudeId,
+          model: "stale"
+        })
+      ).response.status
+    ).toBe(409);
+    expect(
+      (
+        await call(`/api/sessions/${sessionId}/model`, "PUT", {
+          providerId: id,
+          model: "  "
+        })
+      ).response.status
+    ).toBe(400);
     const inPlace = await call(`/api/sessions/${sessionId}/provider`, "PUT", {
       providerId: cloned.body.id
     });

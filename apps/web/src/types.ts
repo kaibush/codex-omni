@@ -143,6 +143,7 @@ export type Session = {
   title: string;
   status: "idle" | "running" | "failed" | "cancelled" | "interrupted";
   providerId: string | null;
+  model?: string | null;
   parentSessionId?: string | null;
   continuationMode?: string | null;
   lastMessageAt?: number | null;

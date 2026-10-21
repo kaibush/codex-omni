@@ -1146,7 +1146,7 @@ export class RunManager {
       startedAt,
       timeout
     });
-    const selectedModel = command.model ?? provider.model;
+    const selectedModel = command.model ?? session.model ?? provider.model;
     const turnOptions = {
       ...(selectedModel ? { model: selectedModel } : {}),
       sandbox: planMode ? ("read-only" as const) : (command.sandbox ?? settings.sandbox),

@@ -435,6 +435,41 @@ describe("RunManager timeline positions", () => {
 });
 
 describe("RunManager runtime inputs", () => {
+  it("uses each session's saved model and keeps explicit turn overrides scoped to that turn", async () => {
+    const { provider, project, session, socket } = fixture();
+    store!.upsertProvider({ ...provider, model: "provider-default" });
+    store!.updateSession(session.id, { model: "x" });
+    const second = store!.createSession({
+      projectId: project.id,
+      providerId: provider.id,
+      model: "y"
+    });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(bridgeEvent({ seq: 1, type: "turn.completed", payload: {} }));
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    for (const [sessionId, override, expected] of [
+      [session.id, undefined, "x"],
+      [second.id, undefined, "y"],
+      [session.id, "one-turn-model", "one-turn-model"],
+      [session.id, undefined, "x"]
+    ] as const) {
+      await manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId,
+          message: "hi",
+          ...(override ? { model: override } : {})
+        },
+        socket
+      );
+      expect(runtimeMocks.run.mock.lastCall?.[0]).toMatchObject({ model: expected });
+      expect(store!.getLatestRun(sessionId)?.model).toBe(expected);
+    }
+    expect(store!.getSession(second.id)?.model).toBe("y");
+  });
+
   it("forwards provider-specific model limits without applying guesses to other providers", async () => {
     const { provider, project, session, socket } = fixture();
     store!.upsertProvider({ ...provider, contextWindow: 32000, autoCompactTokenLimit: 28000 });

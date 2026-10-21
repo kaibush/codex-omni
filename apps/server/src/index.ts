@@ -3,7 +3,11 @@ import { listClaudeResources } from "./claude-resources.js";
 import { CLIENTS, clientType, clientTypeSchema, claudeOptionsSchema } from "@codex-omni/protocol";
 import { claudeProviderFiles, claudeMcpList, updateClaudeMcp } from "./client-provider.js";
 import { clientRuntimeHome, ensureClientHome } from "./client-home.js";
-import { selectSessionProvider, switchSessionProvider } from "./session-runtime.js";
+import {
+  selectSessionProvider,
+  switchSessionProvider,
+  updateSessionModel
+} from "./session-runtime.js";
 import { buildForkContext } from "./session-context.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -1164,6 +1168,7 @@ app.post("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
     .object({
       title: z.string().optional(),
       providerId: z.string().nullable().optional(),
+      model: z.string().trim().min(1).nullable().optional(),
       clientType: clientTypeSchema.optional(),
       kind: z.enum(["chat", "terminal-chat"]).optional()
     })
@@ -1175,6 +1180,7 @@ app.post("/api/projects/:id/sessions", { preHandler: auth }, async (req) => {
       ...(body.providerId ? { providerId: body.providerId } : {}),
       ...(body.clientType ? { clientType: body.clientType } : {})
     }),
+    ...(body.model !== undefined ? { model: body.model } : {}),
     ...(body.title !== undefined ? { title: body.title } : {}),
     ...(body.providerId !== undefined ? { providerId: body.providerId } : {}),
     ...(body.kind !== undefined ? { kind: body.kind } : {})
@@ -1408,6 +1414,17 @@ app.put("/api/sessions/:id/provider", { preHandler: auth }, async (req) => {
   const body = z.object({ providerId: z.string().min(1) }).parse(req.body);
   return switchSessionProvider(store, routeId(req), body.providerId);
 });
+app.put("/api/sessions/:id/model", { preHandler: auth }, async (req) => {
+  const parsed = z
+    .object({
+      providerId: z.string().min(1),
+      model: z.string().trim().min(1).nullable()
+    })
+    .safeParse(req.body);
+  if (!parsed.success) throw httpError(400, parsed.error.issues[0]?.message ?? "模型选择无效");
+  const body = parsed.data;
+  return updateSessionModel(store, routeId(req), body.providerId, body.model);
+});
 app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
   const source = store.getSession(routeId(req));
   if (!source) throw httpError(404, "Source session not found");
@@ -1434,6 +1451,7 @@ app.post("/api/sessions/:id/continue", { preHandler: auth }, async (req) => {
     clientType: selection.clientType,
     title: body.title?.trim() || source.title,
     ...(providerId ? { providerId } : {}),
+    ...(providerId === source.providerId ? { model: source.model } : {}),
     parentSessionId: source.id,
     continuationMode: "portable-context"
   });

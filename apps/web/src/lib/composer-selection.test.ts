@@ -5,14 +5,11 @@ import {
   COMPOSER_MODELS_KEY,
   COMPOSER_PROVIDER_KEY,
   fallbackProviderId,
-  isUnstartedComposerSession,
   loadComposerModels,
   loadComposerProviderId,
   persistComposerModel,
   persistComposerProviderId,
-  resolveComposerModel,
-  resolveComposerProviderId,
-  shouldHydrateComposerProvider
+  resolveComposerModel
 } from "./composer-selection";
 
 const providers = [{ id: "openai-default", isDefault: true }, { id: "grok-provider" }];
@@ -46,75 +43,9 @@ describe("composer provider persistence", () => {
   });
 });
 
-describe("composer provider hydration", () => {
-  it("hydrates once per session and ignores later session object mutations", () => {
-    expect(
-      shouldHydrateComposerProvider({
-        sessionId: "s1",
-        hydratedSessionId: null,
-        sessionReady: true
-      })
-    ).toBe(true);
-    expect(
-      shouldHydrateComposerProvider({
-        sessionId: "s1",
-        hydratedSessionId: "s1",
-        sessionReady: true
-      })
-    ).toBe(false);
-    expect(
-      shouldHydrateComposerProvider({
-        sessionId: "s2",
-        hydratedSessionId: "s1",
-        sessionReady: true
-      })
-    ).toBe(true);
-    expect(
-      shouldHydrateComposerProvider({
-        sessionId: "s1",
-        hydratedSessionId: null,
-        sessionReady: false
-      })
-    ).toBe(false);
-  });
-
-  it("keeps the selected grok provider on a new empty session", () => {
-    expect(
-      resolveComposerProviderId({
-        sessionProviderId: "openai-default",
-        projectProviderId: "openai-default",
-        currentProviderId: "grok-provider",
-        lastUsedProviderId: "grok-provider",
-        providers,
-        keepCurrentOnEmptySession: true
-      })
-    ).toBe("grok-provider");
-  });
-
-  it("uses the session provider when reopening a started conversation", () => {
-    expect(
-      resolveComposerProviderId({
-        sessionProviderId: "openai-default",
-        currentProviderId: "grok-provider",
-        lastUsedProviderId: "grok-provider",
-        providers,
-        keepCurrentOnEmptySession: false
-      })
-    ).toBe("openai-default");
-  });
-
-  it("falls back to the default provider when the preferred id is gone", () => {
-    expect(fallbackProviderId(providers, "deleted-provider")).toBe("openai-default");
-    expect(fallbackProviderId(providers, "")).toBe("openai-default");
-  });
-});
-
-describe("isUnstartedComposerSession", () => {
-  it("treats chats without a Codex thread as unstarted, even after the first local user turn", () => {
-    expect(isUnstartedComposerSession({ threadId: null })).toBe(true);
-    expect(isUnstartedComposerSession({ threadId: "" })).toBe(true);
-    expect(isUnstartedComposerSession({ threadId: "thread-1" })).toBe(false);
-  });
+it("falls back to the default provider when the preferred id is gone", () => {
+  expect(fallbackProviderId(providers, "deleted-provider")).toBe("openai-default");
+  expect(fallbackProviderId(providers, "")).toBe("openai-default");
 });
 
 describe("resolveComposerModel", () => {

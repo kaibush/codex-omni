@@ -3,7 +3,8 @@ import { Store } from "@codex-omni/db";
 import {
   runtimeHistoryContext,
   selectSessionProvider,
-  switchSessionProvider
+  switchSessionProvider,
+  updateSessionModel
 } from "./session-runtime.js";
 
 const stores: Store[] = [];
@@ -28,6 +29,39 @@ function fixture() {
 }
 
 describe("sessions with a fixed client", () => {
+  it("saves models per conversation and rejects saves for a provider that has changed", () => {
+    const { store, codex, other, project, session } = fixture();
+    const second = store.createSession({ projectId: project.id, providerId: codex.id });
+    updateSessionModel(store, session.id, codex.id, "x");
+    updateSessionModel(store, second.id, codex.id, "y");
+    expect(store.getSession(session.id)?.model).toBe("x");
+    expect(store.getSession(second.id)?.model).toBe("y");
+    expect(switchSessionProvider(store, session.id, codex.id).model).toBe("x");
+    store.upsertProvider({ ...other, model: "other-model" });
+    expect(switchSessionProvider(store, session.id, other.id).model).toBe("other-model");
+    expect(() => updateSessionModel(store, session.id, codex.id, "stale")).toThrow("供应商已变更");
+    expect(store.getSession(session.id)?.model).toBe("other-model");
+    expect(store.getSession(second.id)?.model).toBe("y");
+    expect(store.getProvider(codex.id)?.model).toBeNull();
+  });
+
+  it("allows the next model to be selected during a run without altering that run", () => {
+    const { store, codex, project, session } = fixture();
+    store.updateSession(session.id, { status: "running", model: "x" });
+    const run = store.createRun({
+      id: "run",
+      sessionId: session.id,
+      projectId: project.id,
+      providerId: codex.id,
+      model: "x",
+      serviceInstanceId: "test",
+      cwd: "/tmp",
+      startedAt: 1
+    });
+    updateSessionModel(store, session.id, codex.id, "y");
+    expect(store.getSession(session.id)?.model).toBe("y");
+    expect(store.getRun(run.id)?.model).toBe("x");
+  });
   it("keeps separate defaults and chooses a provider matching the requested client", () => {
     const { store, codex, claude, other, project } = fixture();
     expect(store.getProvider(codex.id)?.isDefault).toBe(1);

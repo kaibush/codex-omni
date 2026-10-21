@@ -62,42 +62,6 @@ export function fallbackProviderId(
   return providers.find((provider) => provider.isDefault)?.id ?? providers[0]?.id ?? wanted;
 }
 
-export function shouldHydrateComposerProvider(input: {
-  sessionId: string;
-  hydratedSessionId: string | null;
-  sessionReady: boolean;
-}): boolean {
-  return Boolean(
-    input.sessionId && input.sessionReady && input.hydratedSessionId !== input.sessionId
-  );
-}
-
-export function isUnstartedComposerSession(input: { threadId?: string | null }): boolean {
-  return !input.threadId?.trim();
-}
-
-export function resolveComposerProviderId(input: {
-  sessionProviderId?: string | null | undefined;
-  projectProviderId?: string | null | undefined;
-  currentProviderId?: string | null | undefined;
-  lastUsedProviderId?: string | null | undefined;
-  providers?: ProviderOption[] | null | undefined;
-  keepCurrentOnEmptySession?: boolean;
-}): string {
-  const current = fallbackProviderId(
-    input.providers,
-    input.currentProviderId || input.lastUsedProviderId
-  );
-  if (input.keepCurrentOnEmptySession && current) return current;
-  return fallbackProviderId(
-    input.providers,
-    input.sessionProviderId ||
-      input.projectProviderId ||
-      input.currentProviderId ||
-      input.lastUsedProviderId
-  );
-}
-
 export function resolveComposerModel(input: {
   current: string;
   available: string[];

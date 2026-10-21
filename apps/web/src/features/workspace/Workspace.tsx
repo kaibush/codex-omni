@@ -47,16 +47,12 @@ import {
 import { shouldContinueWithProvider, timelineHasConversation } from "@/lib/provider-continuation";
 import { isThreadGoalLocked } from "@/lib/thread-goal";
 import {
-  fallbackProviderId,
-  isUnstartedComposerSession,
   loadComposerModels,
-  loadComposerProviderId,
   persistComposerModel,
   persistComposerProviderId,
-  resolveComposerModel,
-  resolveComposerProviderId,
-  shouldHydrateComposerProvider
+  resolveComposerModel
 } from "@/lib/composer-selection";
+import { useComposerSelection } from "@/lib/use-composer-selection";
 import {
   isPlaceholderSessionTitle,
   readSessionListSort,
@@ -204,14 +200,12 @@ export function Workspace() {
   const params = useParams<{ projectId?: string; sessionId?: string; section?: string }>();
   const projectId = params.projectId ?? "";
   const sessionId = params.sessionId ?? "";
-  const [composerClient, setComposerClient] = useState<ClientType>("codex");
   const [switchingProvider, setSwitchingProvider] = useState(false);
   const pendingProviderSend = useRef<{
     text: string | null | undefined;
     attachments: TurnAttachment[];
     model: string;
   } | null>(null);
-  const [providerId, setProviderId] = useState(() => loadComposerProviderId());
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -265,7 +259,6 @@ export function Workspace() {
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [sendNotice, setSendNotice] = useState("");
   const [clearingGoal, setClearingGoal] = useState(false);
-  const [model, setModel] = useState("");
   const [runtimeOptionsOpen, setRuntimeOptionsOpen] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
     defaultWorkspaceView(params.sessionId)
@@ -391,7 +384,6 @@ export function Workspace() {
   const liveEventsRef = useRef<TimelineItem[]>([]);
   const eventsRef = useRef<TimelineItem[]>([]);
   const cachedSessionId = useRef(sessionId);
-  const hydratedComposerSessionId = useRef<string | null>(null);
   currentSessionId.current = sessionId;
   eventsRef.current = events;
   const restoreLiveTimeline = useCallback(
@@ -569,6 +561,21 @@ export function Workspace() {
     enabled: Boolean(sessionId),
     refetchOnWindowFocus: false
   });
+  const {
+    providerId,
+    model,
+    clientType: composerClient,
+    ready: composerReady,
+    selectProvider,
+    setModel,
+    setComposerClient
+  } = useComposerSelection({
+    sessionId,
+    session: detail.data?.session,
+    projectProviderId: projects.data?.find((project) => project.id === projectId)?.providerId,
+    providers: providers.data
+  });
+  const modelSaves = useRef(new Map<string, Promise<Session>>());
   const outlineQuery = useQuery({
     queryKey: ["session-outline", sessionId],
     queryFn: () => api<{ items: SessionOutlineItem[] }>(`/api/sessions/${sessionId}/outline`),
@@ -632,9 +639,6 @@ export function Workspace() {
     liveEventsRef.current = [];
     eventsRef.current = [];
     setTimelineLockId(undefined);
-    if (hydratedComposerSessionId.current !== sessionId) {
-      hydratedComposerSessionId.current = null;
-    }
   }, [projectId, qc, sessionId]);
   useEffect(() => {
     if (followingLive) liveEventsRef.current = events;
@@ -659,37 +663,6 @@ export function Workspace() {
     }, 200);
     return () => window.clearTimeout(timer);
   }, [attachments, input]);
-  useEffect(() => {
-    const selected = detail.data?.session;
-    if (
-      !selected ||
-      !shouldHydrateComposerProvider({
-        sessionId,
-        hydratedSessionId: hydratedComposerSessionId.current,
-        sessionReady: selected.id === sessionId
-      })
-    ) {
-      return;
-    }
-    hydratedComposerSessionId.current = sessionId;
-    setComposerClient(clientType(selected.clientType));
-    setProviderId((current) => {
-      const next = resolveComposerProviderId({
-        sessionProviderId: selected.providerId,
-        projectProviderId:
-          projects.data?.find((project) => project.id === selected.projectId)?.providerId ?? null,
-        currentProviderId: current,
-        lastUsedProviderId: loadComposerProviderId(),
-        providers: providers.data?.filter(
-          (provider) => clientType(provider.kind) === clientType(selected.clientType)
-        ),
-        keepCurrentOnEmptySession: isUnstartedComposerSession({
-          threadId: selected.threadId
-        })
-      });
-      return next || current;
-    });
-  }, [detail.data?.session, projects.data, providers.data, sessionId]);
   useEffect(() => {
     if (!detail.data || detail.data.session.id !== sessionId) return;
     const messages = detail.data.messages;
@@ -1461,14 +1434,6 @@ export function Workspace() {
       setSendNotice(error instanceof Error ? error.message : "完整内容加载失败");
     }
   }, []);
-  useEffect(() => {
-    if (!providers.data?.length) return;
-    const next = fallbackProviderId(
-      providers.data.filter((provider) => clientType(provider.kind) === composerClient),
-      providerId || loadComposerProviderId()
-    );
-    if (next && next !== providerId) setProviderId(next);
-  }, [providers.data, providerId, composerClient]);
   const pendingApprovals = useMemo(
     () =>
       events.filter(
@@ -1477,7 +1442,7 @@ export function Workspace() {
     [events]
   );
   const blockReason = sendBlockReason({
-    hasSession: Boolean(activeSession),
+    hasSession: Boolean(activeSession) && composerReady,
     hasProvider: Boolean(providerId),
     hasContent: Boolean(input.trim() || attachments.length),
     sending,
@@ -1527,27 +1492,69 @@ export function Workspace() {
   }, [templates.data, composerClient, events, providerId, clientResources.data]);
   const lastAssistantText =
     [...events].reverse().find((item) => item.kind === "assistant")?.text ?? "";
-  const availableModels = useMemo(() => selectedProvider?.models ?? [], [selectedProvider?.models]);
-  useEffect(() => {
-    setModel((current) =>
-      resolveComposerModel({
-        current,
-        available: availableModels,
-        preferred: loadComposerModels()[providerId] ?? null,
-        fallback: selectedProvider?.model ?? null
-      })
+  const availableModels = useMemo(
+    () => [...new Set([...(model ? [model] : []), ...(selectedProvider?.models ?? [])])],
+    [model, selectedProvider?.models]
+  );
+  const saveSessionModel = (session: Session, selectedProviderId: string, nextModel: string) => {
+    const updateCache = (value: string | null) => {
+      qc.setQueryData<SessionDetailPage>(["session", session.id], (current) =>
+        current && current.session.providerId === selectedProviderId
+          ? { ...current, session: { ...current.session, model: value } }
+          : current
+      );
+      qc.setQueriesData<Session[]>({ queryKey: ["sessions", session.projectId] }, (current) =>
+        current?.map((entry) =>
+          entry.id === session.id && entry.providerId === selectedProviderId
+            ? { ...entry, model: value }
+            : entry
+        )
+      );
+    };
+    updateCache(nextModel || null);
+    // Preserve the order of rapid model changes for each conversation.
+    const previous = modelSaves.current.get(session.id) ?? Promise.resolve();
+    const saved = previous
+      .catch(() => undefined)
+      .then(() =>
+        api<Session>(`/api/sessions/${session.id}/model`, {
+          method: "PUT",
+          body: JSON.stringify({ providerId: selectedProviderId, model: nextModel || null })
+        })
+      );
+    modelSaves.current.set(session.id, saved);
+    void saved.then(
+      (updated) => {
+        if (modelSaves.current.get(session.id) !== saved) return;
+        modelSaves.current.delete(session.id);
+        updateCache(updated.model ?? null);
+      },
+      () => {
+        if (modelSaves.current.get(session.id) !== saved) return;
+        modelSaves.current.delete(session.id);
+        void qc.invalidateQueries({ queryKey: ["session", session.id] });
+      }
     );
-  }, [availableModels, providerId, selectedProvider?.model]);
-  useEffect(() => {
-    if (!providerId || !model || !availableModels.includes(model)) return;
-    persistComposerModel(providerId, model);
-  }, [availableModels, model, providerId]);
+    return saved;
+  };
+  const chooseModel = (nextModel: string) => {
+    if (!composerReady || switchingProvider) return;
+    setModel(nextModel);
+    persistComposerModel(providerId, nextModel);
+    if (activeSession) {
+      void saveSessionModel(activeSession, providerId, nextModel).catch((error) => {
+        if (currentSessionId.current === activeSession.id)
+          setSendNotice(error instanceof Error ? error.message : "模型保存失败");
+      });
+    }
+  };
   const providerNames = useMemo(
     () => new Map(providers.data?.map((p) => [p.id, p.name]) ?? []),
     [providers.data]
   );
-  const applyCurrentProvider = async (target: Provider) => {
+  const applyCurrentProvider = async (target: Provider, nextModel?: string) => {
     if (activeSession) {
+      await modelSaves.current.get(activeSession.id);
       if (clientType(target.kind) !== clientType(activeSession.clientType))
         throw new Error("对话客户端不能更换，请新建全新对话");
       const updated = await api<Session>(`/api/sessions/${activeSession.id}/provider`, {
@@ -1560,12 +1567,14 @@ export function Workspace() {
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
         (current ?? []).map((entry) => (entry.id === updated.id ? updated : entry))
       );
+      selectProvider(target.id, nextModel ?? updated.model ?? "");
       await qc.invalidateQueries({ queryKey: ["session", activeSession.id] });
+    } else {
+      selectProvider(target.id);
     }
-    setComposerClient(clientType(target.kind));
-    setProviderId(target.id);
   };
   const chooseProvider = (id: string) => {
+    if (!composerReady) return;
     const target = providers.data?.find((entry) => entry.id === id);
     if (!target || (id === activeSession?.providerId && id === providerId)) return;
     if (activeSession && clientType(target.kind) !== clientType(activeSession.clientType)) {
@@ -1605,8 +1614,8 @@ export function Workspace() {
     const target = compatible.find((entry) => entry.isDefault) ?? compatible[0];
     if (target) chooseProvider(target.id);
     else {
+      selectProvider("");
       setComposerClient(kind);
-      setProviderId("");
       setProviderManager(true);
     }
   };
@@ -1634,13 +1643,20 @@ export function Workspace() {
         method: "POST",
         body: JSON.stringify({
           clientType: client,
-          providerId: targetProvider?.id ?? null
+          providerId: targetProvider?.id ?? null,
+          model:
+            targetProvider?.id === providerId
+              ? model || null
+              : resolveComposerModel({
+                  current: "",
+                  available: targetProvider?.models ?? [],
+                  preferred: targetProvider ? loadComposerModels()[targetProvider.id] : null,
+                  fallback: targetProvider?.model
+                }) || null
         })
       });
     },
     onSuccess: (s) => {
-      setComposerClient(clientType(s.clientType));
-      setProviderId(s.providerId ?? "");
       qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) => [
         s,
         ...(current ?? []).filter((session) => session.id !== s.id)
@@ -2036,7 +2052,7 @@ export function Workspace() {
     const chosenProviderId = options?.providerId || providerId;
     const chosenModel = options?.model ?? model;
     const reason = sendBlockReason({
-      hasSession: Boolean(activeSession),
+      hasSession: Boolean(activeSession) && composerReady,
       hasProvider: Boolean(chosenProviderId),
       hasContent: Boolean(raw || files.length),
       sending,
@@ -2105,7 +2121,9 @@ export function Workspace() {
     try {
       const targetProvider = providers.data?.find((entry) => entry.id === chosenProviderId);
       if (targetProvider && activeSession.providerId !== targetProvider.id)
-        await applyCurrentProvider(targetProvider);
+        await applyCurrentProvider(targetProvider, chosenModel);
+      await saveSessionModel(activeSession, chosenProviderId, chosenModel);
+      if (currentSessionId.current !== activeSession.id) return;
       const composed = usingOverride
         ? {
             message: raw,
@@ -2864,7 +2882,7 @@ export function Workspace() {
                   setRuntimeOptionsOpen={setRuntimeOptionsOpen}
                   saveWorkspaceSettings={saveWorkspaceSettings}
                   model={model}
-                  setModel={setModel}
+                  setModel={chooseModel}
                   availableModels={availableModels}
                   cancelTurn={cancelTurn}
                   blockReason={blockReason}
@@ -3121,7 +3139,7 @@ export function Workspace() {
             queryKey: ["providers"],
             queryFn: () => api<Provider[]>("/api/providers")
           });
-          if (providerId === id) setProviderId(remaining[0]?.id ?? "");
+          if (providerId === id) selectProvider(remaining[0]?.id ?? "");
           await qc.invalidateQueries({ queryKey: ["projects"] });
         }}
         onSave={async (body) => {
@@ -3246,8 +3264,8 @@ export function Workspace() {
           if (!request || request.sessionId !== sessionId) return;
           pendingContinuationSend.current = null;
           rememberConfirmedFirstTurn(request.sessionId, confirmedFirstTurns.current);
-          setProviderId(nextProviderId);
-          if (nextModel) setModel(nextModel);
+          selectProvider(nextProviderId, nextModel);
+          persistComposerModel(nextProviderId, nextModel);
           setFirstTurnPrompt(null);
           void submitMessage(request.overrideText, request.retryAttachments, {
             skipPrompt: true,
@@ -3306,8 +3324,6 @@ export function Workspace() {
                 : null;
               await qc.invalidateQueries({ queryKey: ["sessions", projectId] });
               openWorkspace(target.projectId || projectId, target.id, false, "chat");
-              setComposerClient(clientType(target.clientType));
-              setProviderId(continuation.id);
               setContinuation(null);
               pendingProviderSend.current = null;
             }
