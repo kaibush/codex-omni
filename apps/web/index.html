@@ -21,6 +21,19 @@
       href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Manrope:wght@200..800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        var site = "%VITE_VISORA_SITE_ID%";
+        var base = "%VITE_VISORA_URL%";
+        if (!site || site.charAt(0) === "%" || !base || base.charAt(0) === "%") return;
+        var script = document.createElement("script");
+        script.defer = true;
+        script.src = base.replace(/\/$/, "") + "/tracker.js";
+        script.setAttribute("data-site", site);
+        script.setAttribute("data-wait-for-user", "true");
+        document.head.appendChild(script);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

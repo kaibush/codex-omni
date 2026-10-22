@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Bot, Check, FolderOpen, KeyRound, Loader2, TerminalSquare } from "lucide-react";
 import { api, setCsrf } from "@/lib/api";
+import { syncVisoraUser } from "@/lib/visora";
 import { DEFAULT_DOCUMENT_TITLE, useDocumentTitle } from "@/lib/document-title";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,14 +39,15 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         if (password !== confirmPassword) throw new Error("两次输入的密码不一致");
         if (password.length < 8) throw new Error("密码至少 8 位");
       }
-      const result = await api<{ csrfToken: string }>(
-        mode === "setup" ? "/api/auth/setup" : "/api/auth/login",
-        {
-          method: "POST",
-          body: JSON.stringify({ username, password })
-        }
-      );
+      const result = await api<{
+        csrfToken: string;
+        user?: { id: string; username: string };
+      }>(mode === "setup" ? "/api/auth/setup" : "/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password })
+      });
       setCsrf(result.csrfToken);
+      if (result.user?.id) syncVisoraUser({ id: result.user.id, name: result.user.username });
       onLogin();
     } catch (reason) {
       setError(String(reason instanceof Error ? reason.message : reason));

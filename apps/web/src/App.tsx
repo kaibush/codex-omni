@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router";
 import { api, setCsrf } from "@/lib/api";
+import { syncVisoraUser } from "@/lib/visora";
 import { Login } from "@/features/auth/Login";
 import { Workspace } from "@/features/workspace/Workspace";
 import { SystemSettingsPage } from "@/features/workspace/SystemSettingsPage";
@@ -11,9 +12,27 @@ export function App() {
   const session = useQuery({
     queryKey: ["auth", nonce],
     queryFn: async () => {
-      const result = await api<{ csrfToken: string }>("/api/auth/session");
-      setCsrf(result.csrfToken);
-      return result;
+      try {
+        const result = await api<{
+          csrfToken: string;
+          user?: { id: string; username: string };
+        }>("/api/auth/session");
+        setCsrf(result.csrfToken);
+        if (result.user?.id) {
+          syncVisoraUser({ id: result.user.id, name: result.user.username });
+        }
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (
+          message === "Authentication required" ||
+          message === "Session expired" ||
+          message === "HTTP 401"
+        ) {
+          syncVisoraUser(null);
+        }
+        throw error;
+      }
     },
     retry: false
   });

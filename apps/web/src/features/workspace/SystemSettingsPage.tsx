@@ -37,6 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ThemeSwitch } from "@/components/theme-switch";
 import { useTheme } from "@/context/theme-provider";
 import { api } from "@/lib/api";
+import { syncVisoraUser } from "@/lib/visora";
 import { joinDocumentTitle, useDocumentTitle } from "@/lib/document-title";
 import { workspacePath } from "@/lib/routes";
 import {
@@ -858,6 +859,7 @@ export function SystemSettingsPage() {
                     className="mt-6"
                     onClick={async () => {
                       await api("/api/auth/logout", { method: "POST" });
+                      syncVisoraUser(null);
                       window.location.assign("/");
                     }}
                   >
