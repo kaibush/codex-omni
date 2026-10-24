@@ -68,15 +68,16 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Linux includes guest time in user/nice already. Sum only the first eight
-// counters, treating I/O wait and hypervisor steal as unavailable, not execution.
+// /proc/stat: user nice system idle iowait irq softirq steal. guest and
+// guest_nice are already included in user and nice, so they are not added again.
+// Match htop's default aggregate meter: steal counts as busy, iowait stays idle.
 export function parseProcCpuTimes(text: string): CpuTimes | null {
   const line = text.split("\n").find((line) => /^cpu\s/.test(line));
   if (!line) return null;
   const times = line.trim().split(/\s+/).slice(1, 9).map(Number);
   if (times.length < 8 || times.some((value) => !Number.isFinite(value) || value < 0)) return null;
   return {
-    idle: times[3]! + times[4]! + times[7]!,
+    idle: times[3]! + times[4]!,
     total: times.reduce((sum, value) => sum + value, 0)
   };
 }

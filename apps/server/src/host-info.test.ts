@@ -35,12 +35,12 @@ describe("cpuUsageFromTimes", () => {
 });
 
 describe("Linux CPU accounting", () => {
-  it("includes softirq and steal in total without double-counting guest time", () => {
+  it("counts steal as busy and keeps iowait idle, without double-counting guest time", () => {
     const before = parseProcCpuTimes("cpu 100 20 30 400 50 10 15 75 25 5\ncpu0 1 2 3 4")!;
     const after = parseProcCpuTimes("cpu 110 20 40 440 60 10 25 95 30 6")!;
-    expect(before).toEqual({ idle: 525, total: 700 });
-    expect(after).toEqual({ idle: 595, total: 800 });
-    expect(cpuUsageFromTimes(before, after)).toBe(30);
+    expect(before).toEqual({ idle: 450, total: 700 });
+    expect(after).toEqual({ idle: 500, total: 800 });
+    expect(cpuUsageFromTimes(before, after)).toBe(50);
   });
 
   it("rejects malformed counters", () => {
