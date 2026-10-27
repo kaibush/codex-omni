@@ -6,7 +6,6 @@ import {
   ArrowUpDown,
   Blocks,
   BookOpen,
-  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -38,6 +37,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/BrandMark";
 import { ClientIcon } from "@/components/ClientIcon";
 import { SessionIcon } from "@/components/SessionIcon";
 import { Button } from "@/components/ui/button";
@@ -361,9 +361,7 @@ export function WorkspaceSidebar({
                 title="最近对话首页"
                 onClick={openHome}
               >
-                <span className="brand-mark grid size-8 shrink-0 place-items-center rounded-lg">
-                  <Bot className="size-4 shrink-0" />
-                </span>
+                <BrandMark className="size-8 rounded-lg" />
                 <span className="min-w-0 flex-1">
                   <b className="block truncate text-sm">Codex Omni</b>
                   <span className="block truncate text-[11px] text-muted-foreground">

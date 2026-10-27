@@ -5,6 +5,7 @@ coverage
 .DS_Store
 data/*.db*
 data/runtime
+data/branding/
 apps/web/.vite
 playwright-report
 test-results

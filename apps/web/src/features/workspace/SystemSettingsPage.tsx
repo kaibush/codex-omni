@@ -56,6 +56,7 @@ import { RuntimeSettingsTabs } from "./RuntimeSettingsTabs";
 import { defaultWorkspaceSettings, type WorkspaceSettings } from "./SettingsDialog";
 import { normalizeTemplateCommand } from "./prompt-templates";
 import { findSettingsSection } from "./settings-navigation";
+import { BrandIconSettings } from "./settings/BrandIconSettings";
 import { SettingsUpdatesSection } from "./SettingsUpdatesSection";
 import { SettingsMobileNav, SettingsSidebar } from "./settings/settings-sidebar";
 import {
@@ -300,6 +301,7 @@ export function SystemSettingsPage() {
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
               {active.id === "system-info" ? (
                 <>
+                  <BrandIconSettings />
                   <SettingsCard title="当前版本" description="后续检查更新时会对照这个版本号。">
                     <SettingsFormGrid>
                       <SettingsInfoRow label="应用" value="Codex Omni" />

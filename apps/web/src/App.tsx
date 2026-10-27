@@ -2,12 +2,14 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, Route, Routes } from "react-router";
 import { api, setCsrf } from "@/lib/api";
+import { useBrandIcon } from "@/lib/branding";
 import { syncVisoraUser } from "@/lib/visora";
 import { Login } from "@/features/auth/Login";
 import { Workspace } from "@/features/workspace/Workspace";
 import { SystemSettingsPage } from "@/features/workspace/SystemSettingsPage";
 import { SystemUpdateDialog } from "@/features/workspace/SystemUpdateDialog";
 export function App() {
+  useBrandIcon();
   const [nonce, setNonce] = useState(0);
   const session = useQuery({
     queryKey: ["auth", nonce],

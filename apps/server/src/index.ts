@@ -31,6 +31,13 @@ import {
 import { parseCodexProviderConfig } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
 import {
+  MAX_BRAND_ICON_BYTES,
+  clearBrandIcon,
+  readBrandIconFile,
+  readBranding,
+  saveBrandIcon
+} from "./branding.js";
+import {
   browseDirectory,
   readFilesystemBinaryFile,
   readFilesystemTextFile,
@@ -122,6 +129,7 @@ const root = path.resolve(process.cwd());
 const execFileAsync = promisify(execFile);
 const dataPath = resolveDatabasePath(root);
 await mkdir(path.dirname(dataPath), { recursive: true });
+const brandingDir = path.join(path.dirname(dataPath), "branding");
 const store = new Store(dataPath);
 initAuth(store.db);
 const app = Fastify({ logger: true });
@@ -681,6 +689,38 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
   store.updateSettings(settings);
   return settings;
 });
+app.get("/api/branding", async (_req, reply) => {
+  reply.header("cache-control", "no-store");
+  return readBranding(brandingDir);
+});
+app.get("/api/branding/icon", async (req, reply) => {
+  const file = await readBrandIconFile(brandingDir);
+  if (!file) return reply.code(404).send({ error: "尚未设置图标" });
+  reply.header("content-type", file.contentType);
+  reply.header("x-content-type-options", "nosniff");
+  reply.header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'");
+  reply.header(
+    "cache-control",
+    queryValue(req, "v") ? "public, max-age=31536000, immutable" : "no-cache"
+  );
+  return reply.send(file.buffer);
+});
+app.put(
+  "/api/branding/icon",
+  { preHandler: auth, bodyLimit: MAX_BRAND_ICON_BYTES + 64 * 1024 },
+  async (req) => {
+    if (!Buffer.isBuffer(req.body)) throw httpError(400, "请使用二进制上传");
+    try {
+      return await saveBrandIcon(brandingDir, req.body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const known =
+        message.startsWith("图标") || message.startsWith("只支持") || message.startsWith("SVG");
+      throw httpError(400, known ? message : "图标无效");
+    }
+  }
+);
+app.delete("/api/branding/icon", { preHandler: auth }, async () => clearBrandIcon(brandingDir));
 app.get("/api/projects", { preHandler: auth }, async () => store.listProjects());
 app.get("/api/filesystem/browse", { preHandler: auth }, async (req) => {
   const pathValue = z.string().optional().parse(queryValue(req, "path"));

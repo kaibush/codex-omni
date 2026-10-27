@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Bot, Check, FolderOpen, KeyRound, Loader2, TerminalSquare } from "lucide-react";
+import { Check, FolderOpen, KeyRound, Loader2, TerminalSquare } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 import { api, setCsrf } from "@/lib/api";
 import { syncVisoraUser } from "@/lib/visora";
 import { DEFAULT_DOCUMENT_TITLE, useDocumentTitle } from "@/lib/document-title";
@@ -70,9 +71,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       <section className="relative hidden overflow-hidden border-r bg-[oklch(0.235_0_0)] p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-14">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,color-mix(in_oklch,var(--primary)_28%,transparent),transparent_35%),radial-gradient(circle_at_80%_75%,oklch(0.7_0.12_163_/_0.16),transparent_32%)]" />
         <div className="relative flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Bot className="size-5" />
-          </span>
+          <BrandMark className="size-10 rounded-xl" iconClassName="size-5" />
           <div>
             <div className="font-semibold">Codex Omni</div>
             <div className="text-xs text-zinc-400">远程工程工作台</div>
@@ -109,9 +108,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         <Card className="w-full max-w-[28rem] gap-5 border-border/80">
           <CardHeader className="gap-3">
             <div className="mb-2 flex items-center gap-3 lg:hidden">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                <Bot className="size-5" />
-              </span>
+              <BrandMark className="size-10 rounded-xl" iconClassName="size-5" />
               <div>
                 <div className="font-semibold">Codex Omni</div>
                 <div className="text-xs text-muted-foreground">远程工程工作台</div>
