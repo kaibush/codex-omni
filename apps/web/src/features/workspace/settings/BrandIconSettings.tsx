@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { api, apiUpload } from "@/lib/api";
-import { brandIconFileError, brandingQueryKey, fetchBranding, type Branding } from "@/lib/branding";
+import {
+  brandIconFileError,
+  brandingQueryKey,
+  fetchBranding,
+  normalizeBranding,
+  type Branding
+} from "@/lib/branding";
 import { SettingsCard } from "./settings-ui";
 
 export function BrandIconSettings() {
@@ -21,7 +27,7 @@ export function BrandIconSettings() {
   const upload = useMutation({
     mutationFn: (file: File) => apiUpload<Branding>("/api/branding/icon", file),
     onSuccess: (next) => {
-      queryClient.setQueryData(brandingQueryKey, next);
+      queryClient.setQueryData(brandingQueryKey, normalizeBranding(next));
       toast.success("图标已更新");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "上传图标失败")
@@ -29,7 +35,7 @@ export function BrandIconSettings() {
   const reset = useMutation({
     mutationFn: () => api<Branding>("/api/branding/icon", { method: "DELETE" }),
     onSuccess: (next) => {
-      queryClient.setQueryData(brandingQueryKey, next);
+      queryClient.setQueryData(brandingQueryKey, normalizeBranding(next));
       toast.success("已恢复默认图标");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "恢复默认图标失败")

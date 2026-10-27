@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_BRAND_ICON_BYTES,
+  brandingForRequest,
   clearBrandIcon,
   detectBrandIcon,
+  forwardedPrefix,
   readBrandIconFile,
   readBranding,
   saveBrandIcon
@@ -77,5 +79,41 @@ describe("brand icon storage", () => {
       updatedAt: null
     });
     expect(await readBrandIconFile(directory)).toBeNull();
+  });
+});
+
+describe("forwardedPrefix", () => {
+  it("keeps a single path segment and drops everything else", () => {
+    expect(forwardedPrefix("/us")).toBe("/us");
+    expect(forwardedPrefix("/ca/")).toBe("/ca");
+    expect(forwardedPrefix(["/us", "/ca"])).toBe("/us");
+    expect(forwardedPrefix("/")).toBe("");
+    expect(forwardedPrefix("//")).toBe("");
+    expect(forwardedPrefix("/us/ca")).toBe("");
+    expect(forwardedPrefix("https://evil.example/us")).toBe("");
+    expect(forwardedPrefix("/us/../ca")).toBe("");
+    expect(forwardedPrefix(undefined)).toBe("");
+  });
+});
+
+describe("brandingForRequest", () => {
+  it("prefixes the icon URL only for a safe forwarded prefix", () => {
+    const branding = {
+      iconUrl: "/api/branding/icon?v=9",
+      contentType: "image/svg+xml",
+      updatedAt: 9
+    };
+    expect(brandingForRequest(branding, "/us")).toEqual({
+      ...branding,
+      iconUrl: "/us/api/branding/icon?v=9"
+    });
+    expect(brandingForRequest(branding, "/us/ca")).toEqual(branding);
+    expect(
+      brandingForRequest({ iconUrl: null, contentType: null, updatedAt: null }, "/ca")
+    ).toEqual({
+      iconUrl: null,
+      contentType: null,
+      updatedAt: null
+    });
   });
 });

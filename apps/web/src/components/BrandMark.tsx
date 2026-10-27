@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
-import { brandingQueryKey, fetchBranding } from "@/lib/branding";
+import { brandingQueryKey, fetchBranding, normalizeBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
 export function BrandMark({
@@ -19,7 +19,7 @@ export function BrandMark({
     retry: false,
     refetchOnWindowFocus: false
   });
-  const iconUrl = branding.data?.iconUrl;
+  const iconUrl = normalizeBranding(branding.data).iconUrl;
   return (
     <span
       className={cn(

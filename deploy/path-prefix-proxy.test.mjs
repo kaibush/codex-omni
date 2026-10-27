@@ -45,3 +45,12 @@ test("strips only the configured prefix", () => {
   assert.equal(proxy.stripPrefix("/ca"), "/");
   assert.equal(proxy.stripPrefix("/assets/app.js"), "/assets/app.js");
 });
+
+test("prefixes branding icon literals and leaves the path check intact", () => {
+  const source =
+    "const href=`/api/branding/icon?v=${id}`;const ok=/^\\/(?:[A-Za-z0-9_-]+\\/)?api\\/branding\\/icon$/.test(path)";
+  const rewritten = proxy.rewriteJavascript(source);
+  assert.match(rewritten, /\/ca\/api\/branding\/icon\?v=/);
+  assert.match(rewritten, /\?api\\\/branding\\\/icon/);
+  assert.equal(rewritten.includes("/ca/api\\/branding"), false);
+});

@@ -39,13 +39,21 @@ export function brandIconFileError(file: Pick<File, "name" | "type" | "size">) {
 export function normalizeBranding(value: unknown): Branding {
   if (!value || typeof value !== "object") return emptyBranding();
   const record = value as Record<string, unknown>;
-  const iconUrl = typeof record.iconUrl === "string" ? safeIconUrl(record.iconUrl) : null;
-  if (!iconUrl) return emptyBranding();
+  const updatedAt =
+    typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
+      ? record.updatedAt
+      : null;
+  const claimed = typeof record.iconUrl === "string" ? record.iconUrl : "";
+  if (updatedAt == null || !isBrandIconPath(claimed)) return emptyBranding();
   return {
-    iconUrl,
+    iconUrl: brandIconUrl(updatedAt),
     contentType: typeof record.contentType === "string" ? record.contentType : null,
-    updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : null
+    updatedAt
   };
+}
+
+function brandIconUrl(updatedAt: number) {
+  return `/api/branding/icon?v=${updatedAt}`;
 }
 
 export async function fetchBranding(): Promise<Branding> {
@@ -56,7 +64,7 @@ export async function fetchBranding(): Promise<Branding> {
 
 export function applyDocumentIcon(branding: Branding | null) {
   if (typeof document === "undefined") return;
-  const iconUrl = safeIconUrl(branding?.iconUrl ?? null);
+  const iconUrl = normalizeBranding(branding).iconUrl;
   let links = [...document.head.querySelectorAll<HTMLLinkElement>(ICON_SELECTOR)];
   if (links.length === 0) {
     const created = document.createElement("link");
@@ -101,7 +109,10 @@ export function useBrandIcon() {
   return query;
 }
 
-function safeIconUrl(value: string | null) {
-  if (!value || !value.startsWith("/api/branding/icon") || value.startsWith("//")) return null;
-  return value;
+function isBrandIconPath(value: string) {
+  if (!value || value.startsWith("//") || value.includes("://") || value.includes("\\")) {
+    return false;
+  }
+  const path = value.split("?")[0]?.split("#")[0] ?? "";
+  return /^\/(?:[A-Za-z0-9_-]+\/)?api\/branding\/icon$/.test(path);
 }

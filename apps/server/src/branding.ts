@@ -23,6 +23,24 @@ export function emptyBranding(): Branding {
   return { iconUrl: null, contentType: null, updatedAt: null };
 }
 
+const FORWARDED_PREFIX = /^\/[A-Za-z0-9_-]+$/;
+
+export function forwardedPrefix(header: unknown) {
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return FORWARDED_PREFIX.test(trimmed) ? trimmed : "";
+}
+
+export function brandingForRequest(branding: Branding, header?: unknown): Branding {
+  const prefix = forwardedPrefix(header);
+  if (!prefix || branding.updatedAt == null || !branding.iconUrl) return branding;
+  return {
+    ...branding,
+    iconUrl: `${prefix}/api/branding/icon?v=${branding.updatedAt}`
+  };
+}
+
 export function detectBrandIcon(buffer: Buffer): { contentType: string } {
   if (buffer.byteLength === 0) throw new Error("图标文件是空的");
   if (buffer.byteLength > MAX_BRAND_ICON_BYTES) throw new Error("图标不能超过 512 KB");

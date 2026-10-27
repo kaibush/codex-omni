@@ -37,6 +37,22 @@ describe("normalizeBranding", () => {
       contentType: null,
       updatedAt: null
     });
+    expect(
+      normalizeBranding({
+        iconUrl: "/us/api/branding/icon?v=3",
+        contentType: "image/svg+xml",
+        updatedAt: 3
+      })
+    ).toEqual({
+      iconUrl: "/api/branding/icon?v=3",
+      contentType: "image/svg+xml",
+      updatedAt: 3
+    });
+    expect(normalizeBranding({ iconUrl: "/api/branding/icon?v=3", updatedAt: null })).toEqual({
+      iconUrl: null,
+      contentType: null,
+      updatedAt: null
+    });
   });
 });
 

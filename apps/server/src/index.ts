@@ -32,6 +32,7 @@ import { parseCodexProviderConfig } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
 import {
   MAX_BRAND_ICON_BYTES,
+  brandingForRequest,
   clearBrandIcon,
   readBrandIconFile,
   readBranding,
@@ -689,9 +690,9 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
   store.updateSettings(settings);
   return settings;
 });
-app.get("/api/branding", async (_req, reply) => {
+app.get("/api/branding", async (req, reply) => {
   reply.header("cache-control", "no-store");
-  return readBranding(brandingDir);
+  return brandingForRequest(await readBranding(brandingDir), req.headers["x-forwarded-prefix"]);
 });
 app.get("/api/branding/icon", async (req, reply) => {
   const file = await readBrandIconFile(brandingDir);
@@ -711,7 +712,10 @@ app.put(
   async (req) => {
     if (!Buffer.isBuffer(req.body)) throw httpError(400, "请使用二进制上传");
     try {
-      return await saveBrandIcon(brandingDir, req.body);
+      return brandingForRequest(
+        await saveBrandIcon(brandingDir, req.body),
+        req.headers["x-forwarded-prefix"]
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       const known =
