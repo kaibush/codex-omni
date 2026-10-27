@@ -1,10 +1,8 @@
-# Codex Omni production SPA + API.
-# Public pages are the built frontend in /var/www/codex-omni (see deploy/publish-frontend.sh).
-# Vite keeps 5173 for local `pnpm dev`. Dev API stays on 8790 (tsx watch).
-# Domain API goes to the production Fastify on 127.0.0.1:8791, not the watch process.
-# Chat/terminal streams must not pass through encode; gzip waits for EOF.
-codex.lvyrix.com {
-	import access_log
+# Example only. Copy this file into your Caddy config and replace example.com.
+# Publish the frontend to /var/www/codex-omni with deploy/publish-frontend.sh.
+# The production API listens on 127.0.0.1:8791. Dev stays on 5173 and 8790.
+# Do not encode chat or terminal streams; compression waits for EOF.
+example.com {
 	@api path /api /api/*
 	handle @api {
 		reverse_proxy 127.0.0.1:8791 {

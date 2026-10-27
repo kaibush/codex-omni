@@ -1,21 +1,19 @@
+# Example systemd unit. Copy to /etc/systemd/system/codex-omni-api.service
+# and replace the directory, Node binary, and public origin before enabling.
 [Unit]
 Description=Codex Omni production API
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/project/github/kaibush/codex-omni/apps/server
-Environment=PATH=/root/.nvm/versions/node/v24.18.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/opt/codex-omni/apps/server
 Environment=CODEX_OMNI_HOST=127.0.0.1
 Environment=CODEX_OMNI_PORT=8791
-Environment=CODEX_OMNI_ORIGIN=https://codex.lvyrix.com
+Environment=CODEX_OMNI_ORIGIN=https://example.com
 Environment=CODEX_OMNI_INSTANCE=prod
+Environment=CODEX_OMNI_DATABASE=/var/lib/codex-omni/codex-omni.db
 Environment=COOKIE_SECURE=true
-Environment=HOME=/root
-Environment=SHELL=/usr/bin/zsh
-Environment=USER=root
-Environment=LOGNAME=root
-ExecStart=/root/.nvm/versions/node/v24.18.0/bin/node dist/cli/codex-omni.js
+ExecStart=/usr/bin/node dist/cli/codex-omni.js
 Restart=on-failure
 RestartSec=3
 

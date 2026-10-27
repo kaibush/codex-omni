@@ -57,7 +57,7 @@ export function ChangeProjectPathDialog({
               className="field mt-0 font-mono"
               value={path}
               onChange={(event) => setPath(event.target.value)}
-              placeholder="/root/project/github/kaibush/grok-iq-plus"
+              placeholder="/srv/projects/my-app"
             />
             <Button
               type="button"

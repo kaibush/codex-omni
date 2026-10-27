@@ -229,12 +229,12 @@ describe("collabCardDetails", () => {
         tool: "close_agent",
         input: { target: "agent-1" },
         output: JSON.stringify({
-          previous_status: { completed: "/root/project/github/kaibush/codex-omni" }
+          previous_status: { completed: "/srv/projects/demo" }
         })
       })
     ).toMatchObject({
       receivers: ["agent-1"],
-      result: "/root/project/github/kaibush/codex-omni"
+      result: "/srv/projects/demo"
     });
   });
 });

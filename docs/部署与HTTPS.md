@@ -2,6 +2,8 @@
 
 生产环境不要把 Fastify 的 `8790`/`8791` 或 Vite 的 `5173` 直接暴露到公网。外网只应看到反向代理的 **HTTPS + WSS**。
 
+下面的域名、目录和 Node 路径都是示例。复制到服务器前改成你自己的值，不要把真实域名、机器路径或证书提交回仓库。
+
 ## 推荐拓扑
 
 ```text
@@ -20,14 +22,14 @@
 | -------------------- | ---------------------------------------------------- |
 | `CODEX_OMNI_HOST`     | 本机 Caddy 用 `127.0.0.1`；对外进程用 `0.0.0.0`        |
 | `CODEX_OMNI_PORT`     | 本机生产 API `8791`；开发默认 `8790`         |
-| `CODEX_OMNI_ORIGIN`   | 站点 Origin 白名单，例如 `https://codex.lvyrix.com` |
-| `CODEX_OMNI_INSTANCE` | 同库多进程时的实例名。本机生产 `prod`，`pnpm dev` 为 `dev` |
+| `CODEX_OMNI_ORIGIN`   | 站点 Origin 白名单，例如 `https://example.com` |
+| `CODEX_OMNI_INSTANCE` | 同库多进程时的实例名。生产可用 `prod`，`pnpm dev` 用 `dev` |
 | `COOKIE_SECURE`      | `true`                                               |
-| `CODEX_OMNI_DATABASE` | 持久卷路径，例如 `/app/data/codex-omni.db`            |
+| `CODEX_OMNI_DATABASE` | 持久卷路径，例如 `/var/lib/codex-omni/codex-omni.db`            |
 | `CODEX_OMNI_VERSION`  | 可选，覆盖版本号；发布包默认用 `package.json`               |
 | `CODEX_OMNI_GITHUB_REPO` | GitHub Releases 仓库，默认 `kaibush/codex-omni`    |
 
-开发默认 `CODEX_OMNI_ORIGIN` 为空，会回显请求 Origin，方便局域网 IP 访问；生产必须改成明确白名单。本机 `codex.lvyrix.com` 与 `pnpm dev` 共用同一 SQLite，但启动时只回收本实例的运行中任务，避免热加载把生产对话打断。
+开发默认 `CODEX_OMNI_ORIGIN` 为空，会回显请求 Origin，方便局域网 IP 访问；生产必须改成明确白名单。生产和 `pnpm dev` 如果共用同一个 SQLite，请设置不同的 `CODEX_OMNI_INSTANCE`。启动时只回收本实例的运行中任务，避免热加载把另一个进程的对话打断。
 
 ## Docker Compose
 
@@ -60,11 +62,14 @@ docker compose exec server node dist/cli/create-user.js --username admin --passw
 - `proxy_read_timeout` 拉长，避免长 turn 被代理掐断。
 - 静态前端用 `try_files` 回退到 `index.html`。
 - 启用 HSTS，并设置 `frame-ancestors 'none'`。
+- 如果前端要加载第三方统计脚本，把那个域名加进 `script-src`。不要把你的统计域名提交进仓库。
 
-Caddy 等价配置（本机当前用法：`codex.lvyrix.com` 挂生产前端 + `8791` 生产 API；`5173`/`8790` 继续给 Vite/`tsx watch`）：
+## Caddy 示例
+
+把 [`deploy/Caddyfile.example`](../deploy/Caddyfile.example) 复制到 Caddy 配置目录，把 `example.com` 换成实际域名。生产 API 用 [`deploy/codex-omni-api.service`](../deploy/codex-omni-api.service) 做参考：复制到 `/etc/systemd/system/` 后，改工作目录、`node` 路径和 `CODEX_OMNI_ORIGIN`。
 
 ```caddy
-codex.lvyrix.com {
+example.com {
   @api path /api /api/*
   handle @api {
     reverse_proxy 127.0.0.1:8791 {
@@ -90,14 +95,14 @@ codex.lvyrix.com {
 }
 ```
 
-仓库里的完整文件是 [`deploy/Caddyfile.codex.lvyrix.com`](../deploy/Caddyfile.codex.lvyrix.com)。生产 API 用 [`deploy/codex-omni-api.service`](../deploy/codex-omni-api.service) 监听 `127.0.0.1:8791`，和 Vite 热加载的 `8790` 分开。
-
 ```bash
+# 先按上面的示例装好 systemd 单元，再构建并重启已安装的服务。
+# 这两个脚本不会覆盖你机器上的 Caddy 或 systemd 配置。
 bash deploy/publish-frontend.sh
 bash deploy/publish-backend.sh
 ```
 
-Caddy 会自动处理 HTTPS 证书；生产进程已设 `CODEX_OMNI_ORIGIN=https://codex.lvyrix.com`。不要把 `5173`/`8790` 反代到公网。
+Caddy 会自动处理 HTTPS 证书。生产进程的 `CODEX_OMNI_ORIGIN` 应设为实际站点，例如 `https://example.com`。不要把 `5173`/`8790` 反代到公网。
 
 ## 安全边界
 

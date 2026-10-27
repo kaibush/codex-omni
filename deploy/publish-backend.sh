@@ -7,12 +7,9 @@ cd "$root"
 # Include every client runtime and its transitive workspace dependencies.
 pnpm --filter '@codex-omni/server...' build
 
-unit_src="$root/deploy/codex-omni-api.service"
-unit_dst="/etc/systemd/system/codex-omni-api.service"
-if [[ ! -e "$unit_dst" ]] || ! cmp -s "$unit_src" "$unit_dst"; then
-  install -m 644 "$unit_src" "$unit_dst"
-  systemctl daemon-reload
-  systemctl enable codex-omni-api
+if [[ ! -f /etc/systemd/system/codex-omni-api.service ]]; then
+  echo "API built. Copy deploy/codex-omni-api.service and deploy/Caddyfile.example, edit them, then install before restarting." >&2
+  exit 0
 fi
 
 systemctl restart codex-omni-api
@@ -31,15 +28,5 @@ if [[ "$healthy" -ne 1 ]]; then
   exit 1
 fi
 
-caddy_src="$root/deploy/Caddyfile.codex.lvyrix.com"
-caddy_dst="/etc/caddy/conf.d/codex-omni.caddy"
-if [[ -d /etc/caddy/conf.d ]]; then
-  if [[ ! -e "$caddy_dst" ]] || ! cmp -s "$caddy_src" "$caddy_dst"; then
-    install -m 644 "$caddy_src" "$caddy_dst"
-    if systemctl is-active --quiet caddy; then
-      systemctl reload caddy
-    fi
-  fi
-fi
-
 echo "Production API healthy on 127.0.0.1:8791"
+echo "Caddy and systemd examples are not installed by this script."

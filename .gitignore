@@ -23,3 +23,6 @@ agents.md
 
 # local chat/terminal uploads, not for GitHub
 .codex-uploads/
+# local overrides, not for GitHub
+.env.local
+.env.*.local
