@@ -5,6 +5,8 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="${CODEX_OMNI_FRONTEND_ROOT:-/var/www/codex-omni}"
 
 cd "$root"
+# Always build the site for /. Subpath mounts such as /ca or /us belong to
+# deploy/path-prefix-proxy.mjs, not to this build.
 pnpm --filter @codex-omni/web build
 
 install -d -m 755 "$dest"

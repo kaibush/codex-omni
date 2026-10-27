@@ -104,6 +104,39 @@ bash deploy/publish-backend.sh
 
 Caddy 会自动处理 HTTPS 证书。生产进程的 `CODEX_OMNI_ORIGIN` 应设为实际站点，例如 `https://example.com`。不要把 `5173`/`8790` 反代到公网。
 
+
+## 发布方式
+
+通用部署和子路径部署共用 `deploy/publish-frontend.sh` 与 `deploy/publish-backend.sh`。两个脚本都按站点根路径构建，也不会覆盖服务器上已有的 Caddy 或 systemd 配置。
+
+### 通用根路径
+
+适合 `https://example.com/` 直接打开这一套服务。Caddy 按 [`deploy/Caddyfile.example`](../deploy/Caddyfile.example) 把页面和 `/api` 转到本机，然后执行：
+
+```bash
+bash deploy/publish-frontend.sh
+bash deploy/publish-backend.sh
+```
+
+前端脚本会把 `apps/web/dist` 同步到 `/var/www/codex-omni`。后端脚本只构建并重启已经安装好的 `codex-omni-api`。
+
+### 子路径
+
+同一域名要挂多个实例时，不要改应用的构建前缀，也不要把真实域名写进仓库。每套服务仍用上面的命令按 `/` 发布。边缘再用 [`deploy/path-prefix-proxy.mjs`](../deploy/path-prefix-proxy.mjs) 把根路径改写到 `/ca` 或 `/us`，并给 Cookie 加上前缀，避免两个实例互相覆盖登录态。
+
+```bash
+PREFIX=/ca LISTEN_PORT=8792 UPSTREAM_TLS=false PUBLIC_HOST=example.com \
+  node deploy/path-prefix-proxy.mjs
+```
+
+```caddy
+handle /ca /ca/* {
+  reverse_proxy 127.0.0.1:8792
+}
+```
+
+另一台没改过的服务也可以挂到别的前缀：本机代理去掉前缀、改写页面和 Cookie，再转发到对方的根路径。对方继续用通用方式发布。单元示例是 [`deploy/codex-omni-prefix-proxy.service.example`](../deploy/codex-omni-prefix-proxy.service.example)，真实上游地址只放在服务器本地配置里。
+
 ## 安全边界
 
 - 本服务以单机自用、高权限为前提：Codex Worker 能按设置读写项目文件并开终端。

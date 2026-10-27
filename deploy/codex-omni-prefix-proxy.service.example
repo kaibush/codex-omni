@@ -1,0 +1,22 @@
+# Example only. Copy to /etc/systemd/system/ and replace the prefix,
+# Node path, public host, and upstream before enabling.
+[Unit]
+Description=Codex Omni path prefix proxy
+After=network.target
+
+[Service]
+Type=simple
+Environment=PREFIX=/ca
+Environment=LISTEN_HOST=127.0.0.1
+Environment=LISTEN_PORT=8792
+Environment=UPSTREAM_HOST=127.0.0.1
+Environment=UPSTREAM_PORT=8791
+Environment=UPSTREAM_TLS=false
+Environment=PUBLIC_HOST=example.com
+Environment=UPSTREAM_NAME=example.com
+ExecStart=/usr/bin/node /opt/codex-omni/deploy/path-prefix-proxy.mjs
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
