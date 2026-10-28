@@ -2,7 +2,26 @@
 # Publish the frontend to /var/www/codex-omni with deploy/publish-frontend.sh.
 # The production API listens on 127.0.0.1:8791. Dev stays on 5173 and 8790.
 # Do not encode chat or terminal streams; compression waits for EOF.
+#
+# Requires the rate_limit module (xcaddy build --with github.com/mholt/caddy-ratelimit).
+# Limits only the login/setup endpoints; normal API traffic is untouched.
+
+(login_guard) {
+	@login_write {
+		method POST
+		path /api/auth/login /api/auth/setup
+	}
+	rate_limit @login_write {
+		zone login_api {
+			key {http.request.host}|{http.request.client_ip}
+			events 12
+			window 1m
+		}
+	}
+}
+
 example.com {
+	import login_guard
 	@api path /api /api/*
 	handle @api {
 		reverse_proxy 127.0.0.1:8791 {
