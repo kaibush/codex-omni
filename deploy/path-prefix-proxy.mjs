@@ -114,7 +114,8 @@ export function rewriteRequestCookie(value) {
 export function rewriteSetCookie(value) {
   let next = value.replace(new RegExp(`(^|;\\s*)${cookieName}=`, "i"), `$1${publicCookieName}=`);
   if (new RegExp(`;\\s*path=${prefixPattern}(?:;|$)`, "i").test(next)) return next;
-  if (/;\s*path=\/(?:;|$)/i.test(next)) return next.replace(/;\s*path=\/(?=;|$)/i, `; Path=${prefix}`);
+  if (/;\s*path=\/(?:;|$)/i.test(next))
+    return next.replace(/;\s*path=\/(?=;|$)/i, `; Path=${prefix}`);
   return `${next}; Path=${prefix}`;
 }
 
@@ -222,12 +223,39 @@ function stripHopHeaders(headers) {
   return next;
 }
 
-function upstreamHeaders(incoming, extra) {
+export function appendForwardedFor(existing, remoteAddress) {
+  const peer = normalizeForwardedPeer(remoteAddress);
+  if (!peer) return existing;
+  const prior = Array.isArray(existing)
+    ? existing
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .join(", ")
+    : String(existing ?? "").trim();
+  if (!prior) return peer;
+  const parts = prior
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (parts[parts.length - 1] === peer) return prior;
+  return `${prior}, ${peer}`;
+}
+
+function normalizeForwardedPeer(remoteAddress) {
+  if (remoteAddress == null) return "";
+  const value = String(remoteAddress).trim();
+  if (!value || value.toLowerCase() === "unknown") return "";
+  return value.replace(/^::ffff:/i, "");
+}
+
+function upstreamHeaders(incoming, extra, remoteAddress) {
   const headers = stripHopHeaders(incoming);
   headers.host = upstreamName;
   headers["x-forwarded-host"] = publicHost;
   headers["x-forwarded-proto"] = "https";
   headers["x-forwarded-prefix"] = prefix;
+  const forwarded = appendForwardedFor(headers["x-forwarded-for"], remoteAddress);
+  if (forwarded) headers["x-forwarded-for"] = forwarded;
   if (headers.cookie) headers.cookie = rewriteRequestCookie(String(headers.cookie));
   if (extra) Object.assign(headers, extra);
   return headers;
@@ -306,7 +334,7 @@ function proxyHttp(req, clientRes) {
       servername: useTls ? upstreamName : undefined,
       method: req.method,
       path: upstreamPath,
-      headers: upstreamHeaders(req.headers),
+      headers: upstreamHeaders(req.headers, undefined, req.socket?.remoteAddress),
       agent: upstreamAgent
     },
     (upstreamRes) => {
@@ -360,10 +388,14 @@ function proxyUpgrade(req, socket, head) {
     servername: useTls ? upstreamName : undefined,
     method: req.method,
     path: upstreamPath,
-    headers: upstreamHeaders(req.headers, {
-      connection: "upgrade",
-      upgrade: req.headers.upgrade || "websocket"
-    }),
+    headers: upstreamHeaders(
+      req.headers,
+      {
+        connection: "upgrade",
+        upgrade: req.headers.upgrade || "websocket"
+      },
+      req.socket?.remoteAddress
+    ),
     agent: upstreamAgent
   });
   upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {

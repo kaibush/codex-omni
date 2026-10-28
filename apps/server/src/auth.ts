@@ -15,6 +15,9 @@ export function initAuth(db: Database.Database) {
   );
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+// Precomputed so a missing account still pays for Argon2 and does not reveal itself by timing.
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,t=3,p=1$EOQinFmyp/oqFuvSRAyACg$1WQBdd8g0IvjL9czFmNKVKgNiLVVOyBDmymXjbTTydM";
 export function hasUsers(db: Database.Database) {
   return Boolean(db.prepare("SELECT 1 FROM users LIMIT 1").get());
 }
@@ -55,7 +58,11 @@ export async function login(db: Database.Database, username: string, password: s
   const user = db
     .prepare("SELECT id,username,password_hash as passwordHash,role FROM users WHERE username=?")
     .get(username) as any;
-  if (!user || !(await verify(user.passwordHash, password))) return null;
+  if (!user) {
+    await verify(DUMMY_PASSWORD_HASH, password).catch(() => false);
+    return null;
+  }
+  if (!(await verify(user.passwordHash, password))) return null;
   const token = randomBytes(32).toString("base64url"),
     csrf = randomBytes(24).toString("base64url"),
     id = randomBytes(12).toString("hex");

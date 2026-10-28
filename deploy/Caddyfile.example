@@ -3,7 +3,8 @@
 # The production API listens on 127.0.0.1:8791. Dev stays on 5173 and 8790.
 # Do not encode chat or terminal streams; compression waits for EOF.
 #
-# Requires the rate_limit module (xcaddy build --with github.com/mholt/caddy-ratelimit).
+# Optional edge limit. The API already throttles login and setup.
+# This block needs the rate_limit module (xcaddy build --with github.com/mholt/caddy-ratelimit).
 # Limits only the login/setup endpoints; normal API traffic is untouched.
 
 (login_guard) {

@@ -35,5 +35,11 @@ export default tseslint.config(
     languageOptions: {
       globals: globals.node
     }
+  },
+  {
+    files: ["deploy/region-nav/**/*.js"],
+    languageOptions: {
+      globals: globals.browser
+    }
   }
 );

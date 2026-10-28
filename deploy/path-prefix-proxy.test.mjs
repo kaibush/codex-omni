@@ -8,10 +8,7 @@ const proxy = await import("./path-prefix-proxy.mjs");
 
 test("prefixes root URLs once", () => {
   const html = '<link rel="icon" href="/favicon.svg" />';
-  assert.equal(
-    proxy.rewriteHtml(html),
-    '<link rel="icon" href="/ca/favicon.svg" />'
-  );
+  assert.equal(proxy.rewriteHtml(html), '<link rel="icon" href="/ca/favicon.svg" />');
   assert.equal(
     proxy.rewriteHtml('<link rel="icon" href="/ca/favicon.svg" />'),
     '<link rel="icon" href="/ca/favicon.svg" />'
@@ -19,7 +16,8 @@ test("prefixes root URLs once", () => {
 });
 
 test("injects the movable region switcher without touching app markup", () => {
-  const html = '<!doctype html><html><head><title>App</title></head><body><div id="root"></div></body></html>';
+  const html =
+    '<!doctype html><html><head><title>App</title></head><body><div id="root"></div></body></html>';
   const rewritten = proxy.rewriteHtml(html);
   assert.match(rewritten, /<link rel="stylesheet" href="\/ca\/region-nav.css">/);
   assert.match(rewritten, /<script src="\/ca\/region-nav.js" defer><\/script><\/head>/);
@@ -76,10 +74,7 @@ test("splits cookies between prefixes", () => {
     proxy.rewriteSetCookie("codex_web_session=abc; Path=/; HttpOnly"),
     "codex_web_session_ca=abc; Path=/ca; HttpOnly"
   );
-  assert.equal(
-    proxy.rewriteRequestCookie("codex_web_session_ca=abc"),
-    "codex_web_session=abc"
-  );
+  assert.equal(proxy.rewriteRequestCookie("codex_web_session_ca=abc"), "codex_web_session=abc");
 });
 
 test("strips only the configured prefix", () => {
@@ -95,4 +90,11 @@ test("prefixes branding icon literals and leaves the path check intact", () => {
   assert.match(rewritten, /\/ca\/api\/branding\/icon\?v=/);
   assert.match(rewritten, /\?api\\\/branding\\\/icon/);
   assert.equal(rewritten.includes("/ca/api\\/branding"), false);
+});
+
+test("appends the proxy peer to X-Forwarded-For", () => {
+  assert.equal(proxy.appendForwardedFor(undefined, "::ffff:203.0.113.8"), "203.0.113.8");
+  assert.equal(proxy.appendForwardedFor("1.1.1.1", "203.0.113.8"), "1.1.1.1, 203.0.113.8");
+  assert.equal(proxy.appendForwardedFor("203.0.113.8", "203.0.113.8"), "203.0.113.8");
+  assert.equal(proxy.appendForwardedFor("1.1.1.1", ""), "1.1.1.1");
 });

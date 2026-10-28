@@ -30,6 +30,7 @@ import {
 } from "@codex-omni/protocol";
 import { parseCodexProviderConfig } from "@codex-omni/codex-runtime";
 import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
+import { LoginThrottle, loginRetryMessage, loginThrottleKeys } from "./login-throttle.js";
 import {
   MAX_BRAND_ICON_BYTES,
   brandingForRequest,
@@ -133,7 +134,11 @@ await mkdir(path.dirname(dataPath), { recursive: true });
 const brandingDir = path.join(path.dirname(dataPath), "branding");
 const store = new Store(dataPath);
 initAuth(store.db);
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  // Only private/loopback peers can supply X-Forwarded-For. Direct clients cannot spoof their IP.
+  trustProxy: ["loopback", "linklocal", "uniquelocal"]
+});
 app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => {
   done(null, body);
 });
@@ -403,9 +408,55 @@ const sessionCookie = {
   secure: process.env.COOKIE_SECURE === "true",
   path: "/"
 };
+const loginBurstThrottle = new LoginThrottle({
+  maxAttempts: 20,
+  windowMs: 60_000,
+  lockMs: 60_000
+});
+const loginIpThrottle = new LoginThrottle({
+  maxAttempts: 8,
+  windowMs: 15 * 60_000,
+  lockMs: 15 * 60_000
+});
+const loginAccountThrottle = new LoginThrottle({
+  maxAttempts: 20,
+  windowMs: 15 * 60_000,
+  lockMs: 15 * 60_000
+});
+const clientAddress = (req: { ip: string }) => {
+  const ip = req.ip?.trim();
+  return ip ? ip.slice(0, 128) : "unknown";
+};
+const reserveLoginFailure = (keys: { ip: string; account: string; pair: string }) => {
+  const ipKeys = [keys.ip, keys.pair];
+  const accountKeys = [keys.account];
+  const wait = Math.max(
+    loginIpThrottle.retryAfter(ipKeys),
+    loginAccountThrottle.retryAfter(accountKeys)
+  );
+  if (wait > 0) return wait;
+  return Math.max(loginIpThrottle.reserve(ipKeys), loginAccountThrottle.reserve(accountKeys));
+};
+const releaseLoginFailure = (keys: { ip: string; account: string; pair: string }) => {
+  loginIpThrottle.release([keys.ip, keys.pair]);
+  loginAccountThrottle.release([keys.account]);
+};
+const rejectLoginThrottle = (
+  reply: {
+    header: (name: string, value: string) => unknown;
+    code: (status: number) => { send: (body: unknown) => unknown };
+  },
+  retryAfterMs: number
+) => {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  reply.header("retry-after", String(seconds));
+  return reply.code(429).send({ error: loginRetryMessage(retryAfterMs) });
+};
 app.get("/api/health", async () => ({ ok: true }));
 app.get("/api/auth/status", async () => ({ setupRequired: !hasUsers(store.db) }));
 app.post("/api/auth/setup", async (req, reply) => {
+  const burstWait = loginBurstThrottle.reserve([`ip:${clientAddress(req)}`]);
+  if (burstWait > 0) return rejectLoginThrottle(reply, burstWait);
   const body = z
     .object({
       username: z
@@ -417,17 +468,27 @@ app.post("/api/auth/setup", async (req, reply) => {
       password: z.string().min(8).max(200)
     })
     .parse(req.body);
+  const failureKeys = loginThrottleKeys(clientAddress(req), body.username);
+  const failureWait = reserveLoginFailure(failureKeys);
+  if (failureWait > 0) return rejectLoginThrottle(reply, failureWait);
   const created = await createInitialAdmin(store.db, body.username, body.password);
   if (!created) return reply.code(409).send({ error: "管理员账户已存在，请直接登录" });
   const result = await login(store.db, body.username, body.password);
   if (!result) return reply.code(500).send({ error: "创建账户后登录失败" });
+  releaseLoginFailure(failureKeys);
   reply.setCookie("codex_web_session", result.token, sessionCookie);
   return { user: result.user, csrfToken: result.csrf };
 });
 app.post("/api/auth/login", async (req, reply) => {
+  const burstWait = loginBurstThrottle.reserve([`ip:${clientAddress(req)}`]);
+  if (burstWait > 0) return rejectLoginThrottle(reply, burstWait);
   const body = z.object({ username: z.string(), password: z.string() }).parse(req.body);
+  const failureKeys = loginThrottleKeys(clientAddress(req), body.username);
+  const failureWait = reserveLoginFailure(failureKeys);
+  if (failureWait > 0) return rejectLoginThrottle(reply, failureWait);
   const result = await login(store.db, body.username, body.password);
   if (!result) return reply.code(401).send({ error: "Account or password is incorrect" });
+  releaseLoginFailure(failureKeys);
   reply.setCookie("codex_web_session", result.token, sessionCookie);
   return { user: result.user, csrfToken: result.csrf };
 });
