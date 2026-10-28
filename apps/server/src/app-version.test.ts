@@ -16,7 +16,7 @@ describe("normalizeVersion", () => {
 describe("resolveAppVersion", () => {
   it("prefers CODEX_OMNI_VERSION over package.json", () => {
     expect(resolveAppVersion({ CODEX_OMNI_VERSION: " v2.5.0-hotfix.1 " })).toBe("v2.5.0-hotfix.1");
-    expect(resolveAppVersion({})).toBe("0.1.1");
+    expect(resolveAppVersion({})).toBe("0.1.2");
   });
 });
 
@@ -24,6 +24,6 @@ describe("currentAppVersion", () => {
   it("normalizes the resolved version", () => {
     expect(currentAppVersion({ CODEX_OMNI_VERSION: "0.1.0" })).toBe("v0.1.0");
     expect(currentAppVersion({ CODEX_OMNI_VERSION: "v2.5.0-hotfix.1" })).toBe("v2.5.0-hotfix.1");
-    expect(currentAppVersion({})).toBe("v0.1.1");
+    expect(currentAppVersion({})).toBe("v0.1.2");
   });
 });
