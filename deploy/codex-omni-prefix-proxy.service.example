@@ -14,6 +14,10 @@ Environment=UPSTREAM_PORT=8791
 Environment=UPSTREAM_TLS=false
 Environment=PUBLIC_HOST=example.com
 Environment=UPSTREAM_NAME=example.com
+# Optional. Defaults to us:美国,ca:加拿大. The prefix must be listed.
+Environment=REGION_NAV=us:美国,ca:加拿大
+# Optional. Defaults to deploy/region-nav/icons/<code>.svg next to the proxy.
+# Environment=REGION_NAV_ICON_DIR=/etc/codex-omni/region-icons
 ExecStart=/usr/bin/node /opt/codex-omni/deploy/path-prefix-proxy.mjs
 Restart=on-failure
 RestartSec=3

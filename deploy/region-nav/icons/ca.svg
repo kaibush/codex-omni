@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="CA">
+  <defs>
+    <clipPath id="ca-shape"><rect width="128" height="128" rx="28"/></clipPath>
+  </defs>
+  <g clip-path="url(#ca-shape)">
+    <rect width="128" height="128" fill="#fff"/>
+    <rect width="30" height="128" fill="#FF0000"/>
+    <rect x="98" width="30" height="128" fill="#FF0000"/>
+    <path fill="#FF0000" fill-rule="evenodd" d=" M64 12 L78 34 L70 40 L90 26 L76 46 L70 48 L94 54 L72 62 L68 66 L84 80 L66 72 L64 86 L66 108 L62 108 L64 86 L62 72 L44 80 L60 66 L56 62 L34 54 L58 48 L52 46 L38 26 L58 40 L50 34 Z "/>
+  </g>
+</svg>

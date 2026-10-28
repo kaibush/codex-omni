@@ -1,6 +1,8 @@
 import http from "node:http";
 import https from "node:https";
-import { pathToFileURL } from "node:url";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const prefix = normalizePrefix(process.env.PREFIX || "");
 const listenHost = process.env.LISTEN_HOST || "127.0.0.1";
@@ -16,6 +18,19 @@ const transport = useTls ? https : http;
 const segment = prefix.slice(1);
 const segmentPattern = escapeRegExp(segment);
 const prefixPattern = escapeRegExp(prefix);
+const REGION_CODE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const MAX_REGIONS = 8;
+const regionNavDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "region-nav");
+const regionNavIconDir = process.env.REGION_NAV_ICON_DIR
+  ? path.resolve(process.env.REGION_NAV_ICON_DIR)
+  : path.join(regionNavDir, "icons");
+const regionNav = parseRegionNav(
+  process.env.REGION_NAV === undefined ? "us:美国,ca:加拿大" : process.env.REGION_NAV
+);
+const REGION_NAV_ASSETS = new Map([
+  ["/region-nav.css", { file: "region-nav.css", type: "text/css; charset=utf-8" }],
+  ["/region-nav.js", { file: "region-nav.js", type: "text/javascript; charset=utf-8" }]
+]);
 
 const upstreamAgent = useTls
   ? new https.Agent({ keepAlive: true, servername: upstreamName })
@@ -32,6 +47,52 @@ function normalizePrefix(value) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const HTML_ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;"
+};
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
+}
+
+export function parseRegionNav(value) {
+  if (typeof value !== "string" || !value.trim()) return [];
+  const regions = [];
+  for (const entry of value.split(/[,\n]/)) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.indexOf(":");
+    const code = (separator < 0 ? trimmed : trimmed.slice(0, separator)).trim().toLowerCase();
+    if (!REGION_CODE.test(code) || regions.some((region) => region.code === code)) continue;
+    const label = (separator < 0 ? "" : trimmed.slice(separator + 1)).trim();
+    regions.push({ code, label: label || code.toUpperCase() });
+    if (regions.length >= MAX_REGIONS) break;
+  }
+  return regions;
+}
+
+export function buildRegionNav(regions, current, prefixValue = prefix) {
+  if (!Array.isArray(regions) || regions.length < 2) return "";
+  const safeRegions = regions
+    .filter((region) => REGION_CODE.test(region.code) && typeof region.label === "string")
+    .slice(0, MAX_REGIONS);
+  if (safeRegions.length < 2 || !safeRegions.some((region) => region.code === current)) return "";
+  const payload = escapeHtml(
+    JSON.stringify(safeRegions.map(({ code, label }) => ({ code, label })))
+  );
+  const links = safeRegions
+    .map(
+      (region) =>
+        `<a href="/${region.code}/"${region.code === current ? ' aria-current="page"' : ""} aria-label="前往${escapeHtml(region.label)}站点" title="前往${escapeHtml(region.label)}站点 /${region.code}"><img src="${escapeHtml(prefixValue)}/region-nav/icons/${region.code}.svg" alt="" aria-hidden="true"><span>${region.code.toUpperCase()}</span></a>`
+    )
+    .join("");
+  return `<nav id="codex-region-nav" data-codex-region-nav data-current="${current}" data-regions="${payload}" aria-label="地区切换">${links}</nav>`;
 }
 
 export function stripPrefix(url) {
@@ -92,13 +153,25 @@ export function rewriteJavascript(code) {
 }
 
 export function rewriteHtml(html) {
+  if (html.includes("data-codex-region-nav")) return html;
   const attributes = new RegExp(
-    `(\\s(?:href|src|action)=(["']))\\/(?!\\/|${segmentPattern}\\/)`,
+    `(\\s(?:href|src|action)=(["']))\\/(?!\\/|${segmentPattern}\\/|region-nav\\/)`,
     "gi"
   );
   // Do not add a cache-busting query to the entry module. Lazy chunks import
   // that file by its plain URL, and a different query creates a second React.
-  return html.replace(attributes, `$1${prefix}/`);
+  const rewritten = html.replace(attributes, `$1${prefix}/`);
+  if (!/<body[\s>]/i.test(rewritten)) return rewritten;
+  const switcher = buildRegionNav(regionNav, segment);
+  if (!switcher) return rewritten;
+  // Keep the application build untouched. The edge proxy adds a standalone
+  // switcher outside the React root, so it survives client-side navigation.
+  return rewritten
+    .replace(
+      /<\/head\s*>/i,
+      `<link rel="stylesheet" href="${prefix}/region-nav.css"><script src="${prefix}/region-nav.js" defer></script></head>`
+    )
+    .replace(/(<body\b[^>]*>)/i, `$1${switcher}`);
 }
 
 export function rewriteCss(css) {
@@ -184,6 +257,48 @@ function sendRewritten(clientRes, upstreamRes, body) {
 
 function proxyHttp(req, clientRes) {
   const upstreamPath = stripPrefix(req.url || "/");
+  const navPath = upstreamPath.split("?")[0];
+  const navAsset = REGION_NAV_ASSETS.get(navPath);
+  if (navAsset && req.method === "GET") {
+    readFile(path.join(regionNavDir, navAsset.file)).then(
+      (body) => {
+        clientRes.writeHead(200, {
+          "content-type": navAsset.type,
+          "cache-control": "no-cache",
+          "content-length": body.byteLength
+        });
+        clientRes.end(body);
+      },
+      () => {
+        clientRes.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        clientRes.end("Not Found");
+      }
+    );
+    return;
+  }
+  const icon = navPath.match(/^\/region-nav\/icons\/([a-z0-9][a-z0-9_-]{0,31})\.svg$/);
+  if (icon && req.method === "GET") {
+    if (!regionNav.some((region) => region.code === icon[1])) {
+      clientRes.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      clientRes.end("Not Found");
+      return;
+    }
+    readFile(path.join(regionNavIconDir, `${icon[1]}.svg`)).then(
+      (body) => {
+        clientRes.writeHead(200, {
+          "content-type": "image/svg+xml",
+          "cache-control": "no-cache",
+          "content-length": body.byteLength
+        });
+        clientRes.end(body);
+      },
+      () => {
+        clientRes.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        clientRes.end("Not Found");
+      }
+    );
+    return;
+  }
   const upstreamReq = transport.request(
     {
       host: upstreamHost,

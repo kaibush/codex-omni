@@ -137,6 +137,25 @@ handle /ca /ca/* {
 
 另一台没改过的服务也可以挂到别的前缀：本机代理去掉前缀、改写页面和 Cookie，再转发到对方的根路径。对方继续用通用方式发布。单元示例是 [`deploy/codex-omni-prefix-proxy.service.example`](../deploy/codex-omni-prefix-proxy.service.example)，真实上游地址只放在服务器本地配置里。
 
+当挂载前缀出现在地区配置中时，代理会在 HTML 的 `<body>` 开头注入一个独立的地区切换图标，并在 `<head>` 引入 `deploy/region-nav` 下的静态资源。应用源码和前端构建不需要改动；图标会显示各地区的 SVG，点击进入对应的 `/<地区>/` 根路径。
+
+地区默认配置为 `us:美国,ca:加拿大`，可通过环境变量改成任意数量和名称，前缀必须出现在列表里：
+
+```bash
+REGION_NAV='us:美国,ca:加拿大' \
+REGION_NAV_ICON_DIR=/etc/codex-omni/region-icons \
+PREFIX=/ca LISTEN_PORT=8792 UPSTREAM_TLS=false PUBLIC_HOST=example.com \
+  node deploy/path-prefix-proxy.mjs
+```
+
+图标文件按地区代码命名，例如 `us.svg`、`ca.svg`；默认从仓库的 `deploy/region-nav/icons/` 读取，也可以用 `REGION_NAV_ICON_DIR` 指向外部目录。设置 `REGION_NAV=` 为空可关闭悬浮入口。地区代码只允许小写字母、数字、下划线和连字符。
+
+- 拖动图标或左侧手柄可以移动，位置和收起状态保存在浏览器的 `codex-omni.region-nav.v2` 中。
+- 点击减号收起到侧边，点击标签重新展开；展开状态下的手柄和收起标签也支持方向键移动。
+- 图标会跟随窗口尺寸和移动端可视区域调整，软键盘打开时临时隐藏，避免遮挡输入框。
+- 颜色跟随页面上的 `html.dark` / `html.light`。只有页面没有主题类时，才跟随系统深色模式。
+- 代理只对配置中的地区前缀注入，直接部署在根路径时不会出现地区切换。
+
 ## 安全边界
 
 - 本服务以单机自用、高权限为前提：Codex Worker 能按设置读写项目文件并开终端。
