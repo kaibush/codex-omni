@@ -87,6 +87,8 @@ export function WorkspaceComposer({
   updateQueuedTurn,
   removeQueuedTurn,
   moveQueuedTurn,
+  insertQueuedTurn,
+  insertingQueueId,
   startNextQueuedTurn,
   selectedProvider,
   mentionRange,
@@ -151,6 +153,8 @@ export function WorkspaceComposer({
   updateQueuedTurn: (id: string, message: string) => void;
   removeQueuedTurn: (id: string) => void;
   moveQueuedTurn: (id: string, direction: "up" | "down") => void;
+  insertQueuedTurn: (id: string) => void;
+  insertingQueueId: string;
   startNextQueuedTurn: () => void;
   selectedProvider: Provider | undefined;
   mentionRange: { start: number; query: string } | null;
@@ -293,6 +297,9 @@ export function WorkspaceComposer({
                 onSaveEdit={(id, value) => void updateQueuedTurn(id, value)}
                 onRemove={removeQueuedTurn}
                 onMove={moveQueuedTurn}
+                onInsert={insertQueuedTurn}
+                insertingId={insertingQueueId}
+                connected={connection === "connected"}
                 onStartNext={startNextQueuedTurn}
               />
             )}

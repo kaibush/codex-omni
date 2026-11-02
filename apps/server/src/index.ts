@@ -2333,7 +2333,9 @@ app.get("/api/ws", { websocket: true, preValidation: auth }, (socket) => {
             error,
             command.type === "turn.enqueue" || command.type === "turn.steer"
               ? command.clientId
-              : undefined,
+              : command.type === "queue.steer"
+                ? command.queueId
+                : undefined,
             command.sessionId
           )
         );

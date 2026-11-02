@@ -9,7 +9,7 @@ import type { BridgeEvent } from "@codex-omni/protocol";
 const runtimeMocks = vi.hoisted(() => ({
   run: vi.fn(),
   respond: vi.fn(() => false),
-  steer: vi.fn((..._args: unknown[]) => true),
+  steer: vi.fn((..._args: unknown[]): boolean | Promise<boolean> => true),
   cancel: vi.fn(() => false),
   shutdown: vi.fn(),
   active: false,
@@ -2168,6 +2168,198 @@ describe("RunManager failure retry", () => {
 });
 
 describe("RunManager steer inserts", () => {
+  it("inserts a selected queued message with its attachments exactly once and keeps the remaining order", async () => {
+    const { project, session, socket, sent, imagePath } = attachmentFixture();
+    let release!: () => void;
+    runtimeMocks.run.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    manager = new RunManager(store!, "/tmp/runtime");
+    const running = manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "first" },
+      socket
+    );
+    await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(1));
+    const attachments = [{ kind: "image" as const, path: imagePath, name: "shot.png" }];
+    const selected = {
+      type: "turn.enqueue" as const,
+      clientId: "selected",
+      projectId: project.id,
+      sessionId: session.id,
+      message: "Runtime context: inspect this screenshot",
+      displayMessage: "inspect this screenshot",
+      model: "saved-model",
+      attachments
+    };
+    for (const command of [
+      { ...selected, clientId: "before", message: "before", attachments: [] },
+      selected,
+      { ...selected, clientId: "after", message: "after", attachments: [] }
+    ])
+      await manager.handle(command, socket);
+
+    const insert = { type: "queue.steer" as const, sessionId: session.id, queueId: "selected" };
+    await Promise.all([manager.handle(insert, socket), manager.handle(insert, socket)]);
+    await manager.handle(insert, socket);
+    await manager.handle(selected, socket); // A delayed outbox replay must not requeue it.
+    expect(runtimeMocks.steer).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.steer).toHaveBeenCalledWith(session.id, selected.message, attachments);
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.listQueuedTurns(session.id).map((item) => item.id)).toEqual(["before", "after"]);
+    const users = store!.listMessages(session.id).filter((message) => message.role === "user");
+    expect(users.map((message) => message.content)).toEqual(["first", selected.displayMessage]);
+    expect(JSON.parse(users[1]!.dataJson!)).toMatchObject({
+      steer: true,
+      turnOptions: { model: "saved-model", attachments }
+    });
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        type: "queue.acknowledged",
+        payload: { queueId: "selected", status: "steered" }
+      })
+    );
+    release();
+    await running;
+  });
+
+  it.each(["refused", "error"])("keeps a queued message when insertion is %s", async (result) => {
+    const { project, session, socket } = fixture();
+    let release!: () => void;
+    runtimeMocks.run.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    manager = new RunManager(store!, "/tmp/runtime");
+    const running = manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "first" },
+      socket
+    );
+    await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(1));
+    await manager.handle(
+      {
+        type: "turn.enqueue",
+        clientId: "queued",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "keep me"
+      },
+      socket
+    );
+    if (result === "refused") runtimeMocks.steer.mockReturnValueOnce(false);
+    else runtimeMocks.steer.mockRejectedValueOnce(new Error("runtime unavailable"));
+    const insert = { type: "queue.steer" as const, sessionId: session.id, queueId: "queued" };
+    const results = await Promise.allSettled([
+      manager.handle(insert, socket),
+      manager.handle(insert, socket)
+    ]);
+    expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(runtimeMocks.steer).toHaveBeenCalledTimes(1);
+    expect(store!.getQueuedTurn("queued")?.message).toBe("keep me");
+    expect(
+      store!.listMessages(session.id).filter((message) => message.role === "user")
+    ).toHaveLength(1);
+    await manager.handle({ type: "queue.steer", sessionId: session.id, queueId: "queued" }, socket);
+    expect(store!.getQueuedTurn("queued")).toBeUndefined();
+    release();
+    await running;
+  });
+
+  it("starts the selected queued message immediately when idle and rejects another session's message", async () => {
+    const { project, session, socket } = fixture();
+    let release!: () => void;
+    runtimeMocks.run.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    manager = new RunManager(store!, "/tmp/runtime");
+    for (const id of ["before", "selected"])
+      store!.enqueueTurn({
+        id,
+        projectId: project.id,
+        sessionId: session.id,
+        message: id,
+        optionsJson: JSON.stringify({ model: "saved-model", mode: "plan" })
+      });
+    const other = store!.createSession({ projectId: project.id });
+    await expect(
+      manager.handle({ type: "queue.steer", sessionId: other.id, queueId: "selected" }, socket)
+    ).rejects.toThrow("Queued turn not found");
+    const insert = { type: "queue.steer" as const, sessionId: session.id, queueId: "selected" };
+    const running = manager.handle(insert, socket);
+    await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(1));
+    expect(runtimeMocks.run.mock.calls[0]?.[0]).toMatchObject({
+      model: "saved-model",
+      mode: "plan"
+    });
+    expect(store!.getLatestRun(session.id)?.sourceQueueId).toBe("selected");
+    expect(store!.listQueuedTurns(session.id).map((item) => item.id)).toEqual(["before"]);
+    await manager.handle(insert, socket);
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.steer).not.toHaveBeenCalled();
+    release();
+    await running;
+  });
+
+  it("waits for insertion acceptance before draining the queue after a run finishes", async () => {
+    const { project, session, socket } = fixture();
+    const pending: Array<{ resolve: () => void; onEvent: (event: BridgeEvent) => void }> = [];
+    runtimeMocks.run.mockImplementation(
+      (_request: unknown, onEvent: (event: BridgeEvent) => void) =>
+        new Promise<void>((resolve) => pending.push({ resolve, onEvent }))
+    );
+    manager = new RunManager(store!, "/tmp/runtime");
+    const running = manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "first" },
+      socket
+    );
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    for (const id of ["selected", "after"])
+      await manager.handle(
+        {
+          type: "turn.enqueue",
+          clientId: id,
+          projectId: project.id,
+          sessionId: session.id,
+          message: id
+        },
+        socket
+      );
+    let accept!: (value: boolean) => void;
+    runtimeMocks.steer.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        accept = resolve;
+      })
+    );
+    const inserting = manager.handle(
+      { type: "queue.steer", sessionId: session.id, queueId: "selected" },
+      socket
+    );
+    pending[0]!.onEvent(
+      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
+    );
+    pending[0]!.resolve();
+    await running;
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getQueuedTurn("selected")).toBeDefined();
+    accept(true);
+    await inserting;
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(store!.getQueuedTurn("selected")).toBeUndefined();
+    expect(store!.getLatestRun(session.id)?.sourceQueueId).toBe("after");
+    pending[1]!.onEvent(
+      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
+    );
+    pending[1]!.resolve();
+    await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
+  });
+
   it("persists a steered user turn without replacing the current run cards", async () => {
     const { project, provider, session, socket, sent } = fixture();
     let release!: () => void;

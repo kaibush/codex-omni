@@ -1,4 +1,12 @@
-import { ChevronDown, ChevronUp, ListPlus, Pencil, Play, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  CornerDownLeft,
+  ListPlus,
+  Pencil,
+  Play,
+  Trash2
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { QueuedTurn } from "@/types";
@@ -7,6 +15,8 @@ import { queuePreviewText, queuedAttachmentMeta } from "@/features/workspace/com
 export function QueuedTurnsPanel({
   items,
   running,
+  connected,
+  insertingId,
   editingId,
   editValue,
   onEditValue,
@@ -15,10 +25,13 @@ export function QueuedTurnsPanel({
   onSaveEdit,
   onRemove,
   onMove,
+  onInsert,
   onStartNext
 }: {
   items: QueuedTurn[];
   running: boolean;
+  connected: boolean;
+  insertingId: string;
   editingId: string;
   editValue: string;
   onEditValue: (value: string) => void;
@@ -27,6 +40,7 @@ export function QueuedTurnsPanel({
   onSaveEdit: (id: string, message: string) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: "up" | "down") => void;
+  onInsert: (id: string) => void;
   onStartNext: () => void;
 }) {
   return (
@@ -93,7 +107,7 @@ export function QueuedTurnsPanel({
                   </div>
                 </div>
               ) : (
-                <>
+                <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
                   <div className="min-w-0 flex-1">
                     <p className="whitespace-pre-wrap break-words text-xs leading-5 text-foreground">
                       {queuePreviewText(item)}
@@ -104,41 +118,58 @@ export function QueuedTurnsPanel({
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-                    aria-label="上移队列消息"
-                    disabled={index === 0}
-                    onClick={() => onMove(item.id, "up")}
-                  >
-                    <ChevronUp className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
-                    aria-label="下移队列消息"
-                    disabled={index === items.length - 1}
-                    onClick={() => onMove(item.id, "down")}
-                  >
-                    <ChevronDown className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="编辑队列消息"
-                    onClick={() => onBeginEdit(item)}
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label="删除队列消息"
-                    onClick={() => onRemove(item.id)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </>
+                  <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      title={connected ? "跳过排队，直接插入当前对话" : "连接恢复后可直接插入"}
+                      aria-label="直接插入队列消息"
+                      disabled={!connected || Boolean(insertingId)}
+                      onClick={() => onInsert(item.id)}
+                    >
+                      <CornerDownLeft data-icon="inline-start" />
+                      {insertingId === item.id ? "正在插入" : "直接插入"}
+                    </Button>
+                    <button
+                      type="button"
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                      aria-label="上移队列消息"
+                      disabled={index === 0}
+                      onClick={() => onMove(item.id, "up")}
+                    >
+                      <ChevronUp className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                      aria-label="下移队列消息"
+                      disabled={index === items.length - 1}
+                      onClick={() => onMove(item.id, "down")}
+                    >
+                      <ChevronDown className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                      aria-label="编辑队列消息"
+                      disabled={insertingId === item.id}
+                      onClick={() => onBeginEdit(item)}
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label="删除队列消息"
+                      disabled={insertingId === item.id}
+                      onClick={() => onRemove(item.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           );

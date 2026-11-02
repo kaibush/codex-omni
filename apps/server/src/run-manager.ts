@@ -211,6 +211,7 @@ export class RunManager {
   private cancelling = new Set<string>();
   private reconnecting = new Set<string>();
   private activeRuns = new Map<string, ActiveRun>();
+  private steeringQueuedTurns = new Map<string, { queueId: string; pending: Promise<void> }>();
   private failureRetryAborters = new Map<string, () => void>();
   private runtimeMonitor: NodeJS.Timeout;
   readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
@@ -855,7 +856,7 @@ export class RunManager {
     return this.queueCommand(command);
   }
 
-  private async steerTurn(command: SteerCommand) {
+  private async steerTurn(command: SteerCommand, requireActive = false) {
     const session = this.store.getSession(command.sessionId);
     const project = this.store.getProject(command.projectId);
     if (!session || !project || session.projectId !== project.id)
@@ -872,6 +873,7 @@ export class RunManager {
     const attachments = sanitizeCodexAttachments(project.realPath, command.attachments);
     const active = this.activeRuns.get(command.sessionId);
     if (!active || !this.worker.isActive(command.sessionId)) {
+      if (requireActive) throw new Error("当前任务暂时无法插入消息，请稍后重试");
       this.queueCommand({
         type: "turn.enqueue",
         ...(command.clientId ? { clientId: command.clientId } : {}),
@@ -893,6 +895,7 @@ export class RunManager {
       return;
     }
     if (!(await this.worker.steer(command.sessionId, command.message, attachments))) {
+      if (requireActive) throw new Error("当前任务未接受插入，消息已保留在队列中");
       this.queueCommand({ ...command, type: "turn.enqueue", attachments });
       return;
     }
@@ -945,6 +948,15 @@ export class RunManager {
     const project = this.store.getProject(command.projectId);
     if (!session || !project || session.projectId !== project.id)
       throw new Error("Session/project mismatch");
+    if (
+      command.clientId &&
+      this.store.getMessageByItemId(command.sessionId, `steer:${command.clientId}`)
+    ) {
+      this.store.deleteQueuedTurn(command.clientId);
+      this.acknowledgeQueue(command.sessionId, command.clientId, "steered");
+      this.sendQueueSnapshot(command.sessionId);
+      return;
+    }
     const existingRun = command.clientId
       ? this.store.getRunBySourceQueueId(command.clientId)
       : undefined;
@@ -1009,6 +1021,7 @@ export class RunManager {
   }
 
   private async startNextQueued(sessionId: string) {
+    if (this.steeringQueuedTurns.has(sessionId)) return;
     if (this.activeRuns.has(sessionId) || this.worker.isActive(sessionId)) return;
     const item = this.store.listQueuedTurns(sessionId)[0];
     if (!item) return;
@@ -1021,6 +1034,46 @@ export class RunManager {
         payload: { message: error instanceof Error ? error.message : String(error) }
       });
     }
+  }
+
+  private async steerQueuedTurn(sessionId: string, queueId: string) {
+    const item = this.store.getQueuedTurn(queueId);
+    if (item && item.sessionId !== sessionId) throw new Error("Queued turn not found");
+    const existingRun = this.store.getRunBySourceQueueId(queueId);
+    const steered = this.store.getMessageByItemId(sessionId, `steer:${queueId}`);
+    if (steered || existingRun?.sessionId === sessionId) {
+      if (item) this.store.deleteQueuedTurn(queueId);
+      this.acknowledgeQueue(sessionId, queueId, steered ? "steered" : existingRun!.status);
+      this.sendQueueSnapshot(sessionId);
+      return;
+    }
+    if (!item) throw new Error("Queued turn not found");
+    const inserting = this.steeringQueuedTurns.get(sessionId);
+    if (inserting?.queueId === queueId) return inserting.pending;
+    if (inserting) throw new Error("正在插入队列消息，请稍后重试");
+    const command = this.queuedToCommand(item);
+    if (!this.activeRuns.has(sessionId) && !this.worker.isActive(sessionId)) {
+      await this.startTurn(command, queueId);
+      return;
+    }
+    // Keep the durable row until acceptance and pause automatic queue draining
+    // while an asynchronous runtime acknowledgement is in flight.
+    let accepted = false;
+    const pending = this.steerTurn({ ...command, type: "turn.steer", clientId: queueId }, true)
+      .then(() => {
+        accepted = true;
+        this.store.deleteQueuedTurn(queueId);
+        this.acknowledgeQueue(sessionId, queueId, "steered");
+        this.sendQueueSnapshot(sessionId);
+      })
+      .finally(() => {
+        this.steeringQueuedTurns.delete(sessionId);
+        if (accepted && this.store.getLatestRun(sessionId)?.status === "completed") {
+          void this.startNextQueued(sessionId);
+        }
+      });
+    this.steeringQueuedTurns.set(sessionId, { queueId, pending });
+    await pending;
   }
 
   private async startTurn(input: TurnStartCommand, sourceQueueId?: string) {
@@ -1724,6 +1777,7 @@ export class RunManager {
       command.type === "turn.start" ||
       command.type === "turn.enqueue" ||
       command.type === "turn.steer" ||
+      command.type === "queue.steer" ||
       command.type === "run.retry"
     ) {
       this.subscribe(command.sessionId, socket);
@@ -1785,6 +1839,16 @@ export class RunManager {
     if (command.type === "turn.steer") {
       await this.steerTurn(command);
       return;
+    }
+    if (command.type === "queue.steer") {
+      await this.steerQueuedTurn(command.sessionId, command.queueId);
+      return;
+    }
+    if (
+      (command.type === "queue.remove" || command.type === "queue.update") &&
+      this.steeringQueuedTurns.get(command.sessionId)?.queueId === command.queueId
+    ) {
+      throw new Error("消息正在插入，请稍后再操作");
     }
     if (command.type === "queue.remove") {
       const item = this.store.getQueuedTurn(command.queueId);

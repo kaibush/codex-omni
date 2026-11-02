@@ -306,6 +306,7 @@ export const runCommandSchema = z.discriminatedUnion("type", [
     lastSeq: z.number().int().min(0).optional()
   }),
   z.object({ type: z.literal("queue.remove"), sessionId: z.string(), queueId: z.string() }),
+  z.object({ type: z.literal("queue.steer"), sessionId: z.string(), queueId: z.string() }),
   z.object({
     type: z.literal("queue.update"),
     sessionId: z.string(),

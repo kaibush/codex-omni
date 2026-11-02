@@ -349,6 +349,7 @@ export function Workspace() {
   const [renameDraft, setRenameDraft] = useState("");
   const longPressTimer = useRef<number | null>(null);
   const [queuedTurns, setQueuedTurns] = useState<QueuedTurn[]>([]);
+  const [insertingQueueId, setInsertingQueueId] = useState("");
   const [editingQueueId, setEditingQueueId] = useState("");
   const [queueDraft, setQueueDraft] = useState("");
   const [historyCursor, setHistoryCursor] = useState<MessageCursor | null>(null);
@@ -618,6 +619,7 @@ export function Workspace() {
     setClearingGoal(false);
     setContinuation(null);
     setQueuedTurns([]);
+    setInsertingQueueId("");
     setEditingQueueId("");
     setQueueDraft("");
     setAttachments([]);
@@ -847,6 +849,7 @@ export function Workspace() {
     };
     ws.onclose = () => {
       if (disposed) return;
+      setInsertingQueueId("");
       socket.current = null;
       reconnectAttempts.current += 1;
       setConnection(reconnectAttempts.current >= 5 ? "disconnected" : "reconnecting");
@@ -865,6 +868,7 @@ export function Workspace() {
       if (event.type === "server.error") {
         const text = String(event.payload?.message ?? "Server command failed");
         if (typeof event.payload?.clientId === "string") {
+          setInsertingQueueId((current) => (current === event.payload.clientId ? "" : current));
           queuedCommands.current = queuedCommands.current.filter(
             (item) => item.id !== event.payload.clientId
           );
@@ -886,11 +890,18 @@ export function Workspace() {
       if (event.type === "queue.acknowledged") {
         const queueId = String(event.payload?.queueId ?? "");
         if (queueId) {
+          if (event.payload?.status !== "queued") {
+            setInsertingQueueId((current) => (current === queueId ? "" : current));
+          }
           queuedCommands.current = queuedCommands.current.filter((item) => item.id !== queueId);
           persistOutboundCommands(queuedCommands.current);
         }
-        if (event.sessionId === sessionId && event.payload?.status === "running") {
+        if (
+          event.sessionId === sessionId &&
+          (event.payload?.status === "running" || event.payload?.status === "steered")
+        ) {
           setQueuedTurns((current) => current.filter((item) => item.id !== queueId));
+          setSendNotice(event.payload?.status === "steered" ? "已插入当前对话" : "正在启动任务");
         }
         return;
       }
@@ -2354,6 +2365,16 @@ export function Workspace() {
     }
     socket.current.send(JSON.stringify({ type: "queue.move", sessionId, queueId, direction }));
   };
+  const insertQueuedTurn = (queueId: string) => {
+    if (insertingQueueId) return;
+    if (socket.current?.readyState !== WebSocket.OPEN) {
+      setSendNotice("连接恢复后再直接插入消息");
+      return;
+    }
+    setInsertingQueueId(queueId);
+    socket.current.send(JSON.stringify({ type: "queue.steer", sessionId, queueId }));
+    setSendNotice("正在插入队列消息");
+  };
   const startNextQueuedTurn = () => {
     if (socket.current?.readyState !== WebSocket.OPEN) {
       setSendNotice("连接恢复后再开始下一条消息");
@@ -2842,6 +2863,8 @@ export function Workspace() {
                   updateQueuedTurn={updateQueuedTurn}
                   removeQueuedTurn={removeQueuedTurn}
                   moveQueuedTurn={moveQueuedTurn}
+                  insertQueuedTurn={insertQueuedTurn}
+                  insertingQueueId={insertingQueueId}
                   startNextQueuedTurn={startNextQueuedTurn}
                   selectedProvider={selectedProvider ?? undefined}
                   mentionRange={mentionRange}
