@@ -56,7 +56,6 @@ import { useComposerSelection } from "@/lib/use-composer-selection";
 import {
   isPlaceholderSessionTitle,
   readSessionListSort,
-  sortSessions,
   sortSessionsByLatest,
   titleFromFirstMessage,
   writeSessionListSort,
@@ -158,6 +157,7 @@ import { HostResourceStatus } from "@/features/workspace/HostResourceStatus";
 import { WorkspaceHeader } from "@/features/workspace/WorkspaceHeader";
 import { WorkspaceHome } from "@/features/workspace/WorkspaceHome";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
+import { projectSessionsQuery } from "@/features/workspace/project-sessions";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
 import { terminalKeepaliveClassName } from "@/features/workspace/terminal-chrome";
 import { messageRetryPayload } from "@/features/workspace/message-retry";
@@ -499,15 +499,10 @@ export function Workspace() {
     return () => window.clearTimeout(timer);
   }, [events, highlightMessageId]);
   const sessions = useQuery({
-    queryKey: ["sessions", projectId],
-    queryFn: () => api<Session[]>(`/api/projects/${projectId}/sessions?archived=true`),
+    ...projectSessionsQuery(projectId),
     enabled: Boolean(projectId)
   });
   const projectSessions = useMemo(() => sortSessionsByLatest(sessions.data ?? []), [sessions.data]);
-  const archivedSessions = useMemo(
-    () => projectSessions.filter((session) => session.archivedAt),
-    [projectSessions]
-  );
   const sessionDisplayTitles = useMemo(
     () =>
       numberedDuplicateTitles(
@@ -515,30 +510,6 @@ export function Workspace() {
       ),
     [projectSessions]
   );
-  const sessionGroups = useMemo(() => {
-    const ordered = sortSessions(projectSessions, sessionSort);
-    return [
-      {
-        key: "pinned",
-        label: "置顶",
-        items: ordered.filter((session) => session.pinnedAt && !session.archivedAt)
-      },
-      {
-        key: "recent",
-        label: "最近",
-        items: ordered.filter((session) => !session.pinnedAt && !session.archivedAt)
-      },
-      ...(showArchived
-        ? [
-            {
-              key: "archived",
-              label: "已归档",
-              items: ordered.filter((session) => session.archivedAt)
-            }
-          ]
-        : [])
-    ].filter((group) => group.key === "archived" || group.items.length > 0);
-  }, [projectSessions, sessionSort, showArchived]);
   const projectList = useMemo(() => {
     const list = [...(projects.data ?? [])];
     list.sort((left, right) => {
@@ -608,7 +579,7 @@ export function Workspace() {
     }
     const previousProject = cachedProjectId.current;
     if (previousProject && previousProject !== projectId) {
-      qc.removeQueries({ queryKey: ["sessions", previousProject] });
+      qc.removeQueries({ queryKey: ["sessions", previousProject], type: "inactive" });
       qc.removeQueries({ queryKey: ["terminals", previousProject] });
     }
     cachedSessionId.current = sessionId;
@@ -1827,11 +1798,11 @@ export function Workspace() {
     onSuccess: (result, input) => {
       const removed = new Set(result.deleted);
       const remaining = (sessions.data ?? []).filter((session) => !removed.has(session.id));
-      qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
-        (current ?? []).filter((session) => !removed.has(session.id))
+      qc.setQueriesData<Session[]>({ queryKey: ["sessions"] }, (current) =>
+        current?.filter((session) => !removed.has(session.id))
       );
-      qc.setQueryData<{ items: TerminalChatSession[] }>(
-        ["terminal-chat-sessions", projectId],
+      qc.setQueriesData<{ items: TerminalChatSession[] }>(
+        { queryKey: ["terminal-chat-sessions"] },
         (current) =>
           current
             ? { items: current.items.filter((item) => !removed.has(item.sessionId)) }
@@ -1851,8 +1822,8 @@ export function Workspace() {
         );
       }
       for (const id of result.deleted) void qc.removeQueries({ queryKey: ["session", id] });
-      void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
-      void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions", projectId] });
+      void qc.invalidateQueries({ queryKey: ["sessions"] });
+      void qc.invalidateQueries({ queryKey: ["terminal-chat-sessions"] });
       if (input.purgeSource && result.skippedSharedThreads) {
         toast.success(
           `已删除 ${result.deleted.length} 个对话。有 ${result.skippedSharedThreads} 条原始数据仍被其他会话使用，已保留。`
@@ -2406,7 +2377,7 @@ export function Workspace() {
         method: "POST",
         body: JSON.stringify(messageId ? { messageId } : {})
       });
-      await qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+      await qc.invalidateQueries({ queryKey: ["sessions", target.projectId] });
       openWorkspace(target.projectId || projectId, target.id, false, "chat");
       toast.success("已创建分叉会话");
     } catch (error) {
@@ -2468,7 +2439,10 @@ export function Workspace() {
     setRenamingSessionId("");
     setRenameDraft("");
     if (!title) return;
-    const current = (sessions.data ?? []).find((session) => session.id === id);
+    const current = qc
+      .getQueriesData<Session[]>({ queryKey: ["sessions"] })
+      .flatMap(([, items]) => items ?? [])
+      .find((session) => session.id === id);
     if (current?.title === title) return;
     updateSession.mutate({ id, changes: { title } });
   };
@@ -2563,13 +2537,13 @@ export function Workspace() {
   const archiveSession = (session: Session, archived: boolean) => {
     if (archived) setShowArchived(true);
     const archivedAt = archived ? Date.now() : null;
-    qc.setQueryData<Session[]>(["sessions", projectId], (current) =>
+    qc.setQueryData<Session[]>(["sessions", session.projectId], (current) =>
       (current ?? []).map((item) => (item.id === session.id ? { ...item, archivedAt } : item))
     );
     void updateSession
       .mutateAsync({ id: session.id, changes: { archived } })
       .then((updated) => {
-        qc.setQueryData<Session[]>(["sessions", projectId], (current) =>
+        qc.setQueryData<Session[]>(["sessions", updated.projectId], (current) =>
           (current ?? []).map((item) =>
             item.id === updated.id
               ? { ...item, ...updated, archivedAt: updated.archivedAt ?? archivedAt }
@@ -2579,7 +2553,7 @@ export function Workspace() {
         toast.success(archived ? `已归档「${session.title}」` : `已恢复「${session.title}」`);
       })
       .catch(() => {
-        void qc.invalidateQueries({ queryKey: ["sessions", projectId] });
+        void qc.invalidateQueries({ queryKey: ["sessions", session.projectId] });
       });
   };
   const exportSession = (
@@ -2655,7 +2629,6 @@ export function Workspace() {
         setPaletteOpen={setPaletteOpen}
         showArchived={showArchived}
         setShowArchived={setShowArchived}
-        archivedSessions={archivedSessions}
         setNewProject={setNewProject}
         projectList={projectList}
         projectSort={projectSort}
@@ -2673,13 +2646,10 @@ export function Workspace() {
         updateProject={updateProject}
         deleteProject={deleteProject}
         projectSessions={projectSessions}
-        sessionDisplayTitles={sessionDisplayTitles}
-        sessionGroups={sessionGroups}
         sessionId={sessionId}
         workspaceView={workspaceView}
         sessionLoading={sessionLoading}
         providerNames={providerNames}
-        sessionsPending={sessions.isPending}
         renamingSessionId={renamingSessionId}
         setRenamingSessionId={setRenamingSessionId}
         renameDraft={renameDraft}
