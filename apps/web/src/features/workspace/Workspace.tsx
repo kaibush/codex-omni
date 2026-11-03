@@ -370,7 +370,8 @@ export function Workspace() {
   const queuedCommands = useRef<QueuedCommand[]>(loadOutboundCommands());
   const replayCursors = useRef(new Map<string, ReplayCursor>());
   const reconnectAttempts = useRef(0);
-  const draftSessionKey = useRef("");
+  const [draftSessionKey, setDraftSessionKey] = useState("");
+  const pendingDraftSave = useRef<(() => void) | null>(null);
   const continuedDraft = useRef<{
     sessionId: string;
     value: ReturnType<typeof parseComposerDraft>;
@@ -628,8 +629,12 @@ export function Workspace() {
     if (followingLive) liveEventsRef.current = events;
   }, [events, followingLive]);
   useEffect(() => {
+    // Flush the previous conversation before reading the next draft. A quick
+    // switch can otherwise cancel the debounced write and lose the last edit.
+    pendingDraftSave.current?.();
+    pendingDraftSave.current = null;
     const key = sessionId ? `codex-omni:draft:${projectId}:${sessionId}` : "";
-    draftSessionKey.current = key;
+    setDraftSessionKey(key);
     const pending = continuedDraft.current?.sessionId === sessionId ? continuedDraft.current : null;
     const draft = pending?.value ?? parseComposerDraft(key ? localStorage.getItem(key) : null);
     if (pending) continuedDraft.current = null;
@@ -638,15 +643,27 @@ export function Workspace() {
     setAttachError("");
   }, [projectId, sessionId]);
   useEffect(() => {
-    const key = draftSessionKey.current;
+    // The key is restored in the same state update as text and attachments,
+    // so an old render cannot write its draft under the newly selected ID.
+    const key = draftSessionKey;
     if (!key) return;
+    const save = () => {
+      try {
+        if (input || attachments.length)
+          localStorage.setItem(key, stringifyComposerDraft(input, attachments));
+        else localStorage.removeItem(key);
+      } catch {
+        // A full browser cache must not prevent selecting another conversation.
+      }
+    };
+    pendingDraftSave.current = save;
     const timer = window.setTimeout(() => {
-      if (input || attachments.length)
-        localStorage.setItem(key, stringifyComposerDraft(input, attachments));
-      else localStorage.removeItem(key);
+      save();
+      if (pendingDraftSave.current === save) pendingDraftSave.current = null;
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [attachments, input]);
+  }, [attachments, draftSessionKey, input]);
+  useEffect(() => () => pendingDraftSave.current?.(), []);
   const clearRewoundTimeline = useCallback((session: Session) => {
     historyRevision.current = session.historyRevision ?? 0;
     historyRequestId.current += 1;

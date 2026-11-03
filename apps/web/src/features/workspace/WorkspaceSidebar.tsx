@@ -348,6 +348,11 @@ export function WorkspaceSidebar({
       return next;
     });
   };
+  const openProject = (id: string) => {
+    expandProject(id);
+    openWorkspace(id, "", false, "chat");
+    if (isMobile) setSidebar(false);
+  };
   const toggleProjectExpanded = (id: string) => {
     setExpandedProjectIds((current) => {
       const next = toggleExpandedProjectId(current, id);
@@ -492,7 +497,7 @@ export function WorkspaceSidebar({
                           }`}
                           aria-label={project.name}
                           onClick={() => {
-                            expandProject(project.id);
+                            openProject(project.id);
                             setSidebarCollapsed(false);
                           }}
                         >
@@ -730,10 +735,8 @@ export function WorkspaceSidebar({
                             <button
                               type="button"
                               aria-label={project.name}
-                              aria-expanded={expandedProjectIds.includes(project.id)}
-                              aria-controls={`project-sessions-${project.id}`}
-                              title="展开或收起会话列表"
-                              onClick={() => toggleProjectExpanded(project.id)}
+                              title="打开工程对话"
+                              onClick={() => openProject(project.id)}
                               onDoubleClick={(event) => {
                                 event.preventDefault();
                                 beginRenameProject(project);
@@ -784,13 +787,7 @@ export function WorkspaceSidebar({
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                expandProject(project.id);
-                                openWorkspace(project.id, "", false, "chat");
-                                if (isMobile) setSidebar(false);
-                              }}
-                            >
+                            <DropdownMenuItem onSelect={() => openProject(project.id)}>
                               <Folder /> 打开项目
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />

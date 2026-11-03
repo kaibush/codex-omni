@@ -48,7 +48,9 @@ for (const mobile of [false, true]) {
     await currentProject
       .getByRole("button", { name: `展开 ${current.project.name}`, exact: true })
       .click();
-    await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
+    await otherProject
+      .getByRole("button", { name: `展开 ${other.project.name}`, exact: true })
+      .click();
     await expect(currentProject.getByTitle("保留当前对话", { exact: true })).toBeVisible();
     await expect(otherProject.getByTitle("另一个工程的对话", { exact: true })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
@@ -57,7 +59,9 @@ for (const mobile of [false, true]) {
     await expect(otherProject.locator(".project-row")).not.toHaveClass(/active/);
     expect(sessionReads).toEqual([]);
 
-    await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
+    await otherProject
+      .getByRole("button", { name: `折叠 ${other.project.name}`, exact: true })
+      .click();
     await expect(otherProject.getByRole("group")).toHaveCount(0);
     await expect(currentProject.getByTitle("保留当前对话", { exact: true })).toBeVisible();
     await otherProject
@@ -78,6 +82,9 @@ for (const mobile of [false, true]) {
       expect(bounds?.width).toBe(32);
       await icon.click();
       await expect(otherProject.getByTitle("另一个工程的对话", { exact: true })).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/projects/${other.project.id}$`));
+      await expect(page.getByRole("heading", { name: "选择对话", exact: true })).toBeVisible();
+      await currentProject.getByTitle("保留当前对话", { exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
       await expect(composer).toHaveValue("尚未发送的内容要保留");
       await page.reload();
@@ -105,8 +112,12 @@ test("renames, archives and bulk deletes sessions in another project without nav
 }) => {
   const { current, other, currentPath, sidebar, currentProject, otherProject } =
     await fixture(page);
-  await currentProject.getByRole("button", { name: current.project.name, exact: true }).click();
-  await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
+  await currentProject
+    .getByRole("button", { name: `展开 ${current.project.name}`, exact: true })
+    .click();
+  await otherProject
+    .getByRole("button", { name: `展开 ${other.project.name}`, exact: true })
+    .click();
   await otherProject
     .getByRole("button", { name: "另一个工程的对话 的更多操作", exact: true })
     .click();
@@ -172,7 +183,9 @@ test("loads and retries an inactive project independently and can explicitly ope
     await heldResponse;
     await route.fulfill({ status: 503, json: { message: "暂时无法加载" } });
   });
-  await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
+  await otherProject
+    .getByRole("button", { name: `展开 ${other.project.name}`, exact: true })
+    .click();
   await expect(otherProject.getByRole("status")).toContainText("正在加载会话");
   await expect(otherProject.getByText("暂无会话", { exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
@@ -191,13 +204,14 @@ test("loads and retries an inactive project independently and can explicitly ope
   });
   await page.reload();
   await expect(otherProject.getByText("暂无会话", { exact: true })).toBeVisible();
-  await otherProject
-    .getByRole("button", { name: `${other.project.name} 菜单`, exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "打开项目", exact: true }).click();
+  await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${other.project.id}$`));
   await expect(page.getByRole("heading", { name: "选择对话", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "新建对话", exact: true })).toBeEnabled();
+  await sidebar.getByRole("button", { name: "新建对话", exact: true }).click();
+  await page.getByRole("button", { name: "开始全新对话", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${other.project.id}/sessions/[^/]+$`));
+  await expect(page.locator(".composer-shell textarea")).toBeVisible();
 });
 
 test("opens terminal sessions from another project in the terminal conversation tab", async ({
@@ -209,7 +223,9 @@ test("opens terminal sessions from another project in the terminal conversation 
     `/api/projects/${other.project.id}/terminal-sessions`,
     { method: "POST", csrf: other.csrf, data: { title: "另一个工程的终端", profileId: "shell" } }
   );
-  await otherProject.getByRole("button", { name: other.project.name, exact: true }).click();
+  await otherProject
+    .getByRole("button", { name: `展开 ${other.project.name}`, exact: true })
+    .click();
   await expect(otherProject.getByTitle("另一个工程的终端", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
   await otherProject.getByTitle("另一个工程的终端", { exact: true }).click();
@@ -220,4 +236,80 @@ test("opens terminal sessions from another project in the terminal conversation 
     "data-state",
     "active"
   );
+});
+
+test("switches conversations and sends in newly created chats while several projects stay expanded", async ({
+  page
+}) => {
+  const { current, other, currentProject, otherProject, currentPath } = await fixture(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await currentProject
+    .getByRole("button", { name: `展开 ${current.project.name}`, exact: true })
+    .click();
+  await otherProject
+    .getByRole("button", { name: `展开 ${other.project.name}`, exact: true })
+    .click();
+  const composer = page.locator(".composer-shell textarea");
+  await composer.fill("当前工程的未发送草稿");
+  await otherProject.getByTitle("另一个工程的对话", { exact: true }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${other.project.id}/sessions/${other.session.id}$`)
+  );
+  await expect(composer).toHaveValue("");
+  await composer.fill("切换后的消息");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "使用该模型发送", exact: true }).click();
+  await expect(page.getByText("已收到：切换后的消息", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "新建对话", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新建对话", exact: true });
+  await dialog.getByRole("button", { name: "开始全新对话", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page).not.toHaveURL(new RegExp(`/sessions/${other.session.id}$`));
+  const createdPath = new URL(page.url()).pathname;
+  expect(createdPath).toContain(`/projects/${other.project.id}/sessions/`);
+  await expect(composer).toHaveValue("");
+  await expect(page.getByText("已收到：切换后的消息", { exact: true })).toHaveCount(0);
+  await composer.fill("新对话能正常发送");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "使用该模型发送", exact: true }).click();
+  await expect(page.getByText("已收到：新对话能正常发送", { exact: true })).toBeVisible();
+  await currentProject.getByTitle("保留当前对话", { exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
+  await expect(composer).toHaveValue("当前工程的未发送草稿");
+  await expect(page.getByText("已收到：新对话能正常发送", { exact: true })).toHaveCount(0);
+  await otherProject.getByTitle("新对话能正常发送", { exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${createdPath}$`));
+  await expect(page.getByText("已收到：新对话能正常发送", { exact: true })).toBeVisible();
+  await otherProject.getByTitle("另一个工程的对话", { exact: true }).click();
+  await expect(page.getByText("已收到：切换后的消息", { exact: true })).toBeVisible();
+  await expect(page.getByText("已收到：新对话能正常发送", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "新建对话", exact: true }).click();
+  await dialog.getByRole("button", { name: "开始全新对话", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("已收到：切换后的消息", { exact: true })).toHaveCount(0);
+  await composer.fill("连续新建后仍可发送");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "使用该模型发送", exact: true }).click();
+  await expect(page.getByText("已收到：连续新建后仍可发送", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("selects a project from home before creating a conversation", async ({ page }) => {
+  const { other } = await fixture(page);
+  await page.goto("/");
+  const sidebar = page.locator(".workspace-sidebar");
+  await sidebar.getByRole("button", { name: other.project.name, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${other.project.id}$`));
+  await expect(page.getByRole("tab", { name: "对话", exact: true })).toHaveAttribute(
+    "data-state",
+    "active"
+  );
+  await sidebar.getByRole("button", { name: "新建对话", exact: true }).click();
+  await page.getByRole("button", { name: "开始全新对话", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${other.project.id}/sessions/[^/]+$`));
+  await page.locator(".composer-shell textarea").fill("从首页进入工程后发送");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "使用该模型发送", exact: true }).click();
+  await expect(page.getByText("已收到：从首页进入工程后发送", { exact: true })).toBeVisible();
 });
