@@ -1764,11 +1764,17 @@ export class Store {
     transaction();
     return this.getSession(sessionId);
   }
-  forkSession(sourceId: string, messageId?: string, options: { before?: boolean } = {}) {
+  forkSession(
+    sourceId: string,
+    messageId?: string,
+    options: { before?: boolean; includeTimeline?: boolean } = {}
+  ) {
     const source = this.getSession(sourceId);
     if (!source) return undefined;
-    const conversation = this.listMessages(sourceId).filter(
-      (message) => message.role === "user" || message.role === "assistant"
+    const conversation = this.listMessages(sourceId).filter((message) =>
+      options.includeTimeline
+        ? message.role !== "run"
+        : message.role === "user" || message.role === "assistant"
     );
     const index = messageId ? conversation.findIndex((message) => message.id === messageId) : -1;
     if (messageId && index < 0) return undefined;
@@ -1779,7 +1785,7 @@ export class Store {
     // finish after it. Its final text is not a valid snapshot of that boundary.
     const pointTime = conversation[index]?.createdAt ?? Infinity;
     const copied = options.before
-      ? selected.filter((message) => message.role === "user" || message.updatedAt <= pointTime)
+      ? selected.filter((message) => message.role !== "assistant" || message.updatedAt <= pointTime)
       : selected;
     return this.db.transaction(() => {
       const target = this.createSession({
@@ -1809,7 +1815,12 @@ export class Store {
       return target;
     })();
   }
-  rewindSession(sourceId: string, messageId: string, mode: "fork" | "current") {
+  rewindSession(
+    sourceId: string,
+    messageId: string,
+    mode: "fork" | "current",
+    nativeThreadId?: string
+  ) {
     return this.db.transaction(() => {
       const fail = (message: string, statusCode: number): never => {
         throw Object.assign(new Error(message), { statusCode });
@@ -1823,7 +1834,11 @@ export class Store {
         return fail("请选择用户消息或助手回复作为回退位置", 400);
       const before = point.role === "user";
       if (mode === "fork") {
-        const session = this.forkSession(sourceId, messageId, { before })!;
+        let session = this.forkSession(sourceId, messageId, {
+          before,
+          includeTimeline: Boolean(nativeThreadId)
+        })!;
+        if (nativeThreadId) session = this.updateSession(session.id, { threadId: nativeThreadId })!;
         return { session, backupSessionId: null, draft: before ? point : null };
       }
       if (
@@ -1892,11 +1907,11 @@ export class Store {
           .run(sourceId, point.createdAt);
       this.db
         .prepare(
-          `UPDATE sessions SET thread_id=NULL,status='idle',continuation_mode='rewind',
+          `UPDATE sessions SET thread_id=@threadId,status='idle',continuation_mode='rewind',
         updated_at=@now,last_message_at=(SELECT MAX(created_at) FROM messages
           WHERE session_id=@sourceId AND role IN ('user','assistant')) WHERE id=@sourceId`
         )
-        .run({ sourceId, now: Date.now() });
+        .run({ sourceId, now: Date.now(), threadId: nativeThreadId ?? null });
       this.db
         .prepare("UPDATE sessions SET last_message_at=? WHERE id=?")
         .run(source.lastMessageAt, backup.id);

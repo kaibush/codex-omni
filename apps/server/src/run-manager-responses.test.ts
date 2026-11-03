@@ -1,8 +1,10 @@
 import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Store } from "@codex-omni/db";
+import { findRolloutFile } from "@codex-omni/codex-runtime";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunManager } from "./run-manager.js";
 
@@ -235,48 +237,116 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
     expect(store!.getSession(session.id)?.threadId).toBe("parent-thread-not-to-resume");
   }, 25_000);
 
-  it("rewinds the current session onto a fresh thread without sending discarded history", async () => {
-    const { requests, session, run } = await fixture(() => ({ text: "已完成检查。" }));
-    store!.updateSession(session.id, { threadId: "old-thread-must-stay-in-backup" });
-    const keep = store!.addMessage({
-      sessionId: session.id,
-      role: "user",
-      content: "RETAINED_CONTEXT",
-      providerId: session.providerId,
-      eventType: "user.message",
-      createdAt: 1
-    });
-    const point = store!.addMessage({
-      sessionId: session.id,
-      role: "user",
-      content: "RETRACTED_REQUEST",
-      providerId: session.providerId,
-      eventType: "user.message",
-      createdAt: 2
-    });
-    store!.addMessage({
-      sessionId: session.id,
-      role: "assistant",
-      content: "RETRACTED_ANSWER",
-      providerId: session.providerId,
-      eventType: "assistant.completed",
-      createdAt: 3
-    });
-    const result = manager!.rewindSession(session.id, point.id, "current");
-    expect(result.draft?.content).toBe("RETRACTED_REQUEST");
-    expect(store!.getSession(session.id)?.threadId).toBeNull();
-    await run("REVISED_REQUEST", session.id);
-    expect(requests).toHaveLength(1);
-    const input = JSON.stringify(requests[0]?.body.input);
-    expect(input).toContain("rewind-history");
-    expect(input).toContain(keep.content);
-    expect(input).toContain("REVISED_REQUEST");
-    expect(input).not.toContain("RETRACTED_REQUEST");
-    expect(input).not.toContain("RETRACTED_ANSWER");
-    expect(store!.getSession(session.id)?.threadId).toBeTruthy();
-    expect(store!.getSession(session.id)?.threadId).not.toBe("old-thread-must-stay-in-backup");
-    expect(store!.getSession(result.backupSessionId!)?.threadId).toBe(
-      "old-thread-must-stay-in-backup"
+  for (const scenario of ["current", "fork", "legacy"] as const) {
+    const mode = scenario === "legacy" ? "current" : scenario;
+    it(`rewinds ${scenario} using native history, including real tool calls and results`, async () => {
+      const { requests, session, run } = await fixture((index) =>
+        index === 0
+          ? { command: "cat check.txt" }
+          : index === 2
+            ? { command: "printf RETRACTED_TOOL_OUTPUT" }
+            : {
+                text:
+                  index === 1
+                    ? "RETAINED_ANSWER"
+                    : index === 3
+                      ? "RETRACTED_ANSWER"
+                      : "REVISED_ANSWER"
+              }
+      );
+      await run("RETAINED_REQUEST");
+      await run("RETRACTED_REQUEST");
+      expect(requests).toHaveLength(4);
+      const originalThread = store!.getSession(session.id)!.threadId;
+      if (scenario === "legacy") {
+        // Reproduce a pre-0.166 thread with new SDK item events appended to its
+        // legacy rollout. All history remains in the real native transcript.
+        const home = path.join(dir!, "runtime", "clients", "codex");
+        const file = findRolloutFile(home, originalThread!);
+        const text = await readFile(file, "utf8");
+        const newline = text.indexOf("\n");
+        const meta = JSON.parse(text.slice(0, newline));
+        meta.payload.history_mode = "legacy";
+        delete meta.payload.context_window;
+        await writeFile(file, JSON.stringify(meta) + text.slice(newline));
+        const db = new Database(path.join(home, "state_5.sqlite"));
+        try {
+          db.prepare("UPDATE threads SET history_mode='legacy' WHERE id=?").run(originalThread);
+        } finally {
+          db.close();
+        }
+      }
+      const point = store!.listMessages(session.id).find((m) => m.content === "RETRACTED_REQUEST")!;
+      const result = await manager!.rewindSession(session.id, point.id, mode);
+      expect(result.draft?.content).toBe("RETRACTED_REQUEST");
+      expect(result.session.id === session.id).toBe(mode === "current");
+      expect(result.session.threadId).toBeTruthy();
+      expect(result.session.threadId).not.toBe(originalThread);
+      const retainedMessages = JSON.stringify(store!.listMessages(result.session.id));
+      expect(retainedMessages).toContain("WORKFLOW_FIXTURE_READ_OK");
+      expect(retainedMessages).not.toContain("RETRACTED_TOOL_OUTPUT");
+      const backup = result.backupSessionId ?? session.id;
+      expect(store!.getSession(backup)?.threadId).toBe(originalThread);
+      await run("REVISED_REQUEST", result.session.id);
+      expect(requests).toHaveLength(5);
+      const input = requests[4]!.body.input as Array<Record<string, unknown>>;
+      expect(input.some((item) => item.type === "function_call")).toBe(true);
+      expect(
+        input.some(
+          (item) =>
+            item.type === "function_call_output" &&
+            JSON.stringify(item).includes("WORKFLOW_FIXTURE_READ_OK")
+        )
+      ).toBe(true);
+      expect(
+        input.some(
+          (item) => item.role === "assistant" && JSON.stringify(item).includes("RETAINED_ANSWER")
+        )
+      ).toBe(true);
+      expect(JSON.stringify(input)).toContain("RETAINED_REQUEST");
+      expect(JSON.stringify(input)).toContain("REVISED_REQUEST");
+      expect(JSON.stringify(input)).not.toContain("RETRACTED_REQUEST");
+      expect(JSON.stringify(input)).not.toContain("RETRACTED_ANSWER");
+      expect(JSON.stringify(input)).not.toContain("RETRACTED_TOOL_OUTPUT");
+      expect(JSON.stringify(input)).not.toContain("rewind-history");
+      expect(JSON.stringify(input)).not.toContain("fork-history");
+      expect(
+        store!.listMessages(result.session.id).some((m) => m.content === "RETRACTED_REQUEST")
+      ).toBe(false);
+      // A second rewind to the first request must really empty native context.
+      const first = store!.listMessages(result.session.id).find((m) => m.role === "user")!;
+      await manager!.rewindSession(result.session.id, first.id, "current");
+      await run("AFTER_EMPTY_REWIND", result.session.id);
+      const empty = JSON.stringify(requests.at(-1)!.body.input);
+      expect(empty).toContain("AFTER_EMPTY_REWIND");
+      expect(empty).not.toContain("RETAINED_REQUEST");
+      expect(empty).not.toContain("WORKFLOW_FIXTURE_READ_OK");
+      expect(empty).not.toContain("REVISED_REQUEST");
+      expect(empty).not.toContain("rewind-history");
+      // The backup still resumes the complete original native conversation.
+      await run("BACKUP_CONTINUATION", backup);
+      expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_REQUEST");
+      expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_ANSWER");
+    }, 40_000);
+  }
+
+  it("leaves native history and the page intact when committing a rewind fails", async () => {
+    const { requests, session, run } = await fixture(() => ({ text: "DONE" }));
+    await run("FIRST_REQUEST");
+    await run("SECOND_REQUEST");
+    const original = store!.getSession(session.id);
+    const messages = store!.listMessages(session.id);
+    const point = messages.find((m) => m.content === "SECOND_REQUEST")!;
+    store!.db.exec(
+      "CREATE TRIGGER reject_rewind BEFORE UPDATE ON sessions WHEN NEW.continuation_mode='rewind' BEGIN SELECT RAISE(ABORT,'fixture failure'); END"
     );
-  }, 25_000);
+    await expect(manager!.rewindSession(session.id, point.id, "current")).rejects.toThrow(
+      "fixture failure"
+    );
+    expect(store!.getSession(session.id)).toEqual(original);
+    expect(store!.listMessages(session.id)).toEqual(messages);
+    expect(store!.listSessions(session.projectId)).toHaveLength(1);
+    await run("AFTER_FAILURE");
+    expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("SECOND_REQUEST");
+  }, 30_000);
 });

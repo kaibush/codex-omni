@@ -28,17 +28,19 @@ export type RewindMode = "fork" | "current";
 export function RewindSessionDialog({
   messageId,
   currentBlocked,
+  nativeHistory,
   busy,
   onCancel,
   onConfirm
 }: {
   messageId: string;
   currentBlocked: boolean;
+  nativeHistory: boolean;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (mode: RewindMode) => void;
 }) {
-  const [mode, setMode] = useState<RewindMode>("fork");
+  const [mode, setMode] = useState<RewindMode>("current");
   const message = useQuery({
     queryKey: ["rewind-message", messageId],
     queryFn: () => api<Message>(`/api/messages/${encodeURIComponent(messageId)}`),
@@ -94,17 +96,17 @@ export function RewindSessionDialog({
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              <SelectItem value="fork">分叉新对话，保留原对话</SelectItem>
               <SelectItem value="current" disabled={currentBlocked}>
                 回退当前对话，自动保存备份
               </SelectItem>
+              <SelectItem value="fork">分叉新对话，保留原对话</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>
         <p className="text-sm text-muted-foreground">
           {mode === "fork"
             ? "原对话和输入草稿保留，可随时返回查看。"
-            : "后续消息和原来的输入草稿会保存在「回退前备份」对话中。"}
+            : "留在当前对话继续，后续消息和原来的输入草稿会保存在「回退前备份」中。"}
         </p>
         {currentBlocked ? (
           <p className="text-xs text-muted-foreground">
@@ -113,7 +115,10 @@ export function RewindSessionDialog({
         ) : null}
         <Alert>
           <AlertDescription>
-            仅回退对话，项目文件保持当前状态。继续时沿用分叉的历史快照，长对话仅携带最近的用户消息和回复，不包含工具输出。
+            {nativeHistory
+              ? "页面与下一次发送给模型的上下文会一起回退，保留此前的原生消息和工具记录。"
+              : "此对话尚无可回退的 Codex 原生历史，继续时使用保留的文字快照，不包含工具输出。"}
+            项目文件保持当前状态。
           </AlertDescription>
         </Alert>
         <DialogFooter>
@@ -125,7 +130,7 @@ export function RewindSessionDialog({
             onClick={() => onConfirm(mode)}
           >
             {busy ? <LoaderCircle className="animate-spin" /> : <CornerUpLeft />}
-            {busy ? "正在回退…" : mode === "fork" ? "分叉并回退" : "备份并回退"}
+            {busy ? "正在回退…" : mode === "fork" ? "分叉并回退" : "回退当前对话"}
           </Button>
         </DialogFooter>
       </DialogContent>

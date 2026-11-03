@@ -1588,7 +1588,7 @@ app.post("/api/sessions/:id/rewind", { preHandler: auth }, async (req) => {
   const body = z
     .object({
       messageId: z.string().min(1),
-      mode: z.enum(["fork", "current"]).default("fork")
+      mode: z.enum(["fork", "current"]).default("current")
     })
     .parse(req.body ?? {});
   return runs.rewindSession(routeId(req), body.messageId, body.mode);

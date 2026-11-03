@@ -6,6 +6,7 @@ import {
   INCOMPLETE_TURN_MESSAGE,
   sanitizeCodexAttachments,
   terminateRecordedWorker,
+  withNativeRewind,
   type WorkerRuntimeInfo
 } from "@codex-omni/codex-runtime";
 import {
@@ -218,6 +219,7 @@ export class RunManager {
   private activeRuns = new Map<string, ActiveRun>();
   private steeringQueuedTurns = new Map<string, { queueId: string; pending: Promise<void> }>();
   private failureRetryAborters = new Map<string, () => void>();
+  private rewindingSessions = new Set<string>();
   private runtimeMonitor: NodeJS.Timeout;
   readonly serviceInstanceId = process.env.CODEX_OMNI_INSTANCE?.trim() || nanoid();
 
@@ -268,17 +270,87 @@ export class RunManager {
     return true;
   }
 
-  rewindSession(sessionId: string, messageId: string, mode: "fork" | "current") {
+  async rewindSession(sessionId: string, messageId: string, mode: "fork" | "current") {
+    const source = this.store.getSession(sessionId);
+    const point = this.store.getMessage(messageId);
+    const fail = (message: string, statusCode: number): never => {
+      throw Object.assign(new Error(message), { statusCode });
+    };
+    if (!source) return fail("对话不存在", 404);
+    if (!point || point.sessionId !== sessionId) return fail("回退位置不存在，请刷新对话", 404);
+    if (source.kind !== "chat" || !["user", "assistant"].includes(point.role))
+      return fail("请选择对话中的用户消息或助手回复作为回退位置", 400);
+    if (this.rewindingSessions.has(sessionId)) return fail("对话正在回退，请稍后重试", 409);
+    const native = source.clientType === "codex" && Boolean(source.threadId);
     if (
-      mode === "current" &&
+      (mode === "current" || native) &&
       (this.activeRuns.has(sessionId) ||
+        source.status === "running" ||
+        this.store.getLatestRun(sessionId)?.status === "running" ||
         this.worker.isActive(sessionId) ||
         this.failureRetryAborters.has(sessionId) ||
         this.steeringQueuedTurns.has(sessionId))
     ) {
       throw Object.assign(new Error("请先停止当前任务，再回退对话"), { statusCode: 409 });
     }
-    const result = this.store.rewindSession(sessionId, messageId, mode);
+    if (mode === "current" && this.store.listQueuedTurns(sessionId).length)
+      return fail("请先处理或移除待发送队列，再回退当前对话", 409);
+    const originalMessages = this.store.listMessages(sessionId);
+    const commit = (threadId?: string) => {
+      const current = this.store.getSession(sessionId);
+      if (
+        current?.threadId !== source.threadId ||
+        current?.updatedAt !== source.updatedAt ||
+        JSON.stringify(this.store.listMessages(sessionId)) !== JSON.stringify(originalMessages)
+      )
+        return fail("对话已变更，请刷新后重新选择回退位置", 409);
+      return this.store.rewindSession(sessionId, messageId, mode, threadId);
+    };
+    this.rewindingSessions.add(sessionId);
+    let result;
+    try {
+      if (native) {
+        const project = this.store.getProject(source.projectId)!;
+        const provider = this.store.getProvider(source.providerId ?? project.providerId ?? "");
+        if (!provider) return fail("找不到对话的供应商配置", 400);
+        const model = source.model ?? provider.model;
+        result = await withNativeRewind(
+          {
+            protocolVersion: 1,
+            requestId: nanoid(),
+            projectId: project.id,
+            sessionId,
+            threadId: source.threadId!,
+            cwd: project.realPath,
+            runtimeKey: `${source.clientType}::${project.id}::${sessionId}`,
+            runtimeHome: clientRuntimeHome("codex", this.runtimeRoot),
+            homeMode:
+              provider.homeMode === "native"
+                ? "native"
+                : provider.homeMode === "api-key"
+                  ? "api-key"
+                  : "managed",
+            ...(model ? { model } : {}),
+            ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
+            ...(provider.homeMode === "api-key" && provider.apiKey
+              ? { apiKey: provider.apiKey }
+              : {}),
+            ...(provider.configToml ? { configToml: provider.configToml } : {}),
+            ...(provider.authJson ? { authJson: provider.authJson } : {}),
+            ...(provider.envJson ? { messageEnvVars: JSON.parse(provider.envJson) } : {}),
+            message: "",
+            sandbox: "read-only",
+            approvalPolicy: "never",
+            networkAccessEnabled: false
+          },
+          originalMessages,
+          messageId,
+          commit
+        );
+      } else result = commit();
+    } finally {
+      this.rewindingSessions.delete(sessionId);
+    }
     if (mode === "current") {
       this.cancelling.delete(sessionId);
       this.reconnecting.delete(sessionId);
@@ -1134,6 +1206,7 @@ export class RunManager {
   }
 
   private async startTurn(input: TurnStartCommand, sourceQueueId?: string) {
+    if (this.rewindingSessions.has(input.sessionId)) throw new Error("对话正在回退，请稍后发送");
     let command = input;
     if (input.type === "run.retry" && input.messageId) {
       const source = this.store.getMessage(input.messageId);
@@ -1190,7 +1263,7 @@ export class RunManager {
       (session.threadId
         ? null
         : (this.store.findMessageByEventType(session.id, "provider.continuation")?.content ??
-          (session.continuationMode === "fork"
+          (session.continuationMode === "fork" && this.store.hasMessageRole(session.id, "user")
             ? buildForkContext(
                 session.parentSessionId ?? session.id,
                 this.forkContextMessages(session.id)
@@ -1305,6 +1378,7 @@ export class RunManager {
       eventType: "user.message",
       dataJson: JSON.stringify({
         turnOptions,
+        runtimeMessage,
         ...(attachments.length ? { attachments } : {}),
         ...(command.displayMessage ? { displayMessage: command.displayMessage } : {}),
         ...(continuationApplied ? { continuation: true } : {}),

@@ -3180,6 +3180,7 @@ export function Workspace() {
         <RewindSessionDialog
           key={rewindMessageId}
           messageId={rewindMessageId}
+          nativeHistory={activeSession?.clientType === "codex" && Boolean(activeSession.threadId)}
           currentBlocked={
             runState?.status === "running" ||
             activeSession?.status === "running" ||

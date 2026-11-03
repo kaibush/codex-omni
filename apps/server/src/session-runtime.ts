@@ -64,12 +64,14 @@ export function runtimeHistoryContext(store: Store, sessionId: string, providerI
     return null;
   const provider = store.getProvider(providerId);
   if (!provider || clientType(provider.kind) !== session.clientType) return null;
-  // A rewind detaches the old native thread so later messages cannot leak back
-  // into the next request. Only the retained conversation enters the snapshot.
-  // Provider switches resume the current native thread, including tool history.
+  const messages = store.conversationSince(sessionId);
+  if (!messages.some((message) => message.role === "user" || message.role === "assistant"))
+    return null;
+  // Native rewinds have a threadId and resume its complete retained history.
+  // Only sessions without native history use the legacy portable snapshot.
   return buildForkContext(
     session.parentSessionId ?? sessionId,
-    store.conversationSince(sessionId),
+    messages,
     session.continuationMode === "rewind" ? "rewind" : "fork"
   );
 }

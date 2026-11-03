@@ -58,10 +58,10 @@ for (const mode of ["fork", "current"] as const) {
     const anchor = page.locator(`article[data-message-id="${point.id}"]`);
     await anchor.getByRole("button", { name: "回退到此处", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "回退对话", exact: true });
-    await expect(dialog.getByRole("combobox", { name: "回退方式" })).toContainText("分叉新对话");
-    if (mode === "current") {
+    await expect(dialog.getByRole("combobox", { name: "回退方式" })).toContainText("回退当前对话");
+    if (mode === "fork") {
       await dialog.getByRole("combobox", { name: "回退方式" }).click();
-      await page.getByRole("option", { name: "回退当前对话，自动保存备份", exact: true }).click();
+      await page.getByRole("option", { name: "分叉新对话，保留原对话", exact: true }).click();
     }
     await expect(dialog).toContainText("项目文件保持当前状态");
     await page.screenshot({ path: testInfo.outputPath(`rewind-${mode}.png`) });
@@ -71,7 +71,7 @@ for (const mode of ["fork", "current"] as const) {
         response.request().method() === "POST"
     );
     await dialog
-      .getByRole("button", { name: mode === "fork" ? "分叉并回退" : "备份并回退", exact: true })
+      .getByRole("button", { name: mode === "fork" ? "分叉并回退" : "回退当前对话", exact: true })
       .click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
@@ -150,7 +150,7 @@ test("rejects another session's anchor and retains the selected assistant respon
   await row.getByRole("button", { name: "回退到此处", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "回退对话", exact: true });
   await expect(dialog).toContainText("保留这条回复及之前的对话");
-  await dialog.getByRole("button", { name: "分叉并回退", exact: true }).click();
+  await dialog.getByRole("button", { name: "回退当前对话", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.locator(".event-card-user")).toHaveCount(1);
   await expect(page.getByText("已收到：保留这一轮上下文", { exact: true })).toBeVisible();
