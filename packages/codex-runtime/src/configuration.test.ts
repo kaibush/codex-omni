@@ -36,6 +36,12 @@ describe("Codex process-scoped provider configuration", () => {
     expect(second.env?.CODEX_HOME).toBe(request.runtimeHome);
     expect(first.env?.HOME).not.toBe("/wrong-user");
     const firstConfig = parse(first.configOverrides!.join("\n")) as any;
+    const secondConfig = parse(second.configOverrides!.join("\n")) as any;
+    expect(secondConfig.model_provider).toBe(firstConfig.model_provider);
+    const otherSession = codexLaunchOptions({ ...request, sessionId: "other-session" });
+    expect(parse(otherSession.configOverrides!.join("\n")).model_provider).not.toBe(
+      firstConfig.model_provider
+    );
     const route = firstConfig.model_providers[firstConfig.model_provider];
     expect(route).toMatchObject({ base_url: "https://a.invalid/v1", requires_openai_auth: false });
     expect(first.env?.[route.env_key]).toBe("key-a");

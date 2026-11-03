@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import Database from "better-sqlite3";
 import os from "node:os";
 import path from "node:path";
 import type { BridgeEvent, BridgeRequest } from "@codex-omni/protocol";
@@ -35,11 +36,21 @@ describe.skipIf(process.platform === "win32")(
       emptyFirstReply = false,
       toolBeforeEmptyReply = false
     ) {
-      const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+      const requests: Array<{
+        url: string;
+        body: Record<string, unknown>;
+        authorization: string;
+        nativeHeader: string;
+      }> = [];
       server = createServer(async (req, res) => {
         let body = "";
         for await (const chunk of req) body += String(chunk);
-        requests.push({ url: req.url ?? "", body: body ? JSON.parse(body) : {} });
+        requests.push({
+          url: req.url ?? "",
+          body: body ? JSON.parse(body) : {},
+          authorization: String(req.headers.authorization ?? ""),
+          nativeHeader: String(req.headers["x-native-secret"] ?? "")
+        });
         if (req.url !== "/v1/responses") {
           res.writeHead(404);
           res.end();
@@ -179,6 +190,65 @@ describe.skipIf(process.platform === "win32")(
         payload: { hasFinalResponse: true }
       });
     });
+
+    it("switches a native-created thread to a managed provider without inheriting native credentials", async () => {
+      const { request, requests } = await fixture();
+      const file = path.join(request.runtimeHome, "config.toml");
+      const native = `${request.configToml}\nexperimental_bearer_token = "native-key"\nhttp_headers = { "X-Native-Secret" = "native-secret" }\n`;
+      await writeFile(file, native);
+      const first: BridgeEvent[] = [];
+      await worker!.run({ ...request, homeMode: "native" }, (event) => first.push(event));
+      const threadId = (
+        first.find((event) => event.type === "thread.started")?.payload as { threadId: string }
+      ).threadId;
+      await worker!.run({ ...request, requestId: "managed", threadId }, () => {});
+      await worker!.run(
+        { ...request, requestId: "native", threadId, homeMode: "native" },
+        () => {}
+      );
+      expect(
+        requests.map(({ authorization, nativeHeader }) => ({ authorization, nativeHeader }))
+      ).toEqual([
+        { authorization: "Bearer native-key", nativeHeader: "native-secret" },
+        { authorization: "Bearer fixture-key", nativeHeader: "" },
+        { authorization: "Bearer native-key", nativeHeader: "native-secret" }
+      ]);
+      expect(await readFile(file, "utf8")).toBe(native);
+    }, 15_000);
+
+    it("resumes a legacy run-specific provider using current state instead of the rollout's original provider", async () => {
+      const { request, requests } = await fixture();
+      const first: BridgeEvent[] = [];
+      await worker!.run(request, (event) => first.push(event));
+      const threadId = (
+        first.find((event) => event.type === "thread.started")?.payload as { threadId: string }
+      ).threadId;
+      const file = (await readdir(request.runtimeHome)).find((name) =>
+        /^state_\d+\.sqlite$/.test(name)
+      )!;
+      const db = new Database(path.join(request.runtimeHome, file));
+      try {
+        // 0.164 changed this value on each resume without rewriting session_meta.
+        db.prepare("UPDATE threads SET model_provider = ? WHERE id = ?").run(
+          "omni_legacy_request",
+          threadId
+        );
+      } finally {
+        db.close();
+      }
+      const resumed: BridgeEvent[] = [];
+      await worker!.run({ ...request, requestId: "resume-legacy", threadId }, (event) =>
+        resumed.push(event)
+      );
+      expect(resumed.find((event) => event.type === "thread.started")?.payload).toMatchObject({
+        threadId
+      });
+      expect(resumed.find((event) => event.type === "turn.completed")?.payload).toMatchObject({
+        hasFinalResponse: true
+      });
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1]?.body.input)).toContain("fixture completed");
+    }, 15_000);
 
     it("does not treat commentary before an image tool as a final answer", async () => {
       const { request, requests } = await fixture(false, true, true);

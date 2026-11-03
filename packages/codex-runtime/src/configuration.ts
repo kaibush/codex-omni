@@ -1,7 +1,13 @@
 import { parse } from "smol-toml";
+import { createHash } from "node:crypto";
 import type { CodexOptions } from "@openai/codex-sdk";
 import type { BridgeRequest } from "@codex-omni/protocol";
 import { workerEnvironment } from "./environment.js";
+import {
+  migrateThreadModelProvider,
+  nativeCodexConfig,
+  threadModelProvider
+} from "./thread-provider.js";
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -66,7 +72,20 @@ function tomlValue(value: unknown): string {
 
 export function codexLaunchOptions(request: BridgeRequest): CodexOptions {
   const env = workerEnvironment(request);
-  if (request.homeMode === "native") return { env };
+  const nativeConfig = nativeCodexConfig(request.runtimeHome);
+  const previousProvider = threadModelProvider(request.runtimeHome, request.threadId, nativeConfig);
+  if (request.homeMode === "native") {
+    const selected = string(nativeConfig.model_provider) || "openai";
+    if (request.threadId && previousProvider && previousProvider !== selected)
+      migrateThreadModelProvider(
+        request.runtimeHome,
+        request.threadId,
+        nativeConfig,
+        previousProvider,
+        selected
+      );
+    return { env };
+  }
   const parsed = parseCodexProviderConfig(request.configToml, request.authJson);
   const config: Record<string, unknown> = Object.fromEntries(
     CHANNEL_KEYS.filter((key) => key in parsed.config).map((key) => [key, parsed.config[key]])
@@ -93,11 +112,43 @@ export function codexLaunchOptions(request: BridgeRequest): CodexOptions {
   } else if (route.requires_openai_auth === true) {
     throw new Error("供应商缺少 API Key；原生登录请使用客户端原生配置");
   }
-  // A unique name also prevents a native config table from supplying missing
-  // keys. The original provider definitions are kept for configured agents.
-  const channel = `omni_${request.requestId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+  // Keep identity stable across retries/resumes while routing stays local to
+  // this process. New sessions use a distinct name from native provider tables.
+  const nativeProviders = object(nativeConfig.model_providers);
+  let channel =
+    previousProvider?.startsWith("omni_") && !(previousProvider in nativeProviders)
+      ? previousProvider
+      : `omni_${createHash("sha256")
+          .update(JSON.stringify([request.projectId, request.sessionId]))
+          .digest("hex")
+          .slice(0, 24)}`;
+  while (channel in nativeProviders) channel += "_";
   providers[selected] = route;
   providers[channel] = route;
+  protectProviderCredentials(providers, env);
+  config.model_provider = channel;
+  config.model_providers = providers;
+  const configOverrides = Object.entries(config).map(
+    ([key, value]) => `${key}=${tomlValue(value)}`
+  );
+  if (request.threadId && previousProvider && previousProvider !== channel)
+    migrateThreadModelProvider(
+      request.runtimeHome,
+      request.threadId,
+      nativeConfig,
+      previousProvider,
+      channel
+    );
+  return {
+    env,
+    configOverrides
+  };
+}
+
+function protectProviderCredentials(
+  providers: Record<string, unknown>,
+  env: Record<string, string>
+) {
   for (const [index, definition] of Object.values(providers).entries()) {
     const provider = object(definition);
     const token = string(provider.experimental_bearer_token);
@@ -123,10 +174,4 @@ export function codexLaunchOptions(request: BridgeRequest): CodexOptions {
       provider.env_http_headers = envHeaders;
     }
   }
-  config.model_provider = channel;
-  config.model_providers = providers;
-  return {
-    env,
-    configOverrides: Object.entries(config).map(([key, value]) => `${key}=${tomlValue(value)}`)
-  };
 }
