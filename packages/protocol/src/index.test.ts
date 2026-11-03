@@ -186,6 +186,20 @@ describe("protocol", () => {
       })
     ).toMatchObject({ lastRequestId: "run-1", lastSeq: 42 });
   });
+  it.each([false, true])(
+    "preserves a queued turn's explicit autoStart setting: %s",
+    (autoStart) => {
+      expect(
+        runCommandSchema.parse({
+          type: "turn.enqueue",
+          projectId: "project-1",
+          sessionId: "session-1",
+          message: "next",
+          autoStart
+        })
+      ).toMatchObject({ autoStart });
+    }
+  );
   it("accepts a queued turn move command", () => {
     expect(
       runCommandSchema.parse({

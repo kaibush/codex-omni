@@ -876,6 +876,7 @@ export class RunManager {
       if (requireActive) throw new Error("当前任务暂时无法插入消息，请稍后重试");
       this.queueCommand({
         type: "turn.enqueue",
+        autoStart: true,
         ...(command.clientId ? { clientId: command.clientId } : {}),
         projectId: command.projectId,
         sessionId: command.sessionId,
@@ -896,7 +897,7 @@ export class RunManager {
     }
     if (!(await this.worker.steer(command.sessionId, command.message, attachments))) {
       if (requireActive) throw new Error("当前任务未接受插入，消息已保留在队列中");
-      this.queueCommand({ ...command, type: "turn.enqueue", attachments });
+      this.queueCommand({ ...command, type: "turn.enqueue", autoStart: true, attachments });
       return;
     }
     const providerId = this.store.getRun(active.runId)?.providerId ?? session.providerId;
@@ -976,6 +977,7 @@ export class RunManager {
       providerId: command.providerId ?? session.providerId,
       message: command.message,
       optionsJson: JSON.stringify({
+        autoStart: command.autoStart === true,
         ...(command.model ? { model: command.model } : {}),
         ...(command.sandbox ? { sandbox: command.sandbox } : {}),
         ...(command.approvalPolicy ? { approvalPolicy: command.approvalPolicy } : {}),
@@ -990,8 +992,8 @@ export class RunManager {
     });
     this.acknowledgeQueue(command.sessionId, queued.id, "queued");
     this.sendQueueSnapshot(command.sessionId);
-    if (!this.activeRuns.has(command.sessionId) && !this.worker.isActive(command.sessionId)) {
-      void this.startNextQueued(command.sessionId);
+    if (command.autoStart === true) {
+      void this.startNextQueued(command.sessionId, true);
     }
     return queued;
   }
@@ -1020,10 +1022,17 @@ export class RunManager {
     };
   }
 
-  private async startNextQueued(sessionId: string) {
+  private async startNextQueued(sessionId: string, automaticOnly = false) {
     if (this.steeringQueuedTurns.has(sessionId)) return;
     if (this.activeRuns.has(sessionId) || this.worker.isActive(sessionId)) return;
-    const item = this.store.listQueuedTurns(sessionId)[0];
+    // Legacy rows and manual messages must never be consumed by automatic draining.
+    const item = this.store
+      .listQueuedTurns(sessionId)
+      .find(
+        (entry) =>
+          !automaticOnly ||
+          parseJson<Record<string, unknown>>(entry.optionsJson, {}).autoStart === true
+      );
     if (!item) return;
     try {
       await this.startTurn(this.queuedToCommand(item), item.id);
@@ -1060,16 +1069,27 @@ export class RunManager {
     // while an asynchronous runtime acknowledgement is in flight.
     let accepted = false;
     const pending = this.steerTurn({ ...command, type: "turn.steer", clientId: queueId }, true)
-      .then(() => {
-        accepted = true;
-        this.store.deleteQueuedTurn(queueId);
-        this.acknowledgeQueue(sessionId, queueId, "steered");
-        this.sendQueueSnapshot(sessionId);
-      })
+      .then(
+        () => {
+          accepted = true;
+          this.store.deleteQueuedTurn(queueId);
+          this.acknowledgeQueue(sessionId, queueId, "steered");
+          this.sendQueueSnapshot(sessionId);
+        },
+        async (error: unknown) => {
+          // The run can finish while the runtime is accepting the insertion.
+          // The explicit selection still takes priority over other queued work.
+          if (this.activeRuns.has(sessionId) || this.worker.isActive(sessionId)) throw error;
+          this.steeringQueuedTurns.delete(sessionId);
+          await this.startTurn(command, queueId);
+          accepted = true;
+        }
+      )
       .finally(() => {
-        this.steeringQueuedTurns.delete(sessionId);
+        if (this.steeringQueuedTurns.get(sessionId)?.queueId === queueId)
+          this.steeringQueuedTurns.delete(sessionId);
         if (accepted && this.store.getLatestRun(sessionId)?.status === "completed") {
-          void this.startNextQueued(sessionId);
+          void this.startNextQueued(sessionId, true);
         }
       });
     this.steeringQueuedTurns.set(sessionId, { queueId, pending });
@@ -1632,7 +1652,7 @@ export class RunManager {
       const cancelled =
         this.cancelling.has(session.id) || this.store.getRun(requestId)?.status === "cancelled";
       this.cancelling.delete(session.id);
-      if (completed) void this.startNextQueued(session.id);
+      if (completed) void this.startNextQueued(session.id, true);
       else if (!cancelled) {
         try {
           await this.maybeRetryAfterFailure({

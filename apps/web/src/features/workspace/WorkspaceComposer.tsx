@@ -89,7 +89,6 @@ export function WorkspaceComposer({
   moveQueuedTurn,
   insertQueuedTurn,
   insertingQueueId,
-  startNextQueuedTurn,
   selectedProvider,
   mentionRange,
   slashOpen,
@@ -155,7 +154,6 @@ export function WorkspaceComposer({
   moveQueuedTurn: (id: string, direction: "up" | "down") => void;
   insertQueuedTurn: (id: string) => void;
   insertingQueueId: string;
-  startNextQueuedTurn: () => void;
   selectedProvider: Provider | undefined;
   mentionRange: { start: number; query: string } | null;
   slashOpen: boolean;
@@ -203,6 +201,12 @@ export function WorkspaceComposer({
   const [enhanceText, setEnhanceText] = useState("");
   const [enhanceError, setEnhanceError] = useState("");
   const [enhanceModel, setEnhanceModel] = useState("");
+  const queueOnly = workspaceSettings.sendMode === "queue";
+  const sendLabel = queueOnly
+    ? "加入消息队列"
+    : runState?.status === "running"
+      ? "直接插入消息"
+      : "发送消息";
   const openEnhance = (source = input) => {
     const text = source.trim();
     if (!text) {
@@ -282,7 +286,6 @@ export function WorkspaceComposer({
             {queuedTurns.length > 0 && (
               <QueuedTurnsPanel
                 items={queuedTurns}
-                running={runState?.status === "running"}
                 editingId={editingQueueId}
                 editValue={queueDraft}
                 onEditValue={setQueueDraft}
@@ -300,7 +303,6 @@ export function WorkspaceComposer({
                 onInsert={insertQueuedTurn}
                 insertingId={insertingQueueId}
                 connected={connection === "connected"}
-                onStartNext={startNextQueuedTurn}
               />
             )}
             {runState && runState.status !== "running" && <RunSummary state={runState} />}
@@ -648,35 +650,18 @@ export function WorkspaceComposer({
                     <span
                       tabIndex={0}
                       className="inline-flex"
-                      aria-label={
-                        blockReason ??
-                        (runState?.status === "running" || pendingApprovals.length
-                          ? "加入消息队列"
-                          : connection === "connected"
-                            ? "发送消息"
-                            : "连接后发送消息")
-                      }
+                      aria-label={blockReason ?? sendLabel}
                     >
                       <Button
                         size="icon"
                         className="size-8 rounded-lg"
                         onClick={send}
                         disabled={Boolean(blockReason)}
-                        aria-label={
-                          blockReason ??
-                          (runState?.status === "running" && workspaceSettings.sendMode === "steer"
-                            ? "直接插入消息"
-                            : runState?.status === "running" || pendingApprovals.length
-                              ? "加入消息队列"
-                              : "发送消息")
-                        }
+                        aria-label={blockReason ?? sendLabel}
                       >
                         {preparingAttachments ? (
                           <LoaderCircle className="size-4 animate-spin" />
-                        ) : runState?.status === "running" &&
-                        workspaceSettings.sendMode === "steer" ? (
-                          <Send className="size-4" />
-                        ) : runState?.status === "running" || pendingApprovals.length ? (
+                        ) : queueOnly ? (
                           <ListPlus className="size-4" />
                         ) : (
                           <Send className="size-4" />
@@ -686,11 +671,7 @@ export function WorkspaceComposer({
                   </TooltipTrigger>
                   <TooltipContent>
                     {blockReason ??
-                      (runState?.status === "running" && workspaceSettings.sendMode === "steer"
-                        ? "直接插入消息"
-                        : runState?.status === "running" || pendingApprovals.length
-                          ? "加入消息队列"
-                          : "发送消息")}
+                      (queueOnly ? "加入队列，点击“直接插入”才会发送" : sendLabel)}
                   </TooltipContent>
                 </Tooltip>
               </div>

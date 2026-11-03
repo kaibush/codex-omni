@@ -221,7 +221,7 @@ export function RuntimeSettingsTabs({
   const sendFields = compact ? (
     <div className="grid gap-2">
       <label className="field-label">
-        运行中发送方式
+        消息发送方式
         <Select
           value={settings.sendMode}
           onValueChange={(value) => patch({ sendMode: value as WorkspaceSettings["sendMode"] })}
@@ -243,14 +243,14 @@ export function RuntimeSettingsTabs({
         />
       </label>
       <p className="text-xs leading-5 text-muted-foreground">
-        直接插入会在当前工具调用完成后继续；排队等待会在当前任务结束后启动。继续触发词可在系统设置里编辑。
+        排队等待会保留消息，只有点击队列中的“直接插入”才发送；直接插入模式会立即发送，运行中在当前工具调用完成后继续。继续触发词可在系统设置里编辑。
       </p>
     </div>
   ) : (
     <SettingsFormGrid>
       <SettingsSelect
-        label="运行中发送方式"
-        hint="直接插入会在当前工具调用完成后继续执行；排队等待会在当前任务结束后启动。"
+        label="消息发送方式"
+        hint="排队等待会一直保留消息，只有点击队列中的“直接插入”才发送。直接插入模式会立即发送，运行中在当前工具调用完成后继续。"
         value={settings.sendMode}
         onValueChange={(value) => patch({ sendMode: value })}
         options={[

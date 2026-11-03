@@ -6,7 +6,7 @@ import path from "node:path";
 const USER = "admin";
 const PASSWORD = "password12";
 
-export async function ensureWorkspace(page: Page) {
+export async function ensureWorkspace(page: Page, sendMode: "queue" | "steer" = "steer") {
   await page.goto("/");
   const setup = page.getByText("设置管理员账户");
   const login = page.getByText("登录工作台");
@@ -22,6 +22,13 @@ export async function ensureWorkspace(page: Page) {
     await page.getByRole("button", { name: "登录" }).click();
   }
   await expect(page.getByRole("button", { name: "新建对话" })).toBeVisible();
+  const { csrfToken } = await apiJson<{ csrfToken: string }>(page.request, "/api/auth/session");
+  const settings = await apiJson<Record<string, unknown>>(page.request, "/api/settings");
+  await apiJson(page.request, "/api/settings", {
+    method: "PUT",
+    csrf: csrfToken,
+    data: { ...settings, sendMode }
+  });
 }
 
 export async function apiJson<T>(
@@ -40,7 +47,7 @@ export async function apiJson<T>(
     error?: string;
     message?: string;
   };
-  if (!response.ok) {
+  if (!response.ok()) {
     throw new Error(body.message ?? body.error ?? `HTTP ${response.status}`);
   }
   return body;

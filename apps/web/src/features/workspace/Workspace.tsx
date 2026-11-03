@@ -2156,12 +2156,14 @@ export function Workspace() {
       restoreLiveTimeline(false);
       const clientId = createId();
       const now = Date.now();
+      const queueOnly = workspaceSettings.sendMode === "queue";
       const steering =
         runState?.status === "running" &&
-        workspaceSettings.sendMode === "steer" &&
+        !queueOnly &&
         socket.current?.readyState === WebSocket.OPEN;
       const command = JSON.stringify({
         type: steering ? "turn.steer" : "turn.enqueue",
+        ...(!steering ? { autoStart: !queueOnly } : {}),
         clientId,
         projectId,
         sessionId,
@@ -2194,6 +2196,7 @@ export function Workspace() {
             providerId: chosenProviderId,
             message: composed.message,
             options: {
+              autoStart: !queueOnly,
               ...(chosenModel ? { model: chosenModel } : {}),
               sandbox: workspaceSettings.sandbox,
               approvalPolicy: workspaceSettings.approvalPolicy,
@@ -2215,14 +2218,18 @@ export function Workspace() {
       if (socket.current?.readyState === WebSocket.OPEN) {
         socket.current.send(command);
         setSendNotice(
-          steering
-            ? "已插入当前对话"
-            : runState?.status === "running" || pendingApprovals.length
-              ? "已加入消息队列"
+          queueOnly
+            ? "已加入队列，点击“直接插入”才会发送"
+            : steering
+              ? "已插入当前对话"
               : "正在启动任务"
         );
       } else {
-        setSendNotice("连接正在恢复，连接成功后会自动发送");
+        setSendNotice(
+          queueOnly
+            ? "消息已暂存，连接恢复后同步到队列，点击“直接插入”才会发送"
+            : "连接正在恢复，连接成功后会自动发送"
+        );
         setConnection("reconnecting");
       }
       if (!usingOverride) {
@@ -2374,13 +2381,6 @@ export function Workspace() {
     setInsertingQueueId(queueId);
     socket.current.send(JSON.stringify({ type: "queue.steer", sessionId, queueId }));
     setSendNotice("正在插入队列消息");
-  };
-  const startNextQueuedTurn = () => {
-    if (socket.current?.readyState !== WebSocket.OPEN) {
-      setSendNotice("连接恢复后再开始下一条消息");
-      return;
-    }
-    socket.current.send(JSON.stringify({ type: "queue.start-next", sessionId }));
   };
   const beginRenameSession = (session: Session) => {
     setRenamingSessionId(session.id);
@@ -2865,7 +2865,6 @@ export function Workspace() {
                   moveQueuedTurn={moveQueuedTurn}
                   insertQueuedTurn={insertQueuedTurn}
                   insertingQueueId={insertingQueueId}
-                  startNextQueuedTurn={startNextQueuedTurn}
                   selectedProvider={selectedProvider ?? undefined}
                   mentionRange={mentionRange}
                   slashOpen={slashOpen}

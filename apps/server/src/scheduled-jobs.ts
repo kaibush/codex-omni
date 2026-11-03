@@ -40,6 +40,7 @@ export function startScheduledJobs(store: Store, runs: RunManager) {
         }
         runs.enqueueTurn({
           type: "turn.enqueue",
+          autoStart: true,
           projectId: project.id,
           sessionId: session.id,
           message: job.prompt,

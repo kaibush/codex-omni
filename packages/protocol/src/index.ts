@@ -281,6 +281,8 @@ export const runCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("turn.enqueue"),
     clientId: z.string().min(1).max(120).optional(),
+    // Omitted/false keeps the message pending until an explicit queue action.
+    autoStart: z.boolean().optional(),
     projectId: z.string(),
     sessionId: z.string(),
     message: z.string().min(1),

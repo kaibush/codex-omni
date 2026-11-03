@@ -3,8 +3,8 @@ import {
   ChevronUp,
   CornerDownLeft,
   ListPlus,
+  LoaderCircle,
   Pencil,
-  Play,
   Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import { queuePreviewText, queuedAttachmentMeta } from "@/features/workspace/com
 
 export function QueuedTurnsPanel({
   items,
-  running,
   connected,
   insertingId,
   editingId,
@@ -25,11 +24,9 @@ export function QueuedTurnsPanel({
   onSaveEdit,
   onRemove,
   onMove,
-  onInsert,
-  onStartNext
+  onInsert
 }: {
   items: QueuedTurn[];
-  running: boolean;
   connected: boolean;
   insertingId: string;
   editingId: string;
@@ -41,24 +38,13 @@ export function QueuedTurnsPanel({
   onRemove: (id: string) => void;
   onMove: (id: string, direction: "up" | "down") => void;
   onInsert: (id: string) => void;
-  onStartNext: () => void;
 }) {
   return (
     <section className="mb-2 overflow-hidden rounded-xl border border-border bg-muted/45">
       <header className="flex min-h-9 items-center gap-2 border-b border-border px-3 text-xs">
         <ListPlus className="size-3.5 text-primary" />
         <b>待发送 · {items.length}</b>
-        {!running && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="ml-auto h-7 px-2 text-xs"
-            onClick={onStartNext}
-          >
-            <Play className="size-3.5" /> 继续下一条
-          </Button>
-        )}
+        <span className="ml-auto text-muted-foreground">点击插入图标后发送</span>
       </header>
       <div className="max-h-48 overflow-y-auto">
         {items.map((item, index) => {
@@ -122,15 +108,18 @@ export function QueuedTurnsPanel({
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      title={connected ? "跳过排队，直接插入当前对话" : "连接恢复后可直接插入"}
+                      size="icon"
+                      className="size-8 rounded-lg"
+                      title={connected ? "直接插入" : "连接恢复后可直接插入"}
                       aria-label="直接插入队列消息"
                       disabled={!connected || Boolean(insertingId)}
                       onClick={() => onInsert(item.id)}
                     >
-                      <CornerDownLeft data-icon="inline-start" />
-                      {insertingId === item.id ? "正在插入" : "直接插入"}
+                      {insertingId === item.id ? (
+                        <LoaderCircle className="animate-spin" />
+                      ) : (
+                        <CornerDownLeft />
+                      )}
                     </Button>
                     <button
                       type="button"
