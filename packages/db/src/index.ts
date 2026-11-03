@@ -193,12 +193,13 @@ export type RecentRunSessionRow = Pick<
   | "startedAt"
   | "endedAt"
   | "reason"
-> & Pick<SessionRow, "kind" | "clientType"> & {
-  sessionTitle: string;
-  projectName: string;
-  providerName: string | null;
-  sessionCreatedAt: number;
-};
+> &
+  Pick<SessionRow, "kind" | "clientType"> & {
+    sessionTitle: string;
+    projectName: string;
+    providerName: string | null;
+    sessionCreatedAt: number;
+  };
 export type ApprovalRow = {
   id: string;
   runId: string;
@@ -212,11 +213,12 @@ export type ApprovalRow = {
   createdAt: number;
   resolvedAt: number | null;
 };
-export type ApprovalListItem = ApprovalRow & Pick<SessionRow, "kind" | "clientType"> & {
-  projectId: string;
-  projectName: string;
-  sessionTitle: string;
-};
+export type ApprovalListItem = ApprovalRow &
+  Pick<SessionRow, "kind" | "clientType"> & {
+    projectId: string;
+    projectName: string;
+    sessionTitle: string;
+  };
 export type ApprovalStats = {
   total: number;
   pending: number;
@@ -1762,7 +1764,7 @@ export class Store {
     transaction();
     return this.getSession(sessionId);
   }
-  forkSession(sourceId: string, messageId?: string) {
+  forkSession(sourceId: string, messageId?: string, options: { before?: boolean } = {}) {
     const source = this.getSession(sourceId);
     if (!source) return undefined;
     const conversation = this.listMessages(sourceId).filter(
@@ -1770,7 +1772,15 @@ export class Store {
     );
     const index = messageId ? conversation.findIndex((message) => message.id === messageId) : -1;
     if (messageId && index < 0) return undefined;
-    const copied = messageId ? conversation.slice(0, index + 1) : conversation;
+    const selected = messageId
+      ? conversation.slice(0, index + (options.before ? 0 : 1))
+      : conversation;
+    // A streamed assistant message may start before a steered user request and
+    // finish after it. Its final text is not a valid snapshot of that boundary.
+    const pointTime = conversation[index]?.createdAt ?? Infinity;
+    const copied = options.before
+      ? selected.filter((message) => message.role === "user" || message.updatedAt <= pointTime)
+      : selected;
     return this.db.transaction(() => {
       const target = this.createSession({
         projectId: source.projectId,
@@ -1797,6 +1807,104 @@ export class Store {
         });
       }
       return target;
+    })();
+  }
+  rewindSession(sourceId: string, messageId: string, mode: "fork" | "current") {
+    return this.db.transaction(() => {
+      const fail = (message: string, statusCode: number): never => {
+        throw Object.assign(new Error(message), { statusCode });
+      };
+      const source = this.getSession(sourceId);
+      if (!source) return fail("对话不存在", 404);
+      if (source.kind !== "chat") return fail("终端对话不支持消息回退", 400);
+      const point = this.getMessage(messageId);
+      if (!point || point.sessionId !== sourceId) return fail("回退位置不存在，请刷新对话", 404);
+      if (point.role !== "user" && point.role !== "assistant")
+        return fail("请选择用户消息或助手回复作为回退位置", 400);
+      const before = point.role === "user";
+      if (mode === "fork") {
+        const session = this.forkSession(sourceId, messageId, { before })!;
+        return { session, backupSessionId: null, draft: before ? point : null };
+      }
+      if (
+        source.status === "running" ||
+        this.db
+          .prepare("SELECT 1 FROM runs WHERE session_id=? AND status='running' LIMIT 1")
+          .get(sourceId)
+      )
+        return fail("请先停止当前任务，再回退对话", 409);
+      if (this.listQueuedTurns(sourceId).length)
+        return fail("请先处理或移除待发送队列，再回退当前对话", 409);
+
+      const backup = this.createSession({
+        projectId: source.projectId,
+        title: `${source.title} (回退前备份)`,
+        providerId: source.providerId,
+        model: source.model,
+        clientType: source.clientType,
+        parentSessionId: sourceId,
+        continuationMode: "fork"
+      });
+      this.updateSession(backup.id, { threadId: source.threadId, status: source.status });
+      // A common id prefix preserves ordering even when timestamps are equal.
+      // Preserve the complete timeline and native thread in the backup.
+      this.db
+        .prepare(
+          `INSERT INTO messages
+        (id,session_id,role,content,provider_id,event_type,item_id,data_json,created_at,updated_at)
+        SELECT @backupId || ':' || id,@backupId,role,content,provider_id,event_type,
+          CASE WHEN item_id=@sourceId || ':current-run' THEN @backupId || ':current-run' ELSE item_id END,
+          data_json,created_at,updated_at
+        FROM messages WHERE session_id=@sourceId`
+        )
+        .run({ backupId: backup.id, sourceId });
+      this.db
+        .prepare(
+          `INSERT INTO message_stars(message_id,session_id,created_at)
+        SELECT @backupId || ':' || message_id,@backupId,created_at FROM message_stars
+        WHERE session_id=@sourceId`
+        )
+        .run({ backupId: backup.id, sourceId });
+      this.db
+        .prepare(
+          `UPDATE run_events SET session_id=@backupId,
+        event_json=CASE WHEN json_type(event_json,'$.payload.messageId')='text'
+          THEN json_set(event_json,'$.sessionId',@backupId,'$.payload.messageId',@backupId || ':' || json_extract(event_json,'$.payload.messageId'))
+          ELSE json_set(event_json,'$.sessionId',@backupId) END
+        WHERE session_id=@sourceId`
+        )
+        .run({ backupId: backup.id, sourceId });
+      for (const table of ["runs", "approval_requests", "checkpoints"]) {
+        this.db
+          .prepare(`UPDATE ${table} SET session_id=? WHERE session_id=?`)
+          .run(backup.id, sourceId);
+      }
+      this.db
+        .prepare(
+          `DELETE FROM messages WHERE session_id=@sourceId AND
+        (created_at>@createdAt OR (created_at=@createdAt AND id${before ? ">=" : ">"}@messageId))`
+        )
+        .run({ sourceId, createdAt: point.createdAt, messageId });
+      this.db.prepare("DELETE FROM messages WHERE session_id=? AND role='run'").run(sourceId);
+      if (before)
+        this.db
+          .prepare("DELETE FROM messages WHERE session_id=? AND role='assistant' AND updated_at>?")
+          .run(sourceId, point.createdAt);
+      this.db
+        .prepare(
+          `UPDATE sessions SET thread_id=NULL,status='idle',continuation_mode='rewind',
+        updated_at=@now,last_message_at=(SELECT MAX(created_at) FROM messages
+          WHERE session_id=@sourceId AND role IN ('user','assistant')) WHERE id=@sourceId`
+        )
+        .run({ sourceId, now: Date.now() });
+      this.db
+        .prepare("UPDATE sessions SET last_message_at=? WHERE id=?")
+        .run(source.lastMessageAt, backup.id);
+      return {
+        session: this.getSession(sourceId)!,
+        backupSessionId: backup.id,
+        draft: before ? point : null
+      };
     })();
   }
   enqueueTurn(input: {

@@ -268,6 +268,29 @@ export class RunManager {
     return true;
   }
 
+  rewindSession(sessionId: string, messageId: string, mode: "fork" | "current") {
+    if (
+      mode === "current" &&
+      (this.activeRuns.has(sessionId) ||
+        this.worker.isActive(sessionId) ||
+        this.failureRetryAborters.has(sessionId) ||
+        this.steeringQueuedTurns.has(sessionId))
+    ) {
+      throw Object.assign(new Error("请先停止当前任务，再回退对话"), { statusCode: 409 });
+    }
+    const result = this.store.rewindSession(sessionId, messageId, mode);
+    if (mode === "current") {
+      this.cancelling.delete(sessionId);
+      this.reconnecting.delete(sessionId);
+      this.broadcast(sessionId, {
+        type: "session.rewound",
+        sessionId,
+        payload: { session: result.session, backupSessionId: result.backupSessionId }
+      });
+    }
+    return result;
+  }
+
   notifyThreadGoal(sessionId: string, goal: ThreadGoal | null) {
     this.broadcast(sessionId, {
       type: "thread.goal.updated",

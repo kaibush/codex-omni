@@ -112,6 +112,8 @@ import {
 } from "@/features/workspace/DeleteSessionsDialog";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
+import { RewindSessionDialog, type RewindMode } from "@/features/workspace/RewindSessionDialog";
+import { messageRewindDraft } from "@/features/workspace/message-rewind";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
 import { ProviderDialog } from "@/features/workspace/ProviderDialog";
 import { ProjectFilesPanel } from "@/features/workspace/ProjectFilesPanel";
@@ -232,6 +234,8 @@ export function Workspace() {
   const [newProject, setNewProject] = useState(false);
   const [pathProject, setPathProject] = useState<Project | null>(null);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [rewindMessageId, setRewindMessageId] = useState("");
+  const [rewinding, setRewinding] = useState(false);
   const [sessionDeletion, setSessionDeletion] = useState<{
     sessions: SessionToDelete[];
     onSuccess?: () => void;
@@ -718,6 +722,53 @@ export function Workspace() {
   providerIdRef.current = providerId;
   const workspaceSettingsRef = useRef(workspaceSettings);
   workspaceSettingsRef.current = workspaceSettings;
+  const resetRewoundSession = useCallback(
+    async (session: Session) => {
+      historyRequestId.current += 1;
+      historyLoadingRef.current = false;
+      historyExpanded.current = false;
+      historyScrollSnapshot.current = null;
+      liveEventsRef.current = [];
+      eventsRef.current = [];
+      stickToBottom.current = true;
+      setEvents([]);
+      setRunState(null);
+      setHistoryCursor(null);
+      setHasOlderMessages(false);
+      setHistoryLoading(false);
+      setFollowingLive(true);
+      setHasDeferredLiveEvents(false);
+      setTimelineLockId(undefined);
+      setMessageHits([]);
+      setHighlightMessageId("");
+      replayCursors.current.delete(session.id);
+      try {
+        localStorage.removeItem(replayCursorKey(session.id));
+      } catch {
+        /* Optional replay cache. */
+      }
+      await qc.cancelQueries({ queryKey: ["session", session.id] });
+      qc.setQueryData<SessionDetailPage>(["session", session.id], {
+        session,
+        messages: [],
+        latestRun: null,
+        hasMore: false,
+        nextCursor: null,
+        threadGoal: null
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["session", session.id] }),
+        qc.invalidateQueries({ queryKey: ["session-outline", session.id] }),
+        qc.invalidateQueries({ queryKey: ["sessions", session.projectId] }),
+        qc.invalidateQueries({ queryKey: ["active-runs"] }),
+        qc.invalidateQueries({ queryKey: ["recent-run-sessions"] }),
+        qc.invalidateQueries({ queryKey: ["run-stats"] }),
+        qc.invalidateQueries({ queryKey: ["approvals"] }),
+        qc.invalidateQueries({ queryKey: ["approval-stats"] })
+      ]);
+    },
+    [qc]
+  );
   useEffect(() => {
     persistComposerProviderId(providerId);
   }, [providerId]);
@@ -879,8 +930,26 @@ export function Workspace() {
       if (event.sessionId !== sessionId) return;
       const payload = (event.payload ?? {}) as Record<string, any>;
 
+      if (event.type === "session.rewound" && payload.session) {
+        timelineUpdates = [];
+        if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
+        timelineFlushTimer = undefined;
+        settledTurn = false;
+        void resetRewoundSession(payload.session);
+        return;
+      }
+
       if (event.type === "session.snapshot") {
         const snapshot = payload as SessionSnapshot;
+        // Hidden tabs can miss session.rewound. Rebuild their history when they
+        // subscribe again instead of merging a shorter history into stale rows.
+        const replaceHistory = snapshot.session?.continuationMode === "rewind";
+        if (replaceHistory && snapshot.session) {
+          timelineUpdates = [];
+          if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
+          timelineFlushTimer = undefined;
+          void resetRewoundSession(snapshot.session);
+        }
         settledTurn = Boolean(
           (snapshot.run && snapshot.run.status !== "running") ||
           (!snapshot.run &&
@@ -888,7 +957,7 @@ export function Workspace() {
             snapshot.session.status !== "idle" &&
             snapshot.session.status !== "running")
         );
-        if (snapshot.session) {
+        if (snapshot.session && !replaceHistory) {
           qc.setQueriesData<Session[]>({ queryKey: ["sessions", projectId] }, (current) =>
             current?.map((item) =>
               item.id === snapshot.session.id ? { ...item, ...snapshot.session } : item
@@ -1248,7 +1317,7 @@ export function Workspace() {
       }
       if (ws.readyState === WebSocket.OPEN) ws.close();
     };
-  }, [pageVisible, sessionId, projectId, qc, reconnectNonce]);
+  }, [pageVisible, sessionId, projectId, qc, reconnectNonce, resetRewoundSession]);
   const activeProject = projects.data?.find((p) => p.id === projectId);
   activeProjectRef.current = activeProject;
   const activeSession =
@@ -1986,16 +2055,21 @@ export function Workspace() {
     }> = [];
     if (files.length) {
       if (!projectId) throw new Error("请先选择工程");
-      try {
-        await api(`/api/projects/${projectId}/files`, {
-          method: "POST",
-          body: JSON.stringify({ path: ATTACHMENT_UPLOAD_DIR, type: "directory" })
-        });
-      } catch (error) {
-        const notice = error instanceof Error ? error.message : String(error);
-        if (!notice.includes("已存在")) throw error;
-      }
+      if (files.some((file) => !file.existingPath))
+        try {
+          await api(`/api/projects/${projectId}/files`, {
+            method: "POST",
+            body: JSON.stringify({ path: ATTACHMENT_UPLOAD_DIR, type: "directory" })
+          });
+        } catch (error) {
+          const notice = error instanceof Error ? error.message : String(error);
+          if (!notice.includes("已存在")) throw error;
+        }
       for (const file of files) {
+        if (file.existingPath) {
+          uploaded.push({ name: file.name, path: file.existingPath, kind: file.kind });
+          continue;
+        }
         const path = attachmentUploadPath(file.name);
         const copy = new ArrayBuffer(file.bytes.byteLength);
         new Uint8Array(copy).set(file.bytes);
@@ -2382,6 +2456,61 @@ export function Workspace() {
       toast.success("已创建分叉会话");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "分叉失败");
+    }
+  };
+  const rewindSession = async (mode: RewindMode) => {
+    if (!rewindMessageId || rewinding || !sessionId) return;
+    setRewinding(true);
+    try {
+      const originalDraft = stringifyComposerDraft(input, attachments);
+      const result = await api<{
+        session: Session;
+        backupSessionId: string | null;
+        draft: Message | null;
+      }>(`/api/sessions/${sessionId}/rewind`, {
+        method: "POST",
+        body: JSON.stringify({ messageId: rewindMessageId, mode })
+      });
+      const draft = messageRewindDraft(result.draft);
+      const preservedId = result.backupSessionId ?? sessionId;
+      try {
+        localStorage.setItem(`codex-omni:draft:${projectId}:${preservedId}`, originalDraft);
+        localStorage.setItem(
+          `codex-omni:draft:${projectId}:${result.session.id}`,
+          stringifyComposerDraft(draft.text, draft.attachments)
+        );
+      } catch {
+        toast.message("对话已回退，但浏览器空间不足，无法持久保存输入草稿");
+      }
+      if (mode === "fork") {
+        continuedDraft.current = { sessionId: result.session.id, value: draft };
+        await qc.invalidateQueries({ queryKey: ["sessions", result.session.projectId] });
+        openWorkspace(result.session.projectId, result.session.id, false, "chat");
+      } else {
+        await resetRewoundSession(result.session);
+        setInput(draft.text);
+        setAttachments(draft.attachments);
+        setAttachError("");
+        setReconnectNonce((value) => value + 1);
+      }
+      setRewindMessageId("");
+      requestAnimationFrame(() => inputRef.current?.focus());
+      toast.success(
+        mode === "fork" ? "已分叉并回退，可以修改后继续" : "已回退，原对话已保存为备份",
+        result.backupSessionId
+          ? {
+              action: {
+                label: "查看备份",
+                onClick: () =>
+                  openWorkspace(result.session.projectId, result.backupSessionId!, false, "chat")
+              }
+            }
+          : undefined
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "回退失败");
+    } finally {
+      setRewinding(false);
     }
   };
   const reloadSession = () => {
@@ -2775,6 +2904,7 @@ export function Workspace() {
                   inputRef={inputRef}
                   submitMessage={submitMessage}
                   retryMessage={retryMessage}
+                  onRewind={(item) => setRewindMessageId(item.messageId ?? item.id)}
                   quoteToInput={quoteToInput}
                   copyMessageLink={copyMessageLink}
                   setCreateFile={setCreateFile}
@@ -3044,6 +3174,20 @@ export function Workspace() {
               }
             );
           }}
+        />
+      ) : null}
+      {rewindMessageId ? (
+        <RewindSessionDialog
+          key={rewindMessageId}
+          messageId={rewindMessageId}
+          currentBlocked={
+            runState?.status === "running" ||
+            activeSession?.status === "running" ||
+            queuedTurns.length > 0
+          }
+          busy={rewinding}
+          onCancel={() => setRewindMessageId("")}
+          onConfirm={(mode) => void rewindSession(mode)}
         />
       ) : null}
       <NewSessionDialog

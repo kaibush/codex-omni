@@ -17,6 +17,7 @@ export type ComposerAttachment = {
   text?: string;
   previewUrl?: string;
   bytes: Uint8Array;
+  existingPath?: string;
 };
 
 export type SerializedComposerAttachment = {
@@ -28,6 +29,7 @@ export type SerializedComposerAttachment = {
   text?: string;
   previewUrl?: string;
   bytesBase64?: string;
+  existingPath?: string;
 };
 
 export type ComposerDraft = {
@@ -379,6 +381,7 @@ export function serializeAttachment(item: ComposerAttachment): SerializedCompose
     kind: item.kind,
     ...(item.text ? { text: item.text } : {}),
     ...(item.previewUrl ? { previewUrl: item.previewUrl } : {}),
+    ...(item.existingPath ? { existingPath: item.existingPath } : {}),
     bytesBase64: bytesToBase64(item.bytes)
   };
 }
@@ -386,13 +389,15 @@ export function serializeAttachment(item: ComposerAttachment): SerializedCompose
 export function deserializeAttachment(
   item: SerializedComposerAttachment
 ): ComposerAttachment | null {
-  const bytes = item.bytesBase64
-    ? base64ToBytes(item.bytesBase64)
-    : item.previewUrl?.includes("base64,")
-      ? base64ToBytes(item.previewUrl.slice(item.previewUrl.indexOf("base64,") + 7))
-      : item.text
-        ? new TextEncoder().encode(item.text)
-        : undefined;
+  const bytes = item.existingPath
+    ? new Uint8Array()
+    : item.bytesBase64
+      ? base64ToBytes(item.bytesBase64)
+      : item.previewUrl?.includes("base64,")
+        ? base64ToBytes(item.previewUrl.slice(item.previewUrl.indexOf("base64,") + 7))
+        : item.text
+          ? new TextEncoder().encode(item.text)
+          : undefined;
   if (!bytes) return null;
   return {
     id: item.id,
@@ -402,6 +407,7 @@ export function deserializeAttachment(
     kind: item.kind,
     ...(item.text ? { text: item.text } : {}),
     ...(item.previewUrl ? { previewUrl: item.previewUrl } : {}),
+    ...(item.existingPath ? { existingPath: item.existingPath } : {}),
     bytes
   };
 }
@@ -442,7 +448,8 @@ export function stringifyComposerDraft(text: string, attachments: ComposerAttach
     size: item.size,
     mime: item.mime,
     kind: item.kind,
-    ...(item.text ? { text: item.text } : {})
+    ...(item.text ? { text: item.text } : {}),
+    ...(item.existingPath ? { existingPath: item.existingPath } : {})
   }));
   json = JSON.stringify(payload);
   if (json.length <= DRAFT_PERSIST_LIMIT) return json;

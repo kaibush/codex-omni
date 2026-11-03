@@ -1584,6 +1584,15 @@ app.post("/api/sessions/:id/fork", { preHandler: auth }, async (req, reply) => {
   if (!forked) return reply.code(404).send({ error: "Session not found" });
   return forked;
 });
+app.post("/api/sessions/:id/rewind", { preHandler: auth }, async (req) => {
+  const body = z
+    .object({
+      messageId: z.string().min(1),
+      mode: z.enum(["fork", "current"]).default("fork")
+    })
+    .parse(req.body ?? {});
+  return runs.rewindSession(routeId(req), body.messageId, body.mode);
+});
 app.post("/api/sessions/:id/clear-runs", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);
   const session = store.getSession(id);

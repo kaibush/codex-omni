@@ -1773,15 +1773,15 @@ button.user-attachment-path {
     white-space: nowrap;
   }
   .message-event-title {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     white-space: nowrap;
   }
   .message-actions {
     min-width: 0;
-    flex: 0 1 auto;
+    flex: 1 0 100%;
     overflow-x: auto;
     flex-wrap: nowrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
     scrollbar-width: none;
   }
   .copy-button-message {

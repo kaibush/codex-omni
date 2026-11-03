@@ -107,6 +107,7 @@ export function WorkspaceTimeline({
   workspaceSettings,
   providerNames,
   forkSessionFrom,
+  onRewind,
   setOpenFileRequest,
   setInput,
   setAttachments,
@@ -170,6 +171,7 @@ export function WorkspaceTimeline({
   workspaceSettings: WorkspaceSettings;
   providerNames: Map<string, string>;
   forkSessionFrom: (messageId?: string, sourceId?: string) => void;
+  onRewind: (item: TimelineItem) => void;
   setWorkspaceView: (view: "chat" | "files" | "git" | "terminal" | "terminal-chat") => void;
   setOpenFileRequest: (path: string, line: number | null) => void;
   setInput: Dispatch<SetStateAction<string>>;
@@ -627,7 +629,15 @@ export function WorkspaceTimeline({
                       onReply={onReply}
                       onOpenThread={onOpenThread}
                       onFork={
-                        item.kind === "user" ? () => void forkSessionFrom(item.id) : undefined
+                        item.kind === "user"
+                          ? () => void forkSessionFrom(item.messageId ?? item.id)
+                          : undefined
+                      }
+                      onRewind={
+                        (item.kind === "user" || item.kind === "assistant") &&
+                        item.streaming !== true
+                          ? () => onRewind(item)
+                          : undefined
                       }
                       onEdit={
                         item.kind === "user"

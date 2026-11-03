@@ -60,12 +60,18 @@ export function switchSessionProvider(store: Store, sessionId: string, providerI
 
 export function runtimeHistoryContext(store: Store, sessionId: string, providerId: string) {
   const session = store.getSession(sessionId);
-  if (!session || session.threadId || session.continuationMode !== "fork") return null;
+  if (!session || session.threadId || !["fork", "rewind"].includes(session.continuationMode ?? ""))
+    return null;
   const provider = store.getProvider(providerId);
   if (!provider || clientType(provider.kind) !== session.clientType) return null;
-  // Text snapshots are reserved for explicitly created forks/continuations.
+  // A rewind detaches the old native thread so later messages cannot leak back
+  // into the next request. Only the retained conversation enters the snapshot.
   // Provider switches resume the current native thread, including tool history.
-  return buildForkContext(session.parentSessionId ?? sessionId, store.conversationSince(sessionId));
+  return buildForkContext(
+    session.parentSessionId ?? sessionId,
+    store.conversationSince(sessionId),
+    session.continuationMode === "rewind" ? "rewind" : "fork"
+  );
 }
 
 export function updateSessionModel(

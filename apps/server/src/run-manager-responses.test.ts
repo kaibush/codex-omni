@@ -234,4 +234,49 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
     expect(store!.getSession(fork.id)?.threadId).not.toBe("parent-thread-not-to-resume");
     expect(store!.getSession(session.id)?.threadId).toBe("parent-thread-not-to-resume");
   }, 25_000);
+
+  it("rewinds the current session onto a fresh thread without sending discarded history", async () => {
+    const { requests, session, run } = await fixture(() => ({ text: "已完成检查。" }));
+    store!.updateSession(session.id, { threadId: "old-thread-must-stay-in-backup" });
+    const keep = store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "RETAINED_CONTEXT",
+      providerId: session.providerId,
+      eventType: "user.message",
+      createdAt: 1
+    });
+    const point = store!.addMessage({
+      sessionId: session.id,
+      role: "user",
+      content: "RETRACTED_REQUEST",
+      providerId: session.providerId,
+      eventType: "user.message",
+      createdAt: 2
+    });
+    store!.addMessage({
+      sessionId: session.id,
+      role: "assistant",
+      content: "RETRACTED_ANSWER",
+      providerId: session.providerId,
+      eventType: "assistant.completed",
+      createdAt: 3
+    });
+    const result = manager!.rewindSession(session.id, point.id, "current");
+    expect(result.draft?.content).toBe("RETRACTED_REQUEST");
+    expect(store!.getSession(session.id)?.threadId).toBeNull();
+    await run("REVISED_REQUEST", session.id);
+    expect(requests).toHaveLength(1);
+    const input = JSON.stringify(requests[0]?.body.input);
+    expect(input).toContain("rewind-history");
+    expect(input).toContain(keep.content);
+    expect(input).toContain("REVISED_REQUEST");
+    expect(input).not.toContain("RETRACTED_REQUEST");
+    expect(input).not.toContain("RETRACTED_ANSWER");
+    expect(store!.getSession(session.id)?.threadId).toBeTruthy();
+    expect(store!.getSession(session.id)?.threadId).not.toBe("old-thread-must-stay-in-backup");
+    expect(store!.getSession(result.backupSessionId!)?.threadId).toBe(
+      "old-thread-must-stay-in-backup"
+    );
+  }, 25_000);
 });

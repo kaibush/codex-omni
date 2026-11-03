@@ -107,9 +107,8 @@ export function QueuedTurnsPanel({
                   <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
-                      className="size-8 rounded-lg"
                       title={connected ? "直接插入" : "连接恢复后可直接插入"}
                       aria-label="直接插入队列消息"
                       disabled={!connected || Boolean(insertingId)}
@@ -121,42 +120,50 @@ export function QueuedTurnsPanel({
                         <CornerDownLeft />
                       )}
                     </Button>
-                    <button
+                    <Button
                       type="button"
-                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                      variant="ghost"
+                      size="icon"
                       aria-label="上移队列消息"
+                      title="上移队列消息"
                       disabled={index === 0}
                       onClick={() => onMove(item.id, "up")}
                     >
-                      <ChevronUp className="size-3.5" />
-                    </button>
-                    <button
+                      <ChevronUp />
+                    </Button>
+                    <Button
                       type="button"
-                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                      variant="ghost"
+                      size="icon"
                       aria-label="下移队列消息"
+                      title="下移队列消息"
                       disabled={index === items.length - 1}
                       onClick={() => onMove(item.id, "down")}
                     >
-                      <ChevronDown className="size-3.5" />
-                    </button>
-                    <button
+                      <ChevronDown />
+                    </Button>
+                    <Button
                       type="button"
-                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                      variant="ghost"
+                      size="icon"
                       aria-label="编辑队列消息"
+                      title="编辑队列消息"
                       disabled={insertingId === item.id}
                       onClick={() => onBeginEdit(item)}
                     >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
+                      <Pencil />
+                    </Button>
+                    <Button
                       type="button"
-                      className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      variant="ghost"
+                      size="icon"
                       aria-label="删除队列消息"
+                      title="删除队列消息"
                       disabled={insertingId === item.id}
                       onClick={() => onRemove(item.id)}
                     >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                      <Trash2 />
+                    </Button>
                   </div>
                 </div>
               )}

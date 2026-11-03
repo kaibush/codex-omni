@@ -368,7 +368,7 @@ export function WorkspaceComposer({
                       {item.name}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
-                      {formatBytes(item.size)}
+                      {item.existingPath ? "已保存" : formatBytes(item.size)}
                     </span>
                     <button
                       type="button"
@@ -388,7 +388,10 @@ export function WorkspaceComposer({
               <p className="px-2 pb-1 text-[11px] text-destructive">{attachError}</p>
             ) : null}
             {preparingAttachments ? (
-              <p role="status" className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground">
+              <p
+                role="status"
+                className="flex items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground"
+              >
                 <LoaderCircle className="size-3.5 animate-spin" />
                 正在处理附件，大图片会自动压缩…
               </p>
@@ -670,8 +673,7 @@ export function WorkspaceComposer({
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {blockReason ??
-                      (queueOnly ? "加入队列，点击“直接插入”才会发送" : sendLabel)}
+                    {blockReason ?? (queueOnly ? "加入队列，点击“直接插入”才会发送" : sendLabel)}
                   </TooltipContent>
                 </Tooltip>
               </div>

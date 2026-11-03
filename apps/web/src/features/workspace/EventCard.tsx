@@ -19,6 +19,7 @@ import {
   CircleAlert,
   CircleHelp,
   Copy,
+  CornerUpLeft,
   Download,
   FileCode2,
   FilePlus,
@@ -709,6 +710,7 @@ type EventCardProps = {
   onApproval?: ApprovalHandler;
   onStopTask?: ((taskId: string) => void) | undefined;
   onFork?: (() => void) | undefined;
+  onRewind?: (() => void) | undefined;
   onOpenFile?: ((path: string, line: number | null) => void) | undefined;
   onOpenThread?: ((threadId: string) => boolean | void) | undefined;
   onReply?: ((text: string) => void) | undefined;
@@ -748,6 +750,7 @@ function areEventCardPropsEqual(prev: EventCardProps, next: EventCardProps) {
     sameHandler(prev.onApproval, next.onApproval) &&
     sameHandler(prev.onStopTask, next.onStopTask) &&
     sameHandler(prev.onFork, next.onFork) &&
+    sameHandler(prev.onRewind, next.onRewind) &&
     sameHandler(prev.onOpenFile, next.onOpenFile) &&
     sameHandler(prev.onOpenThread, next.onOpenThread) &&
     sameHandler(prev.onReply, next.onReply) &&
@@ -776,6 +779,7 @@ function EventCardComponent({
   onApproval,
   onStopTask,
   onFork,
+  onRewind,
   onOpenFile,
   onOpenThread,
   onReply,
@@ -835,6 +839,17 @@ function EventCardComponent({
           )}
           {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
           <span className="message-actions">
+            {onRewind ? (
+              <button
+                type="button"
+                className="copy-button copy-button-message"
+                aria-label="回退到此处"
+                title="回退到此处"
+                onClick={onRewind}
+              >
+                <CornerUpLeft aria-hidden="true" />
+              </button>
+            ) : null}
             {onEdit ? (
               <button
                 type="button"
@@ -933,6 +948,17 @@ function EventCardComponent({
           {item.streaming && <span className="stream-dot" />}
           {item.createdAt ? <EventTime value={item.createdAt} className="ml-auto" /> : null}
           <span className="message-actions">
+            {onRewind ? (
+              <button
+                type="button"
+                className="copy-button copy-button-message"
+                aria-label="回退到此处"
+                title="回退到此处"
+                onClick={onRewind}
+              >
+                <CornerUpLeft aria-hidden="true" />
+              </button>
+            ) : null}
             {onQuote ? (
               <button
                 type="button"

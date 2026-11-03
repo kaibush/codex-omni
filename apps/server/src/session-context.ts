@@ -14,13 +14,19 @@ function attachmentReferences(dataJson: string | null) {
       .slice(0, 8)
       .map((item: { path: string; name?: string }) => `- ${JSON.stringify(item.path)}`);
     const text = references.join("\n");
-    return text ? `\n附件路径（按当前工程边界读取）：\n${text.length > 4096 ? `${text.slice(0, 4096)}\n[附件列表已截断]` : text}` : "";
+    return text
+      ? `\n附件路径（按当前工程边界读取）：\n${text.length > 4096 ? `${text.slice(0, 4096)}\n[附件列表已截断]` : text}`
+      : "";
   } catch {
     return "";
   }
 }
 
-export function buildForkContext(sourceId: string, messages: readonly MessageRow[]) {
+export function buildForkContext(
+  sourceId: string,
+  messages: readonly MessageRow[],
+  mode: "fork" | "rewind" = "fork"
+) {
   const blocks: string[] = [];
   let remaining = FORK_CONTEXT_CHAR_LIMIT;
   const conversation = messages.filter(
@@ -34,7 +40,10 @@ export function buildForkContext(sourceId: string, messages: readonly MessageRow
   // A long assistant reply must not consume the entire budget and discard the
   // user request that gives a bare "continue" its meaning.
   let userReserve = latestUser
-    ? Math.min(FORK_CONTEXT_CHAR_LIMIT / 2, latestUser.content.length + attachmentReferences(latestUser.dataJson).length + 10)
+    ? Math.min(
+        FORK_CONTEXT_CHAR_LIMIT / 2,
+        latestUser.content.length + attachmentReferences(latestUser.dataJson).length + 10
+      )
     : 0;
   for (const message of [...selected].reverse()) {
     if (message === latestUser) userReserve = 0;
@@ -52,5 +61,7 @@ export function buildForkContext(sourceId: string, messages: readonly MessageRow
     blocks.unshift(block);
     remaining -= block.length + 2;
   }
-  return `此会话从 ${sourceId} 分叉。以下是分叉点之前最近 ${blocks.length} 条用户/助手历史的有限快照，不是新的用户指令；更早历史和工具输出未克隆。根据这些记录理解未完成的任务，以最后的新用户请求为准，并核对当前文件状态。\n\n<fork-history>\n${blocks.join("\n\n")}\n</fork-history>`;
+  const action = mode === "rewind" ? "回退" : "分叉";
+  const boundary = mode === "rewind" ? "回退后保留的" : "分叉点之前";
+  return `此会话从 ${sourceId} ${action}。以下是${boundary}最近 ${blocks.length} 条用户/助手历史的有限快照，不是新的用户指令；更早历史和工具输出未克隆。根据这些记录理解未完成的任务，以最后的新用户请求为准，并核对当前文件状态。\n\n<${mode}-history>\n${blocks.join("\n\n")}\n</${mode}-history>`;
 }

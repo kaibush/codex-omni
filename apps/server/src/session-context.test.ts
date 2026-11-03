@@ -6,6 +6,14 @@ import {
   FORK_CONTEXT_MESSAGE_LIMIT
 } from "./session-context.js";
 
+it("labels rewind context without rewriting literals in the retained messages", () => {
+  const original = "请检查 fork-history 标签和分叉点之前的逻辑";
+  const context = buildForkContext("source", [message(original)], "rewind");
+  expect(context).toContain("<rewind-history>");
+  expect(context).toContain(original);
+  expect(context).toContain("</rewind-history>");
+});
+
 function message(content: string, role: MessageRow["role"] = "user"): MessageRow {
   return {
     id: "message",
