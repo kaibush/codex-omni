@@ -48,7 +48,7 @@ function fixture() {
 describe("rewind concurrency", () => {
   it("blocks a second rewind and sending until native preparation commits", async () => {
     const { session, project, point, finish } = fixture();
-    const pending = manager.rewindSession(session.id, point.id, "current");
+    const pending = manager.rewindSession(session.id, point.id, "current", { backup: true });
     await expect(manager.rewindSession(session.id, point.id, "current")).rejects.toThrow(
       "正在回退"
     );

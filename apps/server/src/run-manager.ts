@@ -270,16 +270,22 @@ export class RunManager {
     return true;
   }
 
-  async rewindSession(sessionId: string, messageId: string, mode: "fork" | "current") {
-    const source = this.store.getSession(sessionId);
-    const point = this.store.getMessage(messageId);
+  async rewindSession(
+    sessionId: string,
+    messageId: string,
+    mode: "fork" | "current",
+    options: { boundary?: "turn" | "after"; backup?: boolean } = {}
+  ) {
+    const { source, point, removedMessages } = this.store.sessionRewindPlan(
+      sessionId,
+      messageId,
+      options.boundary
+    );
     const fail = (message: string, statusCode: number): never => {
       throw Object.assign(new Error(message), { statusCode });
     };
-    if (!source) return fail("对话不存在", 404);
-    if (!point || point.sessionId !== sessionId) return fail("回退位置不存在，请刷新对话", 404);
-    if (source.kind !== "chat" || !["user", "assistant"].includes(point.role))
-      return fail("请选择对话中的用户消息或助手回复作为回退位置", 400);
+    if (mode === "current" && !removedMessages)
+      return fail("这个位置之后没有可回退的消息，请选择撤销整轮", 409);
     if (this.rewindingSessions.has(sessionId)) return fail("对话正在回退，请稍后重试", 409);
     const native = source.clientType === "codex" && Boolean(source.threadId);
     if (
@@ -304,7 +310,7 @@ export class RunManager {
         JSON.stringify(this.store.listMessages(sessionId)) !== JSON.stringify(originalMessages)
       )
         return fail("对话已变更，请刷新后重新选择回退位置", 409);
-      return this.store.rewindSession(sessionId, messageId, mode, threadId);
+      return this.store.rewindSession(sessionId, messageId, mode, threadId, options);
     };
     this.rewindingSessions.add(sessionId);
     let result;
@@ -344,7 +350,7 @@ export class RunManager {
             networkAccessEnabled: false
           },
           originalMessages,
-          messageId,
+          point.id,
           commit
         );
       } else result = commit();

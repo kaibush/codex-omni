@@ -237,8 +237,8 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
     expect(store!.getSession(session.id)?.threadId).toBe("parent-thread-not-to-resume");
   }, 25_000);
 
-  for (const scenario of ["current", "fork", "legacy"] as const) {
-    const mode = scenario === "legacy" ? "current" : scenario;
+  for (const scenario of ["current", "backup", "fork", "legacy"] as const) {
+    const mode = scenario === "fork" ? "fork" : "current";
     it(`rewinds ${scenario} using native history, including real tool calls and results`, async () => {
       const { requests, session, run } = await fixture((index) =>
         index === 0
@@ -276,8 +276,14 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
           db.close();
         }
       }
-      const point = store!.listMessages(session.id).find((m) => m.content === "RETRACTED_REQUEST")!;
-      const result = await manager!.rewindSession(session.id, point.id, mode);
+      const point = store!
+        .listMessages(session.id)
+        .find(
+          (m) => m.content === (scenario === "current" ? "RETRACTED_ANSWER" : "RETRACTED_REQUEST")
+        )!;
+      const result = await manager!.rewindSession(session.id, point.id, mode, {
+        backup: scenario === "backup"
+      });
       expect(result.draft?.content).toBe("RETRACTED_REQUEST");
       expect(result.session.id === session.id).toBe(mode === "current");
       expect(result.session.threadId).toBeTruthy();
@@ -285,8 +291,10 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
       const retainedMessages = JSON.stringify(store!.listMessages(result.session.id));
       expect(retainedMessages).toContain("WORKFLOW_FIXTURE_READ_OK");
       expect(retainedMessages).not.toContain("RETRACTED_TOOL_OUTPUT");
-      const backup = result.backupSessionId ?? session.id;
-      expect(store!.getSession(backup)?.threadId).toBe(originalThread);
+      const backup = result.backupSessionId ?? (mode === "fork" ? session.id : null);
+      if (backup) expect(store!.getSession(backup)?.threadId).toBe(originalThread);
+      else expect(store!.listSessions(session.projectId)).toHaveLength(1);
+      expect(result.removedTurns).toBe(1);
       await run("REVISED_REQUEST", result.session.id);
       expect(requests).toHaveLength(5);
       const input = requests[4]!.body.input as Array<Record<string, unknown>>;
@@ -324,9 +332,11 @@ describe.skipIf(process.platform === "win32")("RunManager with real Responses tr
       expect(empty).not.toContain("REVISED_REQUEST");
       expect(empty).not.toContain("rewind-history");
       // The backup still resumes the complete original native conversation.
-      await run("BACKUP_CONTINUATION", backup);
-      expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_REQUEST");
-      expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_ANSWER");
+      if (backup) {
+        await run("BACKUP_CONTINUATION", backup);
+        expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_REQUEST");
+        expect(JSON.stringify(requests.at(-1)!.body.input)).toContain("RETRACTED_ANSWER");
+      } else expect(store!.listSessions(session.projectId)).toHaveLength(1);
     }, 40_000);
   }
 

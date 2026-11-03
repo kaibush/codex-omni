@@ -41,8 +41,8 @@ async function fixture(page: Page) {
   return { ...created, point, attachment, composer, originalMessages: detail.messages };
 }
 
-for (const mode of ["fork", "current"] as const) {
-  test(`${mode} rewind restores an editable request and attachments while preserving the original history`, async ({
+for (const mode of ["fork", "current", "backup"] as const) {
+  test(`${mode} rewind restores the request and attachments with the selected retention mode`, async ({
     page
   }, testInfo) => {
     const created = await fixture(page);
@@ -59,9 +59,14 @@ for (const mode of ["fork", "current"] as const) {
     await anchor.getByRole("button", { name: "回退到此处", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "回退对话", exact: true });
     await expect(dialog.getByRole("combobox", { name: "回退方式" })).toContainText("回退当前对话");
-    if (mode === "fork") {
+    if (mode !== "current") {
       await dialog.getByRole("combobox", { name: "回退方式" }).click();
-      await page.getByRole("option", { name: "分叉新对话，保留原对话", exact: true }).click();
+      await page
+        .getByRole("option", {
+          name: mode === "fork" ? "分叉新对话，保留原对话" : "回退当前对话，并保存备份",
+          exact: true
+        })
+        .click();
     }
     await expect(dialog).toContainText("项目文件保持当前状态");
     await page.screenshot({ path: testInfo.outputPath(`rewind-${mode}.png`) });
@@ -81,20 +86,32 @@ for (const mode of ["fork", "current"] as const) {
     await expect(composer).toHaveValue("需要回退并重新编辑的请求");
     await expect(page.locator(".composer-attachment")).toContainText("reference.txt");
     await expect(page.locator(".event-card-user")).toHaveCount(1);
-    const originalId = result.backupSessionId ?? created.session.id;
-    const original = await apiJson<{ messages: Message[] }>(
-      page.request,
-      `/api/sessions/${originalId}`
-    );
-    expect(original.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(
-      created.originalMessages.filter((m) => m.role === "user").map((m) => m.content)
-    );
-    expect(
-      await page.evaluate(
-        (key) => JSON.parse(localStorage.getItem(key)!).text,
-        `codex-omni:draft:${created.project.id}:${originalId}`
-      )
-    ).toBe("回退前尚未发送的草稿");
+    const originalId = result.backupSessionId ?? (mode === "fork" ? created.session.id : null);
+    if (originalId) {
+      const original = await apiJson<{ messages: Message[] }>(
+        page.request,
+        `/api/sessions/${originalId}`
+      );
+      expect(original.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(
+        created.originalMessages.filter((m) => m.role === "user").map((m) => m.content)
+      );
+      expect(
+        await page.evaluate(
+          (key) => JSON.parse(localStorage.getItem(key)!).text,
+          `codex-omni:draft:${created.project.id}:${originalId}`
+        )
+      ).toBe("回退前尚未发送的草稿");
+    } else {
+      expect(result.session.id).toBe(created.session.id);
+      expect(
+        await apiJson(page.request, `/api/projects/${created.project.id}/sessions`)
+      ).toHaveLength(1);
+      await expect(
+        page.getByText("当前对话已回退，后续发送将从上方保留的历史继续。可以修改输入后重新发送。", {
+          exact: true
+        })
+      ).toBeVisible();
+    }
     if (observer) {
       await observer.bringToFront();
       await expect(observer.locator(`article[data-message-id="${point.id}"]`)).toHaveCount(0);
@@ -149,10 +166,89 @@ test("rejects another session's anchor and retains the selected assistant respon
   const row = page.locator(".event-card-bot").filter({ hasText: reply.content });
   await row.getByRole("button", { name: "回退到此处", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "回退对话", exact: true });
+  await dialog.getByRole("combobox", { name: "回退位置" }).click();
+  await page.getByRole("option", { name: "保留这条回复，移除后续内容", exact: true }).click();
   await expect(dialog).toContainText("保留这条回复及之前的对话");
   await dialog.getByRole("button", { name: "回退当前对话", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.locator(".event-card-user")).toHaveCount(1);
   await expect(page.getByText("已收到：保留这一轮上下文", { exact: true })).toBeVisible();
   await expect(created.composer).toHaveValue("");
+});
+
+test("undoes successive complete turns from assistant replies in the same conversation", async ({
+  page
+}, testInfo) => {
+  const created = await fixture(page);
+  const currentUrl = page.url();
+  const replies = page.locator(".event-card-bot").filter({
+    has: page.getByRole("button", { name: "回退到此处", exact: true })
+  });
+  for (const index of [0, 1]) {
+    await expect(replies).toHaveCount(2 - index);
+    await replies.last().getByRole("button", { name: "回退到此处", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "回退对话", exact: true });
+    await expect(dialog.getByRole("combobox", { name: "回退位置" })).toContainText("撤销这整轮");
+    await expect(dialog).toContainText("将撤销 1 轮");
+    if (index === 0) await page.screenshot({ path: testInfo.outputPath("undo-turn.png") });
+    await dialog.getByRole("button", { name: "回退当前对话", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page).toHaveURL(currentUrl);
+    await expect(page.locator(".event-card-user")).toHaveCount(1 - index);
+    await expect(replies).toHaveCount(1 - index);
+    await expect(created.composer).toHaveValue(
+      index === 0 ? "需要回退并重新编辑的请求" : "保留这一轮上下文"
+    );
+    expect(
+      await apiJson(page.request, `/api/projects/${created.project.id}/sessions`)
+    ).toHaveLength(1);
+    await page.reload();
+    await expect(page.locator(".event-card-user")).toHaveCount(1 - index);
+    await expect(replies).toHaveCount(1 - index);
+  }
+});
+
+test("replaces cached history even when the browser misses rewind and reconnect notifications", async ({
+  page
+}) => {
+  let suppressSnapshots = false;
+  await page.routeWebSocket("**/api/ws", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      const event = JSON.parse(String(message));
+      if (
+        event.type === "session.rewound" ||
+        (suppressSnapshots && event.type === "session.snapshot")
+      )
+        return;
+      socket.send(message);
+    });
+  });
+  const created = await fixture(page);
+  await expect(page.locator(`article[data-message-id="${created.point.id}"]`)).toBeVisible();
+  suppressSnapshots = true;
+  const result = await apiJson<{ session: Session }>(
+    page.request,
+    `/api/sessions/${created.session.id}/rewind`,
+    {
+      method: "POST",
+      csrf: created.csrf,
+      data: { messageId: created.point.id }
+    }
+  );
+  expect(result.session.id).toBe(created.session.id);
+  // The ordinary detail response must replace the old timeline even without
+  // either WebSocket notification and without navigating away from this page.
+  await page.getByRole("button", { name: "Session 更多操作", exact: true }).click();
+  await page.getByRole("menuitem", { name: "重新加载", exact: true }).click();
+  await expect(page.locator(`article[data-message-id="${created.point.id}"]`)).toHaveCount(0);
+  await expect(page.locator(".event-card-user")).toHaveCount(1);
+  suppressSnapshots = false;
+  await created.composer.fill("回退后的全新请求");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await expect(
+    page.locator(".event-card-bot").filter({ hasText: "回退后的全新请求" })
+  ).toBeVisible();
+  await expect(page.locator(".event-card-user")).toHaveCount(2);
+  await expect(page.locator(`article[data-message-id="${created.point.id}"]`)).toHaveCount(0);
 });

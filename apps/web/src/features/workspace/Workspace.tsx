@@ -112,7 +112,11 @@ import {
 } from "@/features/workspace/DeleteSessionsDialog";
 import { NewProjectDialog } from "@/features/workspace/NewProjectDialog";
 import { NewSessionDialog } from "@/features/workspace/NewSessionDialog";
-import { RewindSessionDialog, type RewindMode } from "@/features/workspace/RewindSessionDialog";
+import {
+  RewindSessionDialog,
+  type RewindMode,
+  type RewindBoundary
+} from "@/features/workspace/RewindSessionDialog";
 import { messageRewindDraft } from "@/features/workspace/message-rewind";
 import { ProviderContinuationDialog } from "@/features/workspace/ProviderContinuationDialog";
 import { ProviderDialog } from "@/features/workspace/ProviderDialog";
@@ -382,6 +386,7 @@ export function Workspace() {
   const stickToBottom = useRef(true);
   const historyLoadingRef = useRef(false);
   const historyRequestId = useRef(0);
+  const historyRevision = useRef(0);
   const historyExpanded = useRef(false);
   const historyScrollSnapshot = useRef<{ height: number; top: number } | null>(null);
   const currentSessionId = useRef(sessionId);
@@ -533,7 +538,8 @@ export function Workspace() {
   }, [projectSort, projects.data]);
   const detail = useQuery({
     queryKey: ["session", sessionId],
-    queryFn: () => api<SessionDetailPage>(`/api/sessions/${sessionId}?limit=${SESSION_PAGE_SIZE}`),
+    queryFn: ({ signal }) =>
+      api<SessionDetailPage>(`/api/sessions/${sessionId}?limit=${SESSION_PAGE_SIZE}`, { signal }),
     enabled: Boolean(sessionId),
     refetchOnWindowFocus: false
   });
@@ -588,6 +594,7 @@ export function Workspace() {
     }
     cachedSessionId.current = sessionId;
     cachedProjectId.current = projectId;
+    historyRevision.current = 0;
     setEvents([]);
     setRunState(null);
     setSendNotice("");
@@ -640,8 +647,42 @@ export function Workspace() {
     }, 200);
     return () => window.clearTimeout(timer);
   }, [attachments, input]);
+  const clearRewoundTimeline = useCallback((session: Session) => {
+    historyRevision.current = session.historyRevision ?? 0;
+    historyRequestId.current += 1;
+    historyLoadingRef.current = false;
+    historyExpanded.current = false;
+    historyScrollSnapshot.current = null;
+    liveEventsRef.current = [];
+    eventsRef.current = [];
+    stickToBottom.current = true;
+    setEvents([]);
+    setRunState(null);
+    setHistoryCursor(null);
+    setHasOlderMessages(false);
+    setHistoryLoading(false);
+    setFollowingLive(true);
+    setHasDeferredLiveEvents(false);
+    setTimelineLockId(undefined);
+    setMessageHits([]);
+    setHighlightMessageId("");
+    replayCursors.current.delete(session.id);
+    try {
+      localStorage.removeItem(replayCursorKey(session.id));
+    } catch {
+      /* Optional replay cache. */
+    }
+  }, []);
   useEffect(() => {
     if (!detail.data || detail.data.session.id !== sessionId) return;
+    const revision = detail.data.session.historyRevision ?? 0;
+    // A rewind replaces history. Neither a late HTTP page nor live rows from
+    // the previous revision may be merged back into the current conversation.
+    if (revision < historyRevision.current) return;
+    if (revision > historyRevision.current) {
+      clearRewoundTimeline(detail.data.session);
+      void qc.invalidateQueries({ queryKey: ["session-outline", sessionId] });
+    }
     const messages = detail.data.messages;
     const historical = messages
       .filter(isVisibleTimelineMessage)
@@ -692,7 +733,15 @@ export function Workspace() {
       setHasOlderMessages(detail.data.hasMore);
     }
     setRunState((current) => reconcileTaskState(current, resolved));
-  }, [detail.data?.messages, detail.data?.latestRun, detail.data?.session.status, sessionId]);
+  }, [
+    detail.data?.messages,
+    detail.data?.latestRun,
+    detail.data?.session.status,
+    detail.data?.session.historyRevision,
+    sessionId,
+    qc,
+    clearRewoundTimeline
+  ]);
   useEffect(() => {
     if (!sessionId || !stickToBottom.current) return;
     const cursor = liveTimelineHistoryCursor(events);
@@ -724,30 +773,18 @@ export function Workspace() {
   workspaceSettingsRef.current = workspaceSettings;
   const resetRewoundSession = useCallback(
     async (session: Session) => {
-      historyRequestId.current += 1;
-      historyLoadingRef.current = false;
-      historyExpanded.current = false;
-      historyScrollSnapshot.current = null;
-      liveEventsRef.current = [];
-      eventsRef.current = [];
-      stickToBottom.current = true;
-      setEvents([]);
-      setRunState(null);
-      setHistoryCursor(null);
-      setHasOlderMessages(false);
-      setHistoryLoading(false);
-      setFollowingLive(true);
-      setHasDeferredLiveEvents(false);
-      setTimelineLockId(undefined);
-      setMessageHits([]);
-      setHighlightMessageId("");
-      replayCursors.current.delete(session.id);
-      try {
-        localStorage.removeItem(replayCursorKey(session.id));
-      } catch {
-        /* Optional replay cache. */
-      }
+      if (
+        currentSessionId.current !== session.id ||
+        (session.historyRevision ?? 0) <= historyRevision.current
+      )
+        return;
+      clearRewoundTimeline(session);
       await qc.cancelQueries({ queryKey: ["session", session.id] });
+      if (
+        currentSessionId.current !== session.id ||
+        (session.historyRevision ?? 0) !== historyRevision.current
+      )
+        return;
       qc.setQueryData<SessionDetailPage>(["session", session.id], {
         session,
         messages: [],
@@ -767,7 +804,7 @@ export function Workspace() {
         qc.invalidateQueries({ queryKey: ["approval-stats"] })
       ]);
     },
-    [qc]
+    [qc, clearRewoundTimeline]
   );
   useEffect(() => {
     persistComposerProviderId(providerId);
@@ -794,7 +831,9 @@ export function Workspace() {
       setEvents((current) => updates.reduce((next, update) => update(next), current));
     };
     const enqueueTimelineUpdate = (update: (current: TimelineItem[]) => TimelineItem[]) => {
+      const revision = historyRevision.current;
       timelineUpdates.push((displayed) => {
+        if (revision !== historyRevision.current) return displayed;
         const following = stickToBottom.current;
         const base = following ? displayed : liveEventsRef.current;
         const next = capLiveTimelineEvents(update(base));
@@ -941,9 +980,10 @@ export function Workspace() {
 
       if (event.type === "session.snapshot") {
         const snapshot = payload as SessionSnapshot;
+        if ((snapshot.session?.historyRevision ?? 0) < historyRevision.current) return;
         // Hidden tabs can miss session.rewound. Rebuild their history when they
         // subscribe again instead of merging a shorter history into stale rows.
-        const replaceHistory = snapshot.session?.continuationMode === "rewind";
+        const replaceHistory = (snapshot.session?.historyRevision ?? 0) > historyRevision.current;
         if (replaceHistory && snapshot.session) {
           timelineUpdates = [];
           if (timelineFlushTimer) window.clearTimeout(timelineFlushTimer);
@@ -964,7 +1004,8 @@ export function Workspace() {
             )
           );
           qc.setQueryData<SessionDetailPage>(["session", sessionId], (current) =>
-            current
+            current &&
+            (current.session.historyRevision ?? 0) === (snapshot.session.historyRevision ?? 0)
               ? {
                   ...current,
                   session: snapshot.session,
@@ -2458,7 +2499,7 @@ export function Workspace() {
       toast.error(error instanceof Error ? error.message : "分叉失败");
     }
   };
-  const rewindSession = async (mode: RewindMode) => {
+  const rewindSession = async (mode: RewindMode, boundary: RewindBoundary) => {
     if (!rewindMessageId || rewinding || !sessionId) return;
     setRewinding(true);
     try {
@@ -2467,14 +2508,22 @@ export function Workspace() {
         session: Session;
         backupSessionId: string | null;
         draft: Message | null;
+        removedMessages: number;
+        removedTurns: number;
       }>(`/api/sessions/${sessionId}/rewind`, {
         method: "POST",
-        body: JSON.stringify({ messageId: rewindMessageId, mode })
+        body: JSON.stringify({
+          messageId: rewindMessageId,
+          mode: mode === "fork" ? "fork" : "current",
+          boundary,
+          backup: mode === "backup"
+        })
       });
       const draft = messageRewindDraft(result.draft);
-      const preservedId = result.backupSessionId ?? sessionId;
+      const preservedId = result.backupSessionId ?? (mode === "fork" ? sessionId : null);
       try {
-        localStorage.setItem(`codex-omni:draft:${projectId}:${preservedId}`, originalDraft);
+        if (preservedId)
+          localStorage.setItem(`codex-omni:draft:${projectId}:${preservedId}`, originalDraft);
         localStorage.setItem(
           `codex-omni:draft:${projectId}:${result.session.id}`,
           stringifyComposerDraft(draft.text, draft.attachments)
@@ -2486,8 +2535,9 @@ export function Workspace() {
         continuedDraft.current = { sessionId: result.session.id, value: draft };
         await qc.invalidateQueries({ queryKey: ["sessions", result.session.projectId] });
         openWorkspace(result.session.projectId, result.session.id, false, "chat");
-      } else {
+      } else if (currentSessionId.current === result.session.id) {
         await resetRewoundSession(result.session);
+        if (currentSessionId.current !== result.session.id) return;
         setInput(draft.text);
         setAttachments(draft.attachments);
         setAttachError("");
@@ -2496,7 +2546,9 @@ export function Workspace() {
       setRewindMessageId("");
       requestAnimationFrame(() => inputRef.current?.focus());
       toast.success(
-        mode === "fork" ? "已分叉并回退，可以修改后继续" : "已回退，原对话已保存为备份",
+        mode === "fork"
+          ? "已分叉并回退，可以修改后继续"
+          : `已在当前对话撤销 ${result.removedTurns} 轮，移除 ${result.removedMessages} 条消息和执行记录`,
         result.backupSessionId
           ? {
               action: {
@@ -3179,6 +3231,7 @@ export function Workspace() {
       {rewindMessageId ? (
         <RewindSessionDialog
           key={rewindMessageId}
+          sessionId={sessionId}
           messageId={rewindMessageId}
           nativeHistory={activeSession?.clientType === "codex" && Boolean(activeSession.threadId)}
           currentBlocked={
@@ -3188,7 +3241,7 @@ export function Workspace() {
           }
           busy={rewinding}
           onCancel={() => setRewindMessageId("")}
-          onConfirm={(mode) => void rewindSession(mode)}
+          onConfirm={(mode, boundary) => void rewindSession(mode, boundary)}
         />
       ) : null}
       <NewSessionDialog

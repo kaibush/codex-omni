@@ -146,6 +146,7 @@ export type Session = {
   model?: string | null;
   parentSessionId?: string | null;
   continuationMode?: string | null;
+  historyRevision?: number;
   lastMessageAt?: number | null;
   pinnedAt?: number | null;
   archivedAt?: number | null;

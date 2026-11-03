@@ -60,6 +60,61 @@ describe("session rewind", () => {
     });
   }
 
+  it("undoes the latest assistant turn in place by default, without creating backup sessions", () => {
+    const { session, project, point, future, reply, first } = fixture();
+    const result = store.rewindSession(session.id, future.id, "current", "prefix-thread");
+    expect(result).toMatchObject({
+      session: { id: session.id, historyRevision: 1, threadId: "prefix-thread" },
+      draft: point,
+      removedTurns: 1,
+      removedMessages: 3,
+      backupSessionId: null
+    });
+    expect(store.listMessages(session.id).map((m) => m.id)).toEqual([first.id, reply.id]);
+    expect(store.listSessions(project.id)).toHaveLength(1);
+    expect(store.listSessions(project.id)[0]?.historyRevision).toBe(1);
+    const next = store.rewindSession(session.id, reply.id, "current");
+    expect(next).toMatchObject({ session: { id: session.id, historyRevision: 2 }, draft: first });
+    expect(store.listMessages(session.id)).toEqual([]);
+    expect(store.listSessions(project.id)).toHaveLength(1);
+  });
+
+  it("refuses a no-op assistant boundary before making a backup or changing native history", () => {
+    const { session, project, future } = fixture();
+    const original = store.getSession(session.id);
+    expect(store.sessionRewindPlan(session.id, future.id, "after").removedMessages).toBe(0);
+    expect(() =>
+      store.rewindSession(session.id, future.id, "current", "new-thread", {
+        boundary: "after",
+        backup: true
+      })
+    ).toThrow("没有可回退的消息");
+    expect(store.getSession(session.id)).toEqual(original);
+    expect(store.listMessages(session.id)).toHaveLength(5);
+    expect(store.listSessions(project.id)).toHaveLength(1);
+  });
+
+  it("removes obsolete run replay when rewinding without a backup", () => {
+    const { session, project, future, reply } = fixture();
+    store.setMessageStarred(future.id, true);
+    store.setMessageStarred(reply.id, true);
+    store.createRun({
+      id: "old-run",
+      sessionId: session.id,
+      projectId: project.id,
+      serviceInstanceId: "test",
+      cwd: "/tmp",
+      startedAt: 1
+    });
+    store.updateRun("old-run", { status: "completed" });
+    store.appendRunEvent("old-run", session.id, 1, JSON.stringify({ type: "assistant.completed" }));
+    store.rewindSession(session.id, future.id, "current");
+    expect(store.listRunEvents("old-run", -1, 10)).toEqual([]);
+    expect(store.getLatestRun(session.id)).toBeUndefined();
+    expect(store.listSessionStars(session.id)).toEqual([reply.id]);
+    expect(store.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
   it("backs up the complete timeline, stars, native thread and run replay before changing the current session", () => {
     const { session, project, point, future, add } = fixture();
     add("run", "OUTDATED_STATUS", 0);
@@ -85,7 +140,9 @@ describe("session rewind", () => {
       })
     );
     const original = store.listMessages(session.id);
-    const result = store.rewindSession(session.id, point.id, "current");
+    const result = store.rewindSession(session.id, point.id, "current", undefined, {
+      backup: true
+    });
     expect(result.session).toMatchObject({
       id: session.id,
       status: "idle",
@@ -118,7 +175,9 @@ describe("session rewind", () => {
 
   it("retains the selected assistant reply and can rewind all the way to an empty conversation", () => {
     const { session, reply, first } = fixture();
-    const branch = store.rewindSession(session.id, reply.id, "fork");
+    const branch = store.rewindSession(session.id, reply.id, "fork", undefined, {
+      boundary: "after"
+    });
     expect(branch.draft).toBeNull();
     expect(store.listMessages(branch.session.id).map((m) => m.content)).toEqual([
       "KEEP_REQUEST",
@@ -137,7 +196,9 @@ describe("session rewind", () => {
     const all = store.listMessages(session.id);
     const point = all.findLast((m) => m.role === "user")!;
     const expected = all.slice(0, all.indexOf(point)).map((m) => m.id);
-    const result = store.rewindSession(session.id, point.id, "current");
+    const result = store.rewindSession(session.id, point.id, "current", undefined, {
+      backup: true
+    });
     expect(store.listMessages(session.id).map((m) => m.id)).toEqual(expected);
     expect(store.listMessages(result.backupSessionId!).map((m) => m.content)).toEqual(
       all.map((m) => m.content)

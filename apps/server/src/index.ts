@@ -1584,14 +1584,33 @@ app.post("/api/sessions/:id/fork", { preHandler: auth }, async (req, reply) => {
   if (!forked) return reply.code(404).send({ error: "Session not found" });
   return forked;
 });
+app.get("/api/sessions/:id/rewind", { preHandler: auth }, async (req) => {
+  const query = z
+    .object({
+      messageId: z.string().min(1),
+      boundary: z.enum(["turn", "after"]).default("turn")
+    })
+    .parse(req.query);
+  const { point, removedMessages, removedTurns } = store.sessionRewindPlan(
+    routeId(req),
+    query.messageId,
+    query.boundary
+  );
+  return { point, removedMessages, removedTurns };
+});
 app.post("/api/sessions/:id/rewind", { preHandler: auth }, async (req) => {
   const body = z
     .object({
       messageId: z.string().min(1),
-      mode: z.enum(["fork", "current"]).default("current")
+      mode: z.enum(["fork", "current"]).default("current"),
+      boundary: z.enum(["turn", "after"]).default("turn"),
+      backup: z.boolean().default(false)
     })
     .parse(req.body ?? {});
-  return runs.rewindSession(routeId(req), body.messageId, body.mode);
+  return runs.rewindSession(routeId(req), body.messageId, body.mode, {
+    boundary: body.boundary,
+    backup: body.backup
+  });
 });
 app.post("/api/sessions/:id/clear-runs", { preHandler: auth }, async (req, reply) => {
   const id = routeId(req);

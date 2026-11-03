@@ -23,9 +23,11 @@ import { api } from "@/lib/api";
 import type { Message } from "@/types";
 import { visibleUserMessageText } from "./composer-attachments";
 
-export type RewindMode = "fork" | "current";
+export type RewindMode = "fork" | "current" | "backup";
+export type RewindBoundary = "turn" | "after";
 
 export function RewindSessionDialog({
+  sessionId,
   messageId,
   currentBlocked,
   nativeHistory,
@@ -33,23 +35,33 @@ export function RewindSessionDialog({
   onCancel,
   onConfirm
 }: {
+  sessionId: string;
   messageId: string;
   currentBlocked: boolean;
   nativeHistory: boolean;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: (mode: RewindMode) => void;
+  onConfirm: (mode: RewindMode, boundary: RewindBoundary) => void;
 }) {
   const [mode, setMode] = useState<RewindMode>("current");
+  const [boundary, setBoundary] = useState<RewindBoundary>("turn");
   const message = useQuery({
     queryKey: ["rewind-message", messageId],
     queryFn: () => api<Message>(`/api/messages/${encodeURIComponent(messageId)}`),
     retry: false
   });
-  let preview = message.data?.content ?? "";
-  if (message.data?.role === "user") {
+  const plan = useQuery({
+    queryKey: ["rewind-plan", sessionId, messageId, boundary],
+    queryFn: () =>
+      api<{ point: Message; removedMessages: number; removedTurns: number }>(
+        `/api/sessions/${sessionId}/rewind?${new URLSearchParams({ messageId, boundary })}`
+      ),
+    retry: false
+  });
+  let preview = plan.data?.point.content ?? "";
+  if (plan.data?.point.role === "user") {
     try {
-      preview = visibleUserMessageText(preview, JSON.parse(message.data.dataJson ?? "{}"));
+      preview = visibleUserMessageText(preview, JSON.parse(plan.data.point.dataJson ?? "{}"));
     } catch {
       /* Show the original message when old attachment metadata is invalid. */
     }
@@ -60,27 +72,44 @@ export function RewindSessionDialog({
         <DialogHeader>
           <DialogTitle>回退对话</DialogTitle>
           <DialogDescription>
-            {message.data?.role === "assistant"
+            {boundary === "after" && message.data?.role === "assistant"
               ? "保留这条回复及之前的对话，从这里继续。"
-              : "回到这条消息发送前，并将原文和附件放回输入框，供你修改后重做。"}
+              : "撤销这一轮及之后的消息、回复和工具记录，将用户原文和附件放回输入框，供你修改后重做。"}
           </DialogDescription>
         </DialogHeader>
-        {message.isPending ? (
+        {plan.isPending ? (
           <p role="status" className="text-sm text-muted-foreground">
             正在加载回退位置…
           </p>
         ) : null}
-        {message.isError ? (
+        {plan.isError ? (
           <Alert variant="destructive">
             <AlertDescription>
-              无法加载这条消息。
-              <Button variant="ghost" onClick={() => void message.refetch()}>
+              {plan.error.message}
+              <Button variant="ghost" onClick={() => void plan.refetch()}>
                 重试
               </Button>
             </AlertDescription>
           </Alert>
         ) : null}
-        {message.data ? (
+        {message.data?.role === "assistant" ? (
+          <Select
+            value={boundary}
+            onValueChange={(value) => setBoundary(value as RewindBoundary)}
+            disabled={busy}
+          >
+            <SelectTrigger aria-label="回退位置" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="turn">撤销这整轮，回到用户消息发送前</SelectItem>
+                <SelectItem value="after">保留这条回复，移除后续内容</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        ) : null}
+        {plan.data ? (
           <blockquote className="max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted p-3 text-sm">
             {preview.slice(0, 2000)}
             {preview.length > 2000 ? "…" : ""}
@@ -97,7 +126,10 @@ export function RewindSessionDialog({
           <SelectContent>
             <SelectGroup>
               <SelectItem value="current" disabled={currentBlocked}>
-                回退当前对话，自动保存备份
+                回退当前对话
+              </SelectItem>
+              <SelectItem value="backup" disabled={currentBlocked}>
+                回退当前对话，并保存备份
               </SelectItem>
               <SelectItem value="fork">分叉新对话，保留原对话</SelectItem>
             </SelectGroup>
@@ -106,8 +138,17 @@ export function RewindSessionDialog({
         <p className="text-sm text-muted-foreground">
           {mode === "fork"
             ? "原对话和输入草稿保留，可随时返回查看。"
-            : "留在当前对话继续，后续消息和原来的输入草稿会保存在「回退前备份」中。"}
+            : mode === "backup"
+              ? "留在当前对话继续，另存一份回退前的完整对话和输入草稿。"
+              : "直接在当前对话移除后续内容，不创建备份对话。"}
         </p>
+        {plan.data ? (
+          <p role="status" className="text-sm">
+            {plan.data.removedMessages
+              ? `将撤销 ${plan.data.removedTurns} 轮，移除 ${plan.data.removedMessages} 条消息和执行记录。`
+              : "这个位置之后没有可回退的消息，请选择撤销整轮。"}
+          </p>
+        ) : null}
         {currentBlocked ? (
           <p className="text-xs text-muted-foreground">
             当前有运行任务或待发送消息。停止任务并处理队列后，可在当前对话回退。
@@ -126,10 +167,19 @@ export function RewindSessionDialog({
             取消
           </Button>
           <Button
-            disabled={busy || !message.isSuccess || (mode === "current" && currentBlocked)}
-            onClick={() => onConfirm(mode)}
+            disabled={
+              busy ||
+              !plan.isSuccess ||
+              (mode !== "fork" && !plan.data?.removedMessages) ||
+              ((mode !== "fork" || nativeHistory) && currentBlocked)
+            }
+            onClick={() => onConfirm(mode, boundary)}
           >
-            {busy ? <LoaderCircle className="animate-spin" /> : <CornerUpLeft />}
+            {busy ? (
+              <LoaderCircle data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <CornerUpLeft data-icon="inline-start" />
+            )}
             {busy ? "正在回退…" : mode === "fork" ? "分叉并回退" : "回退当前对话"}
           </Button>
         </DialogFooter>

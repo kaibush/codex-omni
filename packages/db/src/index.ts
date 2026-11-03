@@ -61,6 +61,7 @@ export type SessionRow = {
   model: string | null;
   parentSessionId: string | null;
   continuationMode: string | null;
+  historyRevision: number;
   lastMessageAt: number | null;
   pinnedAt: number | null;
   archivedAt: number | null;
@@ -427,6 +428,8 @@ export class Store {
         (column) => column.name
       )
     );
+    if (!sessionColumns.has("history_revision"))
+      this.db.exec("ALTER TABLE sessions ADD COLUMN history_revision INTEGER NOT NULL DEFAULT 0");
     if (!sessionColumns.has("pinned_at"))
       this.db.exec("ALTER TABLE sessions ADD COLUMN pinned_at INTEGER");
     if (!sessionColumns.has("archived_at"))
@@ -994,7 +997,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,history_revision as historyRevision,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions
          WHERE project_id=@projectId
@@ -1025,7 +1028,7 @@ export class Store {
     const status = options.status ?? "";
     return this.db
       .prepare(
-        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.model,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
+        `SELECT sessions.id,sessions.project_id as projectId,sessions.thread_id as threadId,sessions.title,sessions.status,sessions.kind,sessions.client_type as clientType,sessions.provider_id as providerId,sessions.model,sessions.parent_session_id as parentSessionId,sessions.continuation_mode as continuationMode,sessions.history_revision as historyRevision,sessions.last_message_at as lastMessageAt,sessions.pinned_at as pinnedAt,sessions.archived_at as archivedAt,sessions.color as color,sessions.icon as icon,sessions.tags_json as tagsJson,sessions.created_at as createdAt,sessions.updated_at as updatedAt,
           projects.name as projectName,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage,
           (SELECT m.content FROM messages m
@@ -1144,7 +1147,7 @@ export class Store {
   getSession(id: string) {
     const row = this.db
       .prepare(
-        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
+        `SELECT id,project_id as projectId,thread_id as threadId,title,status,kind,client_type as clientType,provider_id as providerId,model,parent_session_id as parentSessionId,continuation_mode as continuationMode,history_revision as historyRevision,last_message_at as lastMessageAt,pinned_at as pinnedAt,archived_at as archivedAt,color,icon,tags_json as tagsJson,created_at as createdAt,updated_at as updatedAt,
           (SELECT m.content FROM messages m WHERE m.session_id=sessions.id AND m.role='user' ORDER BY m.created_at, m.id LIMIT 1) as firstUserMessage
          FROM sessions WHERE id=?`
       )
@@ -1815,23 +1818,59 @@ export class Store {
       return target;
     })();
   }
+  sessionRewindPlan(sourceId: string, messageId: string, boundary: "turn" | "after" = "turn") {
+    const fail = (message: string, statusCode: number): never => {
+      throw Object.assign(new Error(message), { statusCode });
+    };
+    const source = this.getSession(sourceId);
+    if (!source) return fail("对话不存在", 404);
+    if (source.kind !== "chat") return fail("终端对话不支持消息回退", 400);
+    const messages = this.listMessages(sourceId);
+    const index = messages.findIndex((message) => message.id === messageId);
+    const selected = messages[index];
+    if (!selected) return fail("回退位置不存在，请刷新对话", 404);
+    if (selected.role !== "user" && selected.role !== "assistant")
+      return fail("请选择用户消息或助手回复作为回退位置", 400);
+    const point =
+      selected.role === "assistant" && boundary === "turn"
+        ? messages.slice(0, index).findLast((message) => message.role === "user")
+        : selected;
+    if (!point) return fail("找不到这轮对话的用户消息，无法撤销整轮", 409);
+    const before = point.role === "user";
+    const pointIndex = messages.findIndex((message) => message.id === point.id);
+    const removed = messages.filter(
+      (message, position) =>
+        message.role !== "run" &&
+        (position > pointIndex ||
+          (before && position === pointIndex) ||
+          (before && message.role === "assistant" && message.updatedAt > point.createdAt))
+    );
+    return {
+      source,
+      point,
+      removedMessages: removed.length,
+      removedTurns: removed.filter((message) => message.role === "user").length
+    };
+  }
   rewindSession(
     sourceId: string,
     messageId: string,
     mode: "fork" | "current",
-    nativeThreadId?: string
+    nativeThreadId?: string,
+    options: { boundary?: "turn" | "after"; backup?: boolean } = {}
   ) {
     return this.db.transaction(() => {
       const fail = (message: string, statusCode: number): never => {
         throw Object.assign(new Error(message), { statusCode });
       };
-      const source = this.getSession(sourceId);
-      if (!source) return fail("对话不存在", 404);
-      if (source.kind !== "chat") return fail("终端对话不支持消息回退", 400);
-      const point = this.getMessage(messageId);
-      if (!point || point.sessionId !== sourceId) return fail("回退位置不存在，请刷新对话", 404);
-      if (point.role !== "user" && point.role !== "assistant")
-        return fail("请选择用户消息或助手回复作为回退位置", 400);
+      const { source, point, removedMessages, removedTurns } = this.sessionRewindPlan(
+        sourceId,
+        messageId,
+        options.boundary
+      );
+      if (mode === "current" && !removedMessages)
+        return fail("这个位置之后没有可回退的消息，请选择撤销整轮", 409);
+      messageId = point.id;
       const before = point.role === "user";
       if (mode === "fork") {
         let session = this.forkSession(sourceId, messageId, {
@@ -1839,7 +1878,13 @@ export class Store {
           includeTimeline: Boolean(nativeThreadId)
         })!;
         if (nativeThreadId) session = this.updateSession(session.id, { threadId: nativeThreadId })!;
-        return { session, backupSessionId: null, draft: before ? point : null };
+        return {
+          session,
+          backupSessionId: null,
+          draft: before ? point : null,
+          removedMessages,
+          removedTurns
+        };
       }
       if (
         source.status === "running" ||
@@ -1851,48 +1896,56 @@ export class Store {
       if (this.listQueuedTurns(sourceId).length)
         return fail("请先处理或移除待发送队列，再回退当前对话", 409);
 
-      const backup = this.createSession({
-        projectId: source.projectId,
-        title: `${source.title} (回退前备份)`,
-        providerId: source.providerId,
-        model: source.model,
-        clientType: source.clientType,
-        parentSessionId: sourceId,
-        continuationMode: "fork"
-      });
-      this.updateSession(backup.id, { threadId: source.threadId, status: source.status });
-      // A common id prefix preserves ordering even when timestamps are equal.
-      // Preserve the complete timeline and native thread in the backup.
-      this.db
-        .prepare(
-          `INSERT INTO messages
+      let backup: SessionRow | undefined;
+      if (options.backup) {
+        backup = this.createSession({
+          projectId: source.projectId,
+          title: `${source.title} (回退前备份)`,
+          providerId: source.providerId,
+          model: source.model,
+          clientType: source.clientType,
+          parentSessionId: sourceId,
+          continuationMode: "fork"
+        });
+        this.updateSession(backup.id, { threadId: source.threadId, status: source.status });
+        // A common id prefix preserves ordering even when timestamps are equal.
+        // Preserve the complete timeline and native thread in the backup.
+        this.db
+          .prepare(
+            `INSERT INTO messages
         (id,session_id,role,content,provider_id,event_type,item_id,data_json,created_at,updated_at)
         SELECT @backupId || ':' || id,@backupId,role,content,provider_id,event_type,
           CASE WHEN item_id=@sourceId || ':current-run' THEN @backupId || ':current-run' ELSE item_id END,
           data_json,created_at,updated_at
         FROM messages WHERE session_id=@sourceId`
-        )
-        .run({ backupId: backup.id, sourceId });
-      this.db
-        .prepare(
-          `INSERT INTO message_stars(message_id,session_id,created_at)
+          )
+          .run({ backupId: backup.id, sourceId });
+        this.db
+          .prepare(
+            `INSERT INTO message_stars(message_id,session_id,created_at)
         SELECT @backupId || ':' || message_id,@backupId,created_at FROM message_stars
         WHERE session_id=@sourceId`
-        )
-        .run({ backupId: backup.id, sourceId });
-      this.db
-        .prepare(
-          `UPDATE run_events SET session_id=@backupId,
+          )
+          .run({ backupId: backup.id, sourceId });
+        this.db
+          .prepare(
+            `UPDATE run_events SET session_id=@backupId,
         event_json=CASE WHEN json_type(event_json,'$.payload.messageId')='text'
           THEN json_set(event_json,'$.sessionId',@backupId,'$.payload.messageId',@backupId || ':' || json_extract(event_json,'$.payload.messageId'))
           ELSE json_set(event_json,'$.sessionId',@backupId) END
         WHERE session_id=@sourceId`
-        )
-        .run({ backupId: backup.id, sourceId });
-      for (const table of ["runs", "approval_requests", "checkpoints"]) {
-        this.db
-          .prepare(`UPDATE ${table} SET session_id=? WHERE session_id=?`)
-          .run(backup.id, sourceId);
+          )
+          .run({ backupId: backup.id, sourceId });
+        for (const table of ["runs", "approval_requests", "checkpoints"]) {
+          this.db
+            .prepare(`UPDATE ${table} SET session_id=? WHERE session_id=?`)
+            .run(backup.id, sourceId);
+        }
+      } else {
+        // Old run replay belongs to the discarded history. Retained tool and
+        // assistant messages stay in the timeline and the native prefix.
+        this.db.prepare("DELETE FROM runs WHERE session_id=?").run(sourceId);
+        this.db.prepare("DELETE FROM checkpoints WHERE session_id=?").run(sourceId);
       }
       this.db
         .prepare(
@@ -1907,18 +1960,21 @@ export class Store {
           .run(sourceId, point.createdAt);
       this.db
         .prepare(
-          `UPDATE sessions SET thread_id=@threadId,status='idle',continuation_mode='rewind',
+          `UPDATE sessions SET thread_id=@threadId,status='idle',continuation_mode='rewind',history_revision=history_revision+1,
         updated_at=@now,last_message_at=(SELECT MAX(created_at) FROM messages
           WHERE session_id=@sourceId AND role IN ('user','assistant')) WHERE id=@sourceId`
         )
         .run({ sourceId, now: Date.now(), threadId: nativeThreadId ?? null });
-      this.db
-        .prepare("UPDATE sessions SET last_message_at=? WHERE id=?")
-        .run(source.lastMessageAt, backup.id);
+      if (backup)
+        this.db
+          .prepare("UPDATE sessions SET last_message_at=? WHERE id=?")
+          .run(source.lastMessageAt, backup.id);
       return {
         session: this.getSession(sourceId)!,
-        backupSessionId: backup.id,
-        draft: before ? point : null
+        backupSessionId: backup?.id ?? null,
+        draft: before ? point : null,
+        removedMessages,
+        removedTurns
       };
     })();
   }

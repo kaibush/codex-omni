@@ -21,6 +21,7 @@ import {
   TerminalSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { SessionIcon } from "@/components/SessionIcon";
 import {
   liveFollowActionFromScroll,
@@ -772,6 +773,13 @@ export function WorkspaceTimeline({
                   </p>
                 </div>
               </div>
+            )}
+            {Boolean(activeSession?.historyRevision) && !runState && (
+              <Alert role="status">
+                <AlertDescription>
+                  当前对话已回退，后续发送将从上方保留的历史继续。可以修改输入后重新发送。
+                </AlertDescription>
+              </Alert>
             )}
             {sessionId && runState?.status === "running" && (
               <RunStatusBubble
