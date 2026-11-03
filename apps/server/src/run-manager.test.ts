@@ -65,6 +65,7 @@ vi.mock("@codex-omni/codex-runtime", async (importOriginal) => ({
 
 import { terminateRecordedWorker } from "@codex-omni/codex-runtime";
 import { RunManager } from "./run-manager.js";
+import { MAX_CONTINUATION_ATTEMPTS } from "./turn-completion.js";
 import { startScheduledJobs } from "./scheduled-jobs.js";
 
 let store: Store | undefined;
@@ -785,6 +786,221 @@ describe("RunManager service instance isolation", () => {
 });
 
 describe("RunManager reconnect state", () => {
+  it("continues repeated tool-only endings and an empty turn until a final answer, preserving context", async () => {
+    const { project, session, socket, sent, imagePath } = attachmentFixture();
+    const attachments = [{ name: "shot.png", path: imagePath, kind: "image" as const }];
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      const call = runtimeMocks.run.mock.calls.length;
+      onEvent(
+        bridgeEvent({ seq: 1, type: "thread.started", payload: { threadId: "original-thread" } })
+      );
+      if (call !== 3) {
+        onEvent(
+          bridgeEvent({
+            seq: 2,
+            type: "assistant.completed",
+            payload: {
+              itemId: "reply",
+              text: call === 6 ? "已完成修改并通过验证。" : "现在检查截图。"
+            }
+          })
+        );
+      }
+      if (call !== 3 && call !== 6) {
+        onEvent(
+          bridgeEvent({
+            seq: 3,
+            type: "tool.output",
+            payload: { itemId: "tool", tool: "view_image", output: "image" }
+          })
+        );
+      }
+      onEvent(
+        bridgeEvent({
+          seq: 4,
+          type: "turn.completed",
+          payload: { hasFinalResponse: call === 6, usage: {} }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "创建 HTML 动画并验证",
+        attachments,
+        model: "custom-model",
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(6);
+    for (const [request] of runtimeMocks.run.mock.calls.slice(1)) {
+      expect(request).toMatchObject({
+        threadId: "original-thread",
+        attachments,
+        model: "custom-model",
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false
+      });
+      expect(request.message).toContain("原始用户请求：\n创建 HTML 动画并验证");
+      expect(request.message).toContain("不要重复已成功的操作");
+    }
+    expect(sent.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+    expect(sent.filter((event) => event.type === "run.interrupted")).toHaveLength(5);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "warning")
+    ).toBe(false);
+    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+    expect(store!.getSession(session.id)?.status).toBe("idle");
+  });
+
+  it("caps tool-only continuation without reporting success or draining automatic queued work", async () => {
+    const { project, session, socket, sent } = fixture();
+    store!.updateSettings({ failureRetryEnabled: true, failureRetryDelayMs: 0 });
+    store!.enqueueTurn({
+      projectId: project.id,
+      sessionId: session.id,
+      message: "next task",
+      optionsJson: '{"autoStart":true}'
+    });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "tool.output",
+          payload: { tool: "command", output: "progress" }
+        })
+      );
+      onEvent(
+        bridgeEvent({ seq: 2, type: "turn.completed", payload: { hasFinalResponse: false } })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "完成工作" },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(MAX_CONTINUATION_ATTEMPTS + 1);
+    expect(store!.getLatestRun(session.id)?.status).toBe("interrupted");
+    expect(store!.listQueuedTurns(session.id)).toHaveLength(1);
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+    expect(
+      sent.some((event) => event.type === "server.error" && event.payload?.kind === "warning")
+    ).toBe(true);
+  });
+
+  it("stops after two consecutive empty native completions", async () => {
+    const { project, session, socket } = fixture();
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({ seq: 1, type: "tool.output", payload: { tool: "client_capabilities" } })
+      );
+      onEvent(
+        bridgeEvent({ seq: 2, type: "turn.completed", payload: { hasFinalResponse: false } })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "完成工作" },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
+    expect(store!.getLatestRun(session.id)?.status).toBe("interrupted");
+  });
+
+  it("preserves the no-progress limit and attachments across a transport retry", async () => {
+    const { project, session, socket, sent, imagePath } = attachmentFixture();
+    const attachments = [{ name: "shot.png", path: imagePath, kind: "image" as const }];
+    store!.updateSettings({ failureRetryEnabled: true, failureRetryDelayMs: 0 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+      onEvent(
+        bridgeEvent({ seq: 1, type: "thread.started", payload: { threadId: "original-thread" } })
+      );
+      onEvent(
+        bridgeEvent(
+          runtimeMocks.run.mock.calls.length === 2
+            ? { seq: 2, type: "run.failed", payload: { message: "429 Too Many Requests" } }
+            : { seq: 2, type: "turn.completed", payload: { hasFinalResponse: false } }
+        )
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "检查截图中的问题",
+        attachments,
+        model: "custom-model",
+        sandbox: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(3);
+    expect(runtimeMocks.run.mock.calls[2]?.[0]).toMatchObject({
+      threadId: "original-thread",
+      attachments,
+      model: "custom-model",
+      sandbox: "read-only",
+      approvalPolicy: "on-request",
+      networkAccessEnabled: false
+    });
+    expect(runtimeMocks.run.mock.calls[2]?.[0].message).toContain(
+      "原始用户请求：\n检查截图中的问题"
+    );
+    expect(sent.filter((event) => event.type === "run.interrupted").at(-1)?.payload).toMatchObject({
+      completionGuard: { recoveryAttempt: 1, noProgressCount: 2 }
+    });
+    expect(sent.some((event) => event.type === "turn.completed")).toBe(false);
+    expect(store!.getLatestRun(session.id)?.status).toBe("interrupted");
+  });
+
+  it.each(["disabled", "plan", "cancelled", "disabled-during-run"] as const)(
+    "respects %s when no final reply is returned",
+    async (mode) => {
+      const { project, session, socket } = fixture();
+      if (mode === "disabled") store!.updateSettings({ continuationEnabled: false });
+      runtimeMocks.run.mockImplementation(async (_request, onEvent) => {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "tool.output",
+            payload: { tool: "command", output: "progress" }
+          })
+        );
+        if (mode === "cancelled") manager!.cancel(session.id);
+        if (mode === "disabled-during-run") store!.updateSettings({ continuationEnabled: false });
+        onEvent(
+          bridgeEvent({ seq: 2, type: "turn.completed", payload: { hasFinalResponse: false } })
+        );
+      });
+      manager = new RunManager(store!, "/tmp/runtime");
+      await manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: session.id,
+          message: "检查项目",
+          ...(mode === "plan" ? { mode } : {})
+        },
+        socket
+      );
+      expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+      expect(store!.getLatestRun(session.id)?.status).toBe(
+        mode === "plan" ? "completed" : mode === "cancelled" ? "cancelled" : "interrupted"
+      );
+    }
+  );
+
   it("adds an execution directive to continuation requests", async () => {
     const { project, provider, session, socket } = fixture();
     runtimeMocks.run.mockImplementation(

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -326,6 +326,44 @@ describe("createCollabRolloutTailer", () => {
       model_context_window: 258400
     });
   });
+});
+
+it("tracks native final answers per turn without reusing a resumed or steered turn's completion", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "omni-final-response-"));
+  try {
+    const dir = path.join(home, "sessions", "2026", "11", "03");
+    mkdirSync(dir, { recursive: true });
+    const threadId = "01a19f51-2e2c-7cd1-8a7f-6ad9727ac6b2";
+    const file = path.join(dir, `rollout-2026-11-03T02-51-00-${threadId}.jsonl`);
+    const line = (payload: Record<string, unknown>) =>
+      JSON.stringify({ type: "event_msg", payload }) + "\n";
+    writeFileSync(file, line({ type: "task_complete", last_agent_message: "old answer" }));
+    const tailer = createCollabRolloutTailer(home);
+    tailer.setThreadId(threadId);
+    tailer.flush();
+    expect(tailer.hasFinalResponse()).toBeUndefined();
+
+    for (const [message, expected] of [
+      [null, false],
+      ["", false],
+      [" \n", false],
+      ["已完成验证。", true],
+      [undefined, undefined]
+    ] as const) {
+      appendFileSync(file, line({ type: "task_started" }));
+      tailer.flush();
+      expect(tailer.hasFinalResponse()).toBeUndefined();
+      appendFileSync(file, line({ type: "task_complete", last_agent_message: message }));
+      expect(tailer.flush()).toEqual([]);
+      expect(tailer.hasFinalResponse()).toBe(expected);
+    }
+    appendFileSync(file, line({ type: "task_complete", last_agent_message: "done" }));
+    tailer.flush();
+    tailer.beginSegment();
+    expect(tailer.hasFinalResponse()).toBeUndefined();
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 describe("extractRolloutToolEvents", () => {

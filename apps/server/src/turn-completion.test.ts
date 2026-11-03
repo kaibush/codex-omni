@@ -17,6 +17,22 @@ const defaults = {
 };
 
 describe("task completion guard", () => {
+  it("rejects a native completion without a final reply even after tools have executed", () => {
+    expect(
+      incompleteTurnReason({ ...defaults, hasExecutionEvidence: true, hasFinalResponse: false })
+    ).toBe("missing-final-response");
+    expect(incompleteTurnReason({ ...defaults, assistantText: "", hasFinalResponse: false })).toBe(
+      "missing-final-response"
+    );
+    expect(
+      incompleteTurnReason({ ...defaults, hasExecutionEvidence: true, hasFinalResponse: true })
+    ).toBeUndefined();
+    expect(
+      incompleteTurnReason({ ...defaults, planMode: true, hasFinalResponse: false })
+    ).toBeUndefined();
+    expect(continuationRetryDirective("missing-final-response")).toContain("不要重复已成功的操作");
+  });
+
   it("detects the original plan-only build turn, not just a continue trigger", () => {
     expect(incompleteTurnReason(defaults)).toBe("plan-only");
     expect(incompleteTurnReason({ ...defaults, message: "继续", continuationApplied: true })).toBe(

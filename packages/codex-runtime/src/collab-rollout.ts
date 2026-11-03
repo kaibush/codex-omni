@@ -303,6 +303,7 @@ export function createCollabRolloutTailer(codexHome: string) {
   let startedAtEnd = false;
   let pinFromEnd = true;
   let latestUsage: Record<string, number> | null = null;
+  let hasFinalResponse: boolean | undefined;
   const pendingTools = new Map<string, string>();
   const emitted = new Set<string>();
 
@@ -349,6 +350,14 @@ export function createCollabRolloutTailer(codexHome: string) {
         if (payload) {
           const usage = parseTokenCountPayload(payload);
           if (usage) latestUsage = usage;
+          if (payload.type === "task_started") hasFinalResponse = undefined;
+          if (payload.type === "task_complete") {
+            const message = payload.last_agent_message;
+            hasFinalResponse =
+              message === null || typeof message === "string"
+                ? typeof message === "string" && Boolean(message.trim())
+                : undefined;
+          }
         }
         const parsed = parseCollabRolloutLine(line, pendingTools, lineOffset);
         if (parsed) {
@@ -367,6 +376,9 @@ export function createCollabRolloutTailer(codexHome: string) {
   };
 
   return {
+    beginSegment() {
+      hasFinalResponse = undefined;
+    },
     setThreadId(id: string, options: { fromEnd?: boolean } = {}) {
       if (threadId === id) return;
       threadId = id;
@@ -376,6 +388,7 @@ export function createCollabRolloutTailer(codexHome: string) {
       buffer = "";
       startedAtEnd = false;
       latestUsage = null;
+      hasFinalResponse = undefined;
       pendingTools.clear();
       emitted.clear();
       pinFile(pinFromEnd);
@@ -388,6 +401,9 @@ export function createCollabRolloutTailer(codexHome: string) {
     },
     latestTokenUsage() {
       return latestUsage;
+    },
+    hasFinalResponse() {
+      return hasFinalResponse;
     }
   };
 }

@@ -39,6 +39,8 @@ import { buildForkContext, FORK_CONTEXT_MESSAGE_LIMIT } from "./session-context.
 import {
   continuationRetryDirective,
   incompleteTurnReason,
+  MAX_CONTINUATION_ATTEMPTS,
+  MAX_CONTINUATION_NO_PROGRESS,
   type ContinuationRetryReason
 } from "./turn-completion.js";
 import {
@@ -100,6 +102,7 @@ function isContinuationRequest(message: string, triggers: unknown) {
 const continuationIgnoredTools = new Set([
   "runtime_error",
   "context_compacted",
+  "client_capabilities",
   "update_plan",
   "todo_list"
 ]);
@@ -124,6 +127,8 @@ function queuedAttachments(options: Record<string, any>): TurnAttachment[] {
 type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }> & {
   continuationRetry?: boolean;
   continuationRetryReason?: ContinuationRetryReason;
+  continuationRetryAttempt?: number;
+  continuationNoProgressCount?: number;
   displayMessage?: string;
   failureRetry?: boolean;
   failureRetryAttempt?: number;
@@ -613,6 +618,15 @@ export class RunManager {
         ? { networkAccessEnabled: command.networkAccessEnabled }
         : {}),
       ...(command.mode === "plan" || command.mode === "execute" ? { mode: command.mode } : {}),
+      ...(command.attachments ? { attachments: command.attachments } : {}),
+      ...(command.continuationRetry
+        ? {
+            continuationRetry: true,
+            continuationRetryReason: command.continuationRetryReason,
+            continuationRetryAttempt: command.continuationRetryAttempt,
+            continuationNoProgressCount: command.continuationNoProgressCount
+          }
+        : {}),
       failureRetry: true,
       failureRetryAttempt: attempt
     };
@@ -1160,6 +1174,8 @@ export class RunManager {
               )
             : null)));
     const continuationRetry = command.continuationRetry === true;
+    const continuationRetryAttempt =
+      command.continuationRetryAttempt ?? (continuationRetry ? 1 : 0);
     const failureRetry = command.failureRetry === true;
     const failureRetryAttempt = command.failureRetryAttempt ?? 0;
     const planMode = !continuationRetry && command.mode === "plan";
@@ -1531,7 +1547,9 @@ export class RunManager {
       const incompleteReason =
         lockedGoal || session.clientType === "claude-code"
           ? undefined
-          : continuationRetry && !hasExecutionEvidence
+          : continuationRetry &&
+              command.continuationRetryReason !== "missing-final-response" &&
+              !hasExecutionEvidence
             ? (command.continuationRetryReason ?? "continuation")
             : incompleteTurnReason({
                 message: command.message,
@@ -1541,15 +1559,27 @@ export class RunManager {
                 latestAssistantText,
                 hasExecutionEvidence,
                 compactedThisTurn,
-                hasPostCompactionExecution
+                hasPostCompactionExecution,
+                ...(typeof terminalPayload.hasFinalResponse === "boolean"
+                  ? { hasFinalResponse: terminalPayload.hasFinalResponse }
+                  : {})
               });
       if (incompleteReason) {
-        const retry = !continuationRetry && settings.continuationEnabled === true;
-        const reason = continuationRetry
-          ? "自动复核后仍未观察到所需执行或验证；任务未确认完成。"
-          : incompleteReason === "compaction"
-            ? "上游在压缩上下文后只回复下一步计划，未继续执行；任务未完成。"
-            : "上游只回复下一步计划，未观察到工具调用或文件变更；任务未完成。";
+        const noProgressCount = hasExecutionEvidence
+          ? 0
+          : (command.continuationNoProgressCount ?? 0) + 1;
+        const retry =
+          this.store.getSettings(runtimeDefaults).continuationEnabled === true &&
+          continuationRetryAttempt < MAX_CONTINUATION_ATTEMPTS &&
+          noProgressCount < MAX_CONTINUATION_NO_PROGRESS;
+        const reason =
+          incompleteReason === "missing-final-response"
+            ? "上游结束了本轮执行，但没有返回最终答复；任务未确认完成。"
+            : continuationRetry
+              ? "自动复核后仍未观察到所需执行或验证；任务未确认完成。"
+              : incompleteReason === "compaction"
+                ? "上游在压缩上下文后只回复下一步计划，未继续执行；任务未完成。"
+                : "上游只回复下一步计划，未观察到工具调用或文件变更；任务未完成。";
         const interrupted: BridgeEvent = {
           ...terminal,
           type: "run.interrupted",
@@ -1561,7 +1591,8 @@ export class RunManager {
               reason: incompleteReason,
               upstreamTerminal: terminal.type,
               sdkTerminal: "turn.completed",
-              recoveryAttempt: continuationRetry ? 1 : 0,
+              recoveryAttempt: continuationRetryAttempt,
+              noProgressCount,
               hasExecutionEvidence,
               compactedThisTurn,
               hasPostCompactionExecution
@@ -1581,7 +1612,7 @@ export class RunManager {
           session.id,
           provider.id,
           requestId,
-          `${reason}${retry ? "正在保留原请求和权限自动复核一次。" : "已停止自动复核，请查看本轮结果后决定是否继续。"}`,
+          `${reason}${retry ? `正在保留原请求和权限自动续接（第 ${continuationRetryAttempt + 1}/${MAX_CONTINUATION_ATTEMPTS} 次）。` : "已停止自动复核，请查看本轮结果后决定是否继续。"}`,
           retry ? "retrying" : "warning"
         );
         if (!retry) return;
@@ -1595,7 +1626,9 @@ export class RunManager {
           providerId: provider.id,
           message: command.message,
           continuationRetry: true,
-          continuationRetryReason: incompleteReason
+          continuationRetryReason: incompleteReason,
+          continuationRetryAttempt: continuationRetryAttempt + 1,
+          continuationNoProgressCount: noProgressCount
         });
         return;
       }
@@ -1611,6 +1644,10 @@ export class RunManager {
       } else if (
         continuationApplied &&
         !hasExecutionEvidence &&
+        !(
+          command.continuationRetryReason === "missing-final-response" &&
+          terminalPayload.hasFinalResponse === true
+        ) &&
         (continuationRetry || assistantText)
       ) {
         this.broadcastContinuationNotice(

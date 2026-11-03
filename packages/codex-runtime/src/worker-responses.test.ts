@@ -30,7 +30,11 @@ afterEach(async () => {
 describe.skipIf(process.platform === "win32")(
   "worker with real CLI and Responses transport",
   () => {
-    async function fixture(truncated = false) {
+    async function fixture(
+      truncated = false,
+      emptyFirstReply = false,
+      toolBeforeEmptyReply = false
+    ) {
       const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
       server = createServer(async (req, res) => {
         let body = "";
@@ -50,30 +54,64 @@ describe.skipIf(process.platform === "win32")(
           content: [{ type: "output_text", text: "fixture completed", annotations: [] }]
         };
         const emit = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+        const emptyReply = emptyFirstReply && requests.length === (toolBeforeEmptyReply ? 2 : 1);
+        const toolReply = toolBeforeEmptyReply && requests.length === 1;
         emit({
           type: "response.created",
           response: { id: "resp-fixture", status: "in_progress", output: [] }
         });
-        emit({
-          type: "response.output_item.added",
-          output_index: 0,
-          item: { ...item, status: "in_progress", content: [] }
-        });
-        emit({
-          type: "response.output_text.delta",
-          item_id: item.id,
-          output_index: 0,
-          content_index: 0,
-          delta: "fixture completed"
-        });
-        emit({ type: "response.output_item.done", output_index: 0, item });
+        if (toolReply) {
+          const progress = {
+            ...item,
+            phase: "commentary",
+            content: [{ type: "output_text", text: "现在检查图片。", annotations: [] }]
+          };
+          const tool = {
+            id: "tool-fixture",
+            type: "function_call",
+            call_id: "call-fixture",
+            name: "view_image",
+            arguments: JSON.stringify({ path: path.join(dir!, "project", "image.png") }),
+            status: "completed"
+          };
+          emit({ type: "response.output_item.added", output_index: 0, item: progress });
+          emit({ type: "response.output_item.done", output_index: 0, item: progress });
+          emit({ type: "response.output_item.added", output_index: 1, item: tool });
+          emit({ type: "response.output_item.done", output_index: 1, item: tool });
+          emit({
+            type: "response.completed",
+            response: {
+              id: "resp-fixture",
+              status: "completed",
+              output: [progress, tool],
+              usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 }
+            }
+          });
+          res.end();
+          return;
+        }
+        if (!emptyReply) {
+          emit({
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { ...item, status: "in_progress", content: [] }
+          });
+          emit({
+            type: "response.output_text.delta",
+            item_id: item.id,
+            output_index: 0,
+            content_index: 0,
+            delta: "fixture completed"
+          });
+          emit({ type: "response.output_item.done", output_index: 0, item });
+        }
         if (!truncated)
           emit({
             type: "response.completed",
             response: {
               id: "resp-fixture",
               status: "completed",
-              output: [item],
+              output: emptyReply ? [] : [item],
               usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 }
             }
           });
@@ -121,6 +159,57 @@ describe.skipIf(process.platform === "win32")(
       };
       return { request, requests };
     }
+
+    it("distinguishes an empty upstream completion from a final answer on the resumed thread", async () => {
+      const { request } = await fixture(false, true);
+      const first: BridgeEvent[] = [];
+      await worker!.run(request, (event) => first.push(event));
+      expect(first.some((event) => event.type === "assistant.completed")).toBe(false);
+      expect(first.at(-1)).toMatchObject({
+        type: "turn.completed",
+        payload: { hasFinalResponse: false }
+      });
+      const threadId = (
+        first.find((event) => event.type === "thread.started")?.payload as { threadId: string }
+      ).threadId;
+      const next: BridgeEvent[] = [];
+      await worker!.run({ ...request, requestId: "resume", threadId }, (event) => next.push(event));
+      expect(next.at(-1)).toMatchObject({
+        type: "turn.completed",
+        payload: { hasFinalResponse: true }
+      });
+    });
+
+    it("does not treat commentary before an image tool as a final answer", async () => {
+      const { request, requests } = await fixture(false, true, true);
+      const events: BridgeEvent[] = [];
+      await worker!.run(request, (event) => events.push(event));
+      expect(requests).toHaveLength(2);
+      expect(events.find((event) => event.type === "assistant.completed")?.payload).toMatchObject({
+        text: "现在检查图片。"
+      });
+      expect(
+        events.some(
+          (event) =>
+            event.type === "tool.output" &&
+            (event.payload as Record<string, unknown>).tool === "view_image"
+        )
+      ).toBe(true);
+      expect(events.find((event) => event.type === "turn.completed")?.payload).toMatchObject({
+        hasFinalResponse: false
+      });
+      const threadId = (
+        events.find((event) => event.type === "thread.started")?.payload as { threadId: string }
+      ).threadId;
+      const resumed: BridgeEvent[] = [];
+      await worker!.run({ ...request, requestId: "resume", threadId }, (event) =>
+        resumed.push(event)
+      );
+      expect(resumed.find((event) => event.type === "turn.completed")?.payload).toMatchObject({
+        hasFinalResponse: true
+      });
+      expect(requests).toHaveLength(3);
+    }, 15_000);
 
     it("completes image turns and resends the image on a resumed turn", async () => {
       const { request, requests } = await fixture();

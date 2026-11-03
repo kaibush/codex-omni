@@ -6,6 +6,7 @@ import {
   createMappedStreamState,
   INCOMPLETE_TURN_MESSAGE,
   incompleteStreamError,
+  observeMappedEvent,
   workerExitError
 } from "./worker-stream.js";
 
@@ -28,6 +29,26 @@ async function* events(...items: ThreadEvent[]) {
 }
 
 describe("worker stream terminal state", () => {
+  it("requires a nonempty completed reply after execution, ignoring runtime notices", () => {
+    const state = createMappedStreamState();
+    const emit = (type: string, payload: Record<string, unknown> = {}) =>
+      observeMappedEvent(state, { type, payload });
+    expect(state.hasFinalResponse).toBe(false);
+    emit("assistant.completed", { text: "现在检查截图。" });
+    for (const type of ["tool.started", "tool.output", "file.change"]) {
+      emit(type, { tool: "command" });
+      expect(state.hasFinalResponse).toBe(false);
+      emit("assistant.completed", { text: "已完成，验证通过。" });
+      expect(state.hasFinalResponse).toBe(true);
+    }
+    emit("tool.output", { tool: "runtime_error", message: "Model metadata missing" });
+    emit("tool.output", { tool: "client_capabilities" });
+    emit("turn.completed");
+    expect(state.hasFinalResponse).toBe(true);
+    emit("assistant.completed", { text: "  " });
+    expect(state.hasFinalResponse).toBe(false);
+  });
+
   it("treats unexpected EOF without turn.completed as an incomplete turn", async () => {
     const normalizer = createNormalizer(request);
     const mapped: string[] = [];

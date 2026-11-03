@@ -6,6 +6,7 @@ export const INCOMPLETE_TURN_MESSAGE = "Codex 流在 turn.completed 前结束，
 export type MappedStreamState = {
   completed: boolean;
   failed: boolean;
+  hasFinalResponse: boolean;
   lastFailureMessage: string;
 };
 
@@ -17,7 +18,7 @@ function eventMessage(payload: unknown) {
 }
 
 export function createMappedStreamState(): MappedStreamState {
-  return { completed: false, failed: false, lastFailureMessage: "" };
+  return { completed: false, failed: false, hasFinalResponse: false, lastFailureMessage: "" };
 }
 
 export function observeMappedEvent(
@@ -25,6 +26,17 @@ export function observeMappedEvent(
   mapped: { type: string; payload?: unknown }
 ) {
   const payload = (mapped.payload ?? {}) as Record<string, unknown>;
+  // agent_message includes progress updates. A reply before the last tool call
+  // cannot establish that the model returned a final answer after that work.
+  if (mapped.type === "assistant.completed") {
+    state.hasFinalResponse = typeof payload.text === "string" && Boolean(payload.text.trim());
+  } else if (
+    mapped.type === "file.change" ||
+    ((mapped.type === "tool.started" || mapped.type === "tool.output") &&
+      !["runtime_error", "context_compacted", "client_capabilities"].includes(String(payload.tool)))
+  ) {
+    state.hasFinalResponse = false;
+  }
   const message = firstUsefulFailureMessage(
     payload.reason,
     payload.message,

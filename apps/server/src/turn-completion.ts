@@ -1,4 +1,8 @@
-export type ContinuationRetryReason = "continuation" | "compaction" | "plan-only";
+export type ContinuationRetryReason =
+  "continuation" | "compaction" | "plan-only" | "missing-final-response";
+
+export const MAX_CONTINUATION_ATTEMPTS = 8;
+export const MAX_CONTINUATION_NO_PROGRESS = 2;
 
 export function isPlanningOnlyRequest(message: string) {
   return /(?:只|仅|先).{0,12}(?:计划|方案|解释|说明|分析)|(?:不要|别|暂不).{0,6}(?:执行|操作|调用工具|运行命令)|\b(?:plan only|only (?:explain|describe|plan)|do not (?:execute|run)|don't (?:execute|run))\b/i.test(
@@ -31,8 +35,10 @@ export function incompleteTurnReason(input: {
   hasExecutionEvidence: boolean;
   compactedThisTurn: boolean;
   hasPostCompactionExecution: boolean;
+  hasFinalResponse?: boolean;
 }): ContinuationRetryReason | undefined {
   if (input.planMode || isPlanningOnlyRequest(input.message)) return undefined;
+  if (input.hasFinalResponse === false) return "missing-final-response";
   if (
     input.compactedThisTurn &&
     !input.hasPostCompactionExecution &&
@@ -47,10 +53,12 @@ export function incompleteTurnReason(input: {
 
 export function continuationRetryDirective(reason: ContinuationRetryReason) {
   const cause =
-    reason === "compaction"
-      ? "上一轮在压缩上下文后只回复了下一步计划，没有继续调用工具。"
-      : reason === "continuation"
-        ? "上一轮继续执行请求没有观察到工具调用或文件变更。"
-        : "上一轮只回复了下一步计划，没有观察到工具调用或文件变更。";
-  return `自动复核：${cause}请保持原始用户请求的目标、限制和运行权限，调用必要工具取得实际结果，不要再只说明计划。只在原请求要求修改时修改文件；如果工作已经完成，请用工具核实。若需要用户补充信息，请明确提问。`;
+    reason === "missing-final-response"
+      ? "上一轮在执行过程中结束，没有给出最终答复，工具执行结束不代表任务完成。"
+      : reason === "compaction"
+        ? "上一轮在压缩上下文后只回复了下一步计划，没有继续调用工具。"
+        : reason === "continuation"
+          ? "上一轮继续执行请求没有观察到工具调用或文件变更。"
+          : "上一轮只回复了下一步计划，没有观察到工具调用或文件变更。";
+  return `自动复核：${cause}请保持原始用户请求的目标、限制和运行权限，从已有进度继续完成剩余工作，不要重复已成功的操作。调用必要工具取得实际结果，不要再只说明计划。只在原请求要求修改时修改文件；如果已有结果足以确认工作完成，请直接给出最终答复，说明结果和验证情况。若需要用户补充信息，请明确提问。`;
 }

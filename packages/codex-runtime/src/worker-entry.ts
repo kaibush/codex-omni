@@ -127,6 +127,7 @@ try {
     : codex.startThread(options);
   let nextInput = buildCodexRunInput(request.message, request.attachments, request.cwd);
   while (true) {
+    collabTailer.beginSegment();
     const segmentState = createMappedStreamState();
     let interruptedForSteer = false;
     const { events } = await thread.runStreamed(nextInput);
@@ -170,12 +171,15 @@ try {
         if (mapped.type === "turn.completed") {
           if (steerInputs.length) return;
           const latest = collabTailer.latestTokenUsage();
-          if (!latest) send(mapped);
-          else {
-            const payload = { ...((mapped.payload ?? {}) as Record<string, unknown>) };
+          const payload = { ...((mapped.payload ?? {}) as Record<string, unknown>) };
+          // Prefer the native task_complete record: tool backfill may arrive
+          // after the final SDK message, and is not a new execution step.
+          payload.hasFinalResponse =
+            collabTailer.hasFinalResponse() ?? segmentState.hasFinalResponse;
+          if (latest) {
             payload.usage = { ...numericUsage(payload.usage), ...numericUsage(latest) };
-            send({ ...mapped, payload });
           }
+          send({ ...mapped, payload });
         } else {
           send(mapped);
         }
