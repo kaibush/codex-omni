@@ -1,4 +1,11 @@
-import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction
+} from "react";
 import { useQueries } from "@tanstack/react-query";
 import { numberedDuplicateTitles } from "@codex-omni/protocol";
 import {
@@ -22,6 +29,7 @@ import {
   KeyRound,
   ListChecks,
   LoaderCircle,
+  LocateFixed,
   MessageSquarePlus,
   MoreHorizontal,
   PanelLeftClose,
@@ -281,6 +289,13 @@ export function WorkspaceSidebar({
   );
   const [selectingProjectId, setSelectingProjectId] = useState("");
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [locateTarget, setLocateTarget] = useState<{
+    projectId: string;
+    sessionId: string;
+  } | null>(null);
+  const projectListRef = useRef<HTMLDivElement>(null);
+  const currentProjectRef = useRef<HTMLDivElement>(null);
+  const currentSessionRef = useRef<HTMLDivElement>(null);
   const expandedProjects = projectList.filter((project) => expandedProjectIds.includes(project.id));
   const sessionQueries = useQueries({
     queries: expandedProjects.map((project) => ({
@@ -360,6 +375,65 @@ export function WorkspaceSidebar({
       return next;
     });
   };
+  const locateCurrentProject = () => {
+    if (!projectId) return;
+    expandProject(projectId);
+    setSidebarCollapsed(false);
+    setLocateTarget({ projectId, sessionId });
+  };
+  // Wait for expansion and session loading to mount the current conversation row.
+  useEffect(() => {
+    if (!locateTarget) return;
+    const container = projectListRef.current;
+    const projectRow = currentProjectRef.current;
+    if (
+      locateTarget.projectId !== projectId ||
+      locateTarget.sessionId !== sessionId ||
+      !container ||
+      !projectRow
+    ) {
+      setLocateTarget(null);
+      return;
+    }
+    const query = projectQueries.get(projectId);
+    if (sessionId && query?.isPending) return;
+    const currentSession = (query?.data ?? projectSessions).find((s) => s.id === sessionId);
+    if (currentSession?.archivedAt && !showArchived) {
+      setShowArchived(true);
+      return;
+    }
+    const target = currentSessionRef.current ?? projectRow;
+    const targetBounds = target.getBoundingClientRect();
+    const containerBounds = container.getBoundingClientRect();
+    container.scrollTo({
+      top:
+        container.scrollTop +
+        targetBounds.top -
+        containerBounds.top -
+        (container.clientHeight - targetBounds.height) / 2,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+    });
+    setLocateTarget(null);
+  });
+  const locateCurrentProjectButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="定位当前项目"
+          disabled={!projectList.some((project) => project.id === projectId)}
+          onClick={locateCurrentProject}
+        >
+          <LocateFixed data-icon="inline-start" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side={sidebarCollapsed && !isMobile ? "right" : "bottom"}>
+        定位当前项目与对话
+      </TooltipContent>
+    </Tooltip>
+  );
 
   return (
     <>
@@ -404,6 +478,7 @@ export function WorkspaceSidebar({
                 </span>
               </button>
             ) : null}
+            {!(sidebarCollapsed && !isMobile) && locateCurrentProjectButton}
             <Button
               variant="ghost"
               size="icon"
@@ -423,6 +498,7 @@ export function WorkspaceSidebar({
           </div>
           {sidebarCollapsed && !isMobile ? (
             <div className="flex min-h-0 flex-1 flex-col items-center gap-1 px-1 py-2">
+              {locateCurrentProjectButton}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -642,7 +718,7 @@ export function WorkspaceSidebar({
                   </span>
                 </button>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-auto px-2 pb-1.5">
+              <div ref={projectListRef} className="mt-1 min-h-0 flex-1 overflow-auto px-2 pb-1.5">
                 <div className="mb-1 flex items-center gap-0.5 px-1 text-[11px] font-medium tracking-wider text-muted-foreground/70 uppercase">
                   <span className="min-w-0 flex-1 truncate">工程项目</span>
                   <DropdownMenu>
@@ -691,6 +767,7 @@ export function WorkspaceSidebar({
                   return (
                     <div key={project.id} className="mb-1" data-project-id={project.id}>
                       <div
+                        ref={project.id === projectId ? currentProjectRef : undefined}
                         className={`project-row group flex w-full items-center gap-0.5 rounded-lg px-1 py-1 text-sm ${project.id === projectId ? "active font-medium" : ""}`}
                       >
                         {renamingProjectId === project.id ? (
@@ -916,6 +993,7 @@ export function WorkspaceSidebar({
                                 return (
                                   <div
                                     key={s.id}
+                                    ref={s.id === sessionId ? currentSessionRef : undefined}
                                     className={`session-row group my-px flex min-h-8 w-full items-center gap-0.5 rounded-md px-1 py-0.5 text-xs ${
                                       s.id === sessionId ? "active" : "text-muted-foreground"
                                     } ${s.archivedAt ? "opacity-75" : ""}`}
