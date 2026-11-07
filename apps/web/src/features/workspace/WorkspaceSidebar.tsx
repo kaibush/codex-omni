@@ -29,7 +29,7 @@ import {
   KeyRound,
   ListChecks,
   LoaderCircle,
-  LocateFixed,
+  MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
   PanelLeftClose,
@@ -422,15 +422,15 @@ export function WorkspaceSidebar({
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="定位当前项目"
+          aria-label={sessionId ? "定位当前对话" : "定位当前项目"}
           disabled={!projectList.some((project) => project.id === projectId)}
           onClick={locateCurrentProject}
         >
-          <LocateFixed data-icon="inline-start" />
+          <MessageSquare data-icon="inline-start" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side={sidebarCollapsed && !isMobile ? "right" : "bottom"}>
-        定位当前项目与对话
+      <TooltipContent side={sidebarCollapsed && !isMobile ? "right" : "top"}>
+        {sessionId ? "展开所在项目并定位当前对话" : "展开并定位当前项目"}
       </TooltipContent>
     </Tooltip>
   );
@@ -478,7 +478,6 @@ export function WorkspaceSidebar({
                 </span>
               </button>
             ) : null}
-            {!(sidebarCollapsed && !isMobile) && locateCurrentProjectButton}
             <Button
               variant="ghost"
               size="icon"
@@ -498,7 +497,6 @@ export function WorkspaceSidebar({
           </div>
           {sidebarCollapsed && !isMobile ? (
             <div className="flex min-h-0 flex-1 flex-col items-center gap-1 px-1 py-2">
-              {locateCurrentProjectButton}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -595,6 +593,7 @@ export function WorkspaceSidebar({
                 })}
               </div>
               <div className="mt-auto flex flex-col items-center gap-1 pb-2">
+                {locateCurrentProjectButton}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -1330,54 +1329,45 @@ export function WorkspaceSidebar({
                   </div>
                 </div>
               ) : null}
-              <div className="border-t border-border bg-background/60 p-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">
-                {host ? (
-                  <button
-                    type="button"
-                    className="sidebar-host"
-                    title="检查更新"
-                    aria-label={`检查更新 v${host.app.version}`}
-                    onClick={() => requestSystemUpdateCheck()}
-                  >
-                    <span title={`版本 v${host.app.version}`}>v{host.app.version}</span>
-                    <span>检查更新</span>
-                  </button>
-                ) : null}
-                <div className="sidebar-status-strip" aria-label="工作台状态">
-                  <span title="运行中的 Session">
-                    <Activity className="size-3" />
-                    运行中 {activeRunsCount}
-                  </span>
-                  <span title="待审批">
-                    <ShieldQuestion className="size-3" />
-                    待审批 {pendingApprovalCount}
-                  </span>
-                  <span
-                    title={
-                      connection === "connected"
-                        ? "服务已连接"
+              <div className="shrink-0 border-t border-border bg-background/60 p-2 pb-[max(.5rem,env(safe-area-inset-bottom))]">
+                <div className="mb-1 flex items-center gap-1">
+                  <div className="sidebar-status-strip min-w-0 flex-1" aria-label="工作台状态">
+                    <span title="运行中的 Session">
+                      <Activity className="size-3" />
+                      运行中 {activeRunsCount}
+                    </span>
+                    <span title="待审批">
+                      <ShieldQuestion className="size-3" />
+                      待审批 {pendingApprovalCount}
+                    </span>
+                    <span
+                      title={
+                        connection === "connected"
+                          ? "服务已连接"
+                          : connection === "reconnecting"
+                            ? "正在重连"
+                            : connection === "connecting"
+                              ? "正在连接"
+                              : "服务已断开"
+                      }
+                    >
+                      {connection === "connected" ? (
+                        <Wifi className="size-3 text-emerald-500" />
+                      ) : connection === "disconnected" ? (
+                        <WifiOff className="size-3 text-red-500" />
+                      ) : (
+                        <LoaderCircle className="size-3 animate-spin text-amber-500" />
+                      )}
+                      {connection === "connected"
+                        ? "已连接"
                         : connection === "reconnecting"
-                          ? "正在重连"
+                          ? "重连中"
                           : connection === "connecting"
-                            ? "正在连接"
-                            : "服务已断开"
-                    }
-                  >
-                    {connection === "connected" ? (
-                      <Wifi className="size-3 text-emerald-500" />
-                    ) : connection === "disconnected" ? (
-                      <WifiOff className="size-3 text-red-500" />
-                    ) : (
-                      <LoaderCircle className="size-3 animate-spin text-amber-500" />
-                    )}
-                    {connection === "connected"
-                      ? "已连接"
-                      : connection === "reconnecting"
-                        ? "重连中"
-                        : connection === "connecting"
-                          ? "连接中"
-                          : "已断开"}
-                  </span>
+                            ? "连接中"
+                            : "已断开"}
+                    </span>
+                  </div>
+                  {locateCurrentProjectButton}
                 </div>
                 <div className="sidebar-tools">
                   <button
@@ -1421,6 +1411,18 @@ export function WorkspaceSidebar({
                     </button>
                   </SettingsToolsMenu>
                 </div>
+                {host ? (
+                  <button
+                    type="button"
+                    className="sidebar-host"
+                    title="检查更新"
+                    aria-label={`检查更新 v${host.app.version}`}
+                    onClick={() => requestSystemUpdateCheck()}
+                  >
+                    <span title={`版本 v${host.app.version}`}>v{host.app.version}</span>
+                    <span>检查更新</span>
+                  </button>
+                ) : null}
               </div>
             </>
           )}
