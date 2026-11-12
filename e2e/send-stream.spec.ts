@@ -34,9 +34,10 @@ test("starts queue mode while idle and automatically sends waiting messages afte
   await composer.fill("queued second");
   await page.getByRole("button", { name: "加入消息队列", exact: true }).click();
   await expect(queue.getByText("queued second", { exact: true })).toBeVisible();
-  await expect(queue.getByRole("button", { name: "直接插入队列消息", exact: true })).toHaveText(
-    "插入"
-  );
+  const insert = queue.getByRole("button", { name: "直接插入队列消息", exact: true });
+  await expect(insert).toHaveText("");
+  await expect(insert).toHaveAttribute("title", "立即插入当前任务");
+  await expect(insert.locator("svg")).toHaveClass(/lucide-send-horizontal/);
   await expect(queue.getByText("当前任务结束后自动发送", { exact: true })).toBeVisible();
   await composer.fill("queued third");
   await page.getByRole("button", { name: "加入消息队列", exact: true }).click();

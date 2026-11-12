@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronUp,
+  Ellipsis,
   ListPlus,
   LoaderCircle,
   Pencil,
@@ -8,6 +9,13 @@ import {
   Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { QueuedTurn } from "@/types";
 import { queuePreviewText, queuedAttachmentMeta } from "@/features/workspace/composer-attachments";
@@ -43,8 +51,11 @@ export function QueuedTurnsPanel({
     <section className="mb-2 overflow-hidden rounded-xl border border-border bg-muted/45">
       <header className="flex min-h-9 items-center gap-2 border-b border-border px-3 text-xs">
         <ListPlus className="size-3.5 text-primary" />
-        <b>待发送 · {items.length}</b>
-        <span className="ml-auto text-muted-foreground">当前任务结束后自动发送</span>
+        <b className="shrink-0">待发送 · {items.length}</b>
+        <span className="ml-auto text-muted-foreground">
+          <span className="sm:hidden">完成后自动发送</span>
+          <span className="hidden sm:inline">当前任务结束后自动发送</span>
+        </span>
       </header>
       <div className="max-h-48 overflow-y-auto">
         {items.map((item, index) => {
@@ -71,20 +82,18 @@ export function QueuedTurnsPanel({
                         onSaveEdit(item.id, editValue);
                     }}
                   />
-                  <div className="mt-1 flex justify-end gap-1">
+                  <div className="mt-1 flex justify-end gap-3 p-1.5 sm:gap-1 sm:p-0">
                     <Button
                       type="button"
-                      size="sm"
                       variant="ghost"
-                      className="h-7"
+                      className="queue-touch-target"
                       onClick={onCancelEdit}
                     >
                       取消
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
-                      className="h-7"
+                      className="queue-touch-target"
                       disabled={!editValue.trim()}
                       onClick={() => onSaveEdit(item.id, editValue)}
                     >
@@ -104,12 +113,13 @@ export function QueuedTurnsPanel({
                       </p>
                     )}
                   </div>
-                  <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
+                  <div className="ml-auto flex shrink-0 items-center gap-3 p-1.5 sm:gap-1 sm:p-0">
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="default"
-                      title={connected ? "直接插入" : "连接恢复后可直接插入"}
+                      variant="outline"
+                      size="icon"
+                      className="queue-touch-target"
+                      title={connected ? "立即插入当前任务" : "连接恢复后可直接插入"}
                       aria-label="直接插入队列消息"
                       disabled={!connected || Boolean(insertingId)}
                       onClick={() => onInsert(item.id)}
@@ -119,52 +129,105 @@ export function QueuedTurnsPanel({
                       ) : (
                         <SendHorizontal data-icon="inline-start" />
                       )}
-                      插入
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="上移队列消息"
-                      title="上移队列消息"
-                      disabled={index === 0}
-                      onClick={() => onMove(item.id, "up")}
-                    >
-                      <ChevronUp />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="下移队列消息"
-                      title="下移队列消息"
-                      disabled={index === items.length - 1}
-                      onClick={() => onMove(item.id, "down")}
-                    >
-                      <ChevronDown />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="编辑队列消息"
-                      title="编辑队列消息"
-                      disabled={insertingId === item.id}
-                      onClick={() => onBeginEdit(item)}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="删除队列消息"
-                      title="删除队列消息"
-                      disabled={insertingId === item.id}
-                      onClick={() => onRemove(item.id)}
-                    >
-                      <Trash2 />
-                    </Button>
+                    <div className="sm:hidden">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="queue-touch-target"
+                            aria-label="队列消息更多操作"
+                          >
+                            <Ellipsis data-icon="inline-start" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" side="top">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem
+                              className="min-h-11"
+                              disabled={index === 0}
+                              onSelect={() => onMove(item.id, "up")}
+                            >
+                              <ChevronUp data-icon="inline-start" />
+                              上移
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="min-h-11"
+                              disabled={index === items.length - 1}
+                              onSelect={() => onMove(item.id, "down")}
+                            >
+                              <ChevronDown data-icon="inline-start" />
+                              下移
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="min-h-11"
+                              disabled={insertingId === item.id}
+                              onSelect={() => onBeginEdit(item)}
+                            >
+                              <Pencil data-icon="inline-start" />
+                              编辑消息
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="min-h-11"
+                              variant="destructive"
+                              disabled={insertingId === item.id}
+                              onSelect={() => onRemove(item.id)}
+                            >
+                              <Trash2 data-icon="inline-start" />
+                              删除消息
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="hidden items-center gap-1 sm:flex">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="上移队列消息"
+                        title="上移队列消息"
+                        disabled={index === 0}
+                        onClick={() => onMove(item.id, "up")}
+                      >
+                        <ChevronUp />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="下移队列消息"
+                        title="下移队列消息"
+                        disabled={index === items.length - 1}
+                        onClick={() => onMove(item.id, "down")}
+                      >
+                        <ChevronDown />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="编辑队列消息"
+                        title="编辑队列消息"
+                        disabled={insertingId === item.id}
+                        onClick={() => onBeginEdit(item)}
+                      >
+                        <Pencil />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="删除队列消息"
+                        title="删除队列消息"
+                        disabled={insertingId === item.id}
+                        onClick={() => onRemove(item.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}

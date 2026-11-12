@@ -314,6 +314,18 @@ input[type="checkbox"] {
   border-color: color-mix(in oklab, var(--ring) 45%, var(--border));
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 14%, transparent);
 }
+
+/* Keep the compact button surface and give fingers a separate 44px target. */
+@media (max-width: 639px) {
+  .queue-touch-target {
+    position: relative;
+  }
+  .queue-touch-target::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+}
 .composer-toolbar {
   display: flex;
   min-width: 0;
