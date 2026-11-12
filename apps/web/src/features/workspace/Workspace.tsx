@@ -2266,7 +2266,7 @@ export function Workspace() {
         socket.current?.readyState === WebSocket.OPEN;
       const command = JSON.stringify({
         type: steering ? "turn.steer" : "turn.enqueue",
-        ...(!steering ? { autoStart: !queueOnly } : {}),
+        ...(!steering ? { autoStart: true } : {}),
         clientId,
         projectId,
         sessionId,
@@ -2299,7 +2299,7 @@ export function Workspace() {
             providerId: chosenProviderId,
             message: composed.message,
             options: {
-              autoStart: !queueOnly,
+              autoStart: true,
               ...(chosenModel ? { model: chosenModel } : {}),
               sandbox: workspaceSettings.sandbox,
               approvalPolicy: workspaceSettings.approvalPolicy,
@@ -2322,7 +2322,7 @@ export function Workspace() {
         socket.current.send(command);
         setSendNotice(
           queueOnly
-            ? "已加入队列，点击“直接插入”才会发送"
+            ? "已加入队列，当前任务结束后自动发送；空闲时立即发送"
             : steering
               ? "已插入当前对话"
               : "正在启动任务"
@@ -2330,7 +2330,7 @@ export function Workspace() {
       } else {
         setSendNotice(
           queueOnly
-            ? "消息已暂存，连接恢复后同步到队列，点击“直接插入”才会发送"
+            ? "消息已暂存，连接恢复后排队发送；空闲时立即发送"
             : "连接正在恢复，连接成功后会自动发送"
         );
         setConnection("reconnecting");

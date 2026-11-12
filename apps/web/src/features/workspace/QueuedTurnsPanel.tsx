@@ -1,10 +1,10 @@
 import {
   ChevronDown,
   ChevronUp,
-  CornerDownLeft,
   ListPlus,
   LoaderCircle,
   Pencil,
+  SendHorizontal,
   Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,7 @@ export function QueuedTurnsPanel({
       <header className="flex min-h-9 items-center gap-2 border-b border-border px-3 text-xs">
         <ListPlus className="size-3.5 text-primary" />
         <b>待发送 · {items.length}</b>
-        <span className="ml-auto text-muted-foreground">点击插入图标后发送</span>
+        <span className="ml-auto text-muted-foreground">当前任务结束后自动发送</span>
       </header>
       <div className="max-h-48 overflow-y-auto">
         {items.map((item, index) => {
@@ -108,17 +108,18 @@ export function QueuedTurnsPanel({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
+                      size="default"
                       title={connected ? "直接插入" : "连接恢复后可直接插入"}
                       aria-label="直接插入队列消息"
                       disabled={!connected || Boolean(insertingId)}
                       onClick={() => onInsert(item.id)}
                     >
                       {insertingId === item.id ? (
-                        <LoaderCircle className="animate-spin" />
+                        <LoaderCircle data-icon="inline-start" className="animate-spin" />
                       ) : (
-                        <CornerDownLeft />
+                        <SendHorizontal data-icon="inline-start" />
                       )}
+                      插入
                     </Button>
                     <Button
                       type="button"

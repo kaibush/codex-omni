@@ -1108,7 +1108,7 @@ export class RunManager {
     this.acknowledgeQueue(command.sessionId, queued.id, "queued");
     this.sendQueueSnapshot(command.sessionId);
     if (command.autoStart === true) {
-      void this.startNextQueued(command.sessionId, true);
+      void this.startNextQueued(command.sessionId);
     }
     return queued;
   }
@@ -1137,17 +1137,10 @@ export class RunManager {
     };
   }
 
-  private async startNextQueued(sessionId: string, automaticOnly = false) {
+  private async startNextQueued(sessionId: string) {
     if (this.steeringQueuedTurns.has(sessionId)) return;
     if (this.activeRuns.has(sessionId) || this.worker.isActive(sessionId)) return;
-    // Legacy rows and manual messages must never be consumed by automatic draining.
-    const item = this.store
-      .listQueuedTurns(sessionId)
-      .find(
-        (entry) =>
-          !automaticOnly ||
-          parseJson<Record<string, unknown>>(entry.optionsJson, {}).autoStart === true
-      );
+    const item = this.store.listQueuedTurns(sessionId)[0];
     if (!item) return;
     try {
       await this.startTurn(this.queuedToCommand(item), item.id);
@@ -1204,7 +1197,7 @@ export class RunManager {
         if (this.steeringQueuedTurns.get(sessionId)?.queueId === queueId)
           this.steeringQueuedTurns.delete(sessionId);
         if (accepted && this.store.getLatestRun(sessionId)?.status === "completed") {
-          void this.startNextQueued(sessionId, true);
+          void this.startNextQueued(sessionId);
         }
       });
     this.steeringQueuedTurns.set(sessionId, { queueId, pending });
@@ -1792,7 +1785,7 @@ export class RunManager {
       const cancelled =
         this.cancelling.has(session.id) || this.store.getRun(requestId)?.status === "cancelled";
       this.cancelling.delete(session.id);
-      if (completed) void this.startNextQueued(session.id, true);
+      if (completed) void this.startNextQueued(session.id);
       else if (!cancelled) {
         try {
           await this.maybeRetryAfterFailure({

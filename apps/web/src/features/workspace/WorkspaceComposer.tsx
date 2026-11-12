@@ -673,7 +673,8 @@ export function WorkspaceComposer({
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {blockReason ?? (queueOnly ? "加入队列，点击“直接插入”才会发送" : sendLabel)}
+                    {blockReason ??
+                      (queueOnly ? "加入队列，当前任务结束后自动发送；空闲时立即发送" : sendLabel)}
                   </TooltipContent>
                 </Tooltip>
               </div>

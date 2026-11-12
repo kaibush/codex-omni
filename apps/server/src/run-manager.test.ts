@@ -2542,7 +2542,7 @@ describe("RunManager steer inserts", () => {
     await running;
   });
 
-  it("keeps other manual messages queued when an insertion is accepted after the run finishes", async () => {
+  it("resumes the queue when an insertion is accepted after the run finishes", async () => {
     const { project, session, socket } = fixture();
     const pending: Array<{ resolve: () => void; onEvent: (event: BridgeEvent) => void }> = [];
     runtimeMocks.run.mockImplementation(
@@ -2585,9 +2585,15 @@ describe("RunManager steer inserts", () => {
     expect(store!.getQueuedTurn("selected")).toBeDefined();
     accept(true);
     await inserting;
-    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(runtimeMocks.run.mock.calls[1]?.[0]).toMatchObject({ message: "after" });
     expect(store!.getQueuedTurn("selected")).toBeUndefined();
-    expect(store!.listQueuedTurns(session.id).map((item) => item.id)).toEqual(["after"]);
+    expect(store!.listQueuedTurns(session.id)).toEqual([]);
+    pending[1]!.onEvent(
+      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
+    );
+    pending[1]!.resolve();
+    await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
     expect(store!.getLatestRun(session.id)?.status).toBe("completed");
   });
 
@@ -2939,7 +2945,7 @@ describe("RunManager recovery and queue", () => {
     await running;
   });
 
-  it("keeps manual messages pending while idle, after reconnect, and after another message completes", async () => {
+  it("automatically drains persisted queued messages after completion and deduplicates replay", async () => {
     const { project, provider, session, socket, sent } = fixture();
     const pending: Array<{ resolve: () => void; onEvent: (event: BridgeEvent) => void }> = [];
     runtimeMocks.run.mockImplementation(
@@ -2989,20 +2995,19 @@ describe("RunManager recovery and queue", () => {
     );
     pending[0]!.resolve();
     await first;
-    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
-    expect(store!.getLatestRun(session.id)?.status).toBe("completed");
-    expect(store!.listQueuedTurns(session.id).map((item) => item.message)).toEqual(["second"]);
-
-    const second = manager.handle(
-      { type: "queue.steer", sessionId: session.id, queueId: "queue-2" },
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(runtimeMocks.run.mock.calls[1]?.[0]).toMatchObject({ message: "second" });
+    expect(store!.listQueuedTurns(session.id)).toEqual([]);
+    await manager.handle(
+      { ...command, clientId: "queue-2", message: "second", autoStart: false },
       socket
     );
-    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
     pending[1]!.onEvent(
       bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
     );
     pending[1]!.resolve();
-    await second;
+    await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
     expect(store!.listQueuedTurns(session.id)).toEqual([]);
     expect(
       store!
@@ -3012,7 +3017,7 @@ describe("RunManager recovery and queue", () => {
     ).toEqual(["first", "second"]);
   });
 
-  it("runs scheduled jobs around manual and legacy rows without sending those rows", async () => {
+  it("drains legacy, scheduled and automatic messages in queue order", async () => {
     const { project, session, socket } = fixture();
     const pending: Array<{ resolve: () => void; onEvent: (event: BridgeEvent) => void }> = [];
     runtimeMocks.run.mockImplementation(
@@ -3024,7 +3029,7 @@ describe("RunManager recovery and queue", () => {
       id: "legacy",
       projectId: project.id,
       sessionId: session.id,
-      message: "legacy manual message",
+      message: "legacy queued message",
       optionsJson: "{}"
     });
     const command = {
@@ -3032,7 +3037,7 @@ describe("RunManager recovery and queue", () => {
       projectId: project.id,
       sessionId: session.id,
       clientId: "manual",
-      message: "manual message",
+      message: "queued message",
       autoStart: false
     };
     await manager.handle(command, socket);
@@ -3047,24 +3052,28 @@ describe("RunManager recovery and queue", () => {
     const stop = startScheduledJobs(store!, manager);
     stop();
     await vi.waitFor(() => expect(pending).toHaveLength(1));
-    expect(runtimeMocks.run.mock.calls[0]?.[0]).toMatchObject({ message: "scheduled prompt" });
+    expect(runtimeMocks.run.mock.calls[0]?.[0]).toMatchObject({ message: "legacy queued message" });
     await manager.handle(
       { ...command, clientId: "automatic", message: "send automatically", autoStart: true },
       socket
     );
-    pending[0]!.onEvent(
-      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
-    );
-    pending[0]!.resolve();
-    await vi.waitFor(() => expect(pending).toHaveLength(2));
-    expect(runtimeMocks.run.mock.calls[1]?.[0]).toMatchObject({ message: "send automatically" });
-    pending[1]!.onEvent(
-      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
-    );
-    pending[1]!.resolve();
+    const messages = [
+      "legacy queued message",
+      "queued message",
+      "scheduled prompt",
+      "send automatically"
+    ];
+    for (const [index, message] of messages.entries()) {
+      await vi.waitFor(() => expect(pending).toHaveLength(index + 1));
+      expect(runtimeMocks.run.mock.calls[index]?.[0]).toMatchObject({ message });
+      pending[index]!.onEvent(
+        bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
+      );
+      pending[index]!.resolve();
+    }
     await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
-    expect(runtimeMocks.run).toHaveBeenCalledTimes(2);
-    expect(store!.listQueuedTurns(session.id).map((item) => item.id)).toEqual(["legacy", "manual"]);
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(messages.length);
+    expect(store!.listQueuedTurns(session.id)).toEqual([]);
   });
 
   it.each([false, true])(
@@ -3094,7 +3103,7 @@ describe("RunManager recovery and queue", () => {
         : undefined;
       if (active) await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(1));
       await manager.handle(
-        { ...command, type: "turn.enqueue", clientId: "manual", message: "keep pending" },
+        { ...command, type: "turn.enqueue", clientId: "queued", message: "queued message" },
         socket
       );
       runtimeMocks.steer.mockReturnValueOnce(false);
@@ -3104,10 +3113,15 @@ describe("RunManager recovery and queue", () => {
       );
       if (active) release();
       await running;
-      await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
-      expect(runtimeMocks.run).toHaveBeenCalledTimes(active ? 2 : 1);
+      await vi.waitFor(() => {
+        expect(runtimeMocks.run).toHaveBeenCalledTimes(active ? 3 : 2);
+        expect(store!.getLatestRun(session.id)?.status).toBe("completed");
+      });
+      expect(runtimeMocks.run.mock.calls[active ? 1 : 0]?.[0]).toMatchObject({
+        message: "queued message"
+      });
       expect(runtimeMocks.run.mock.lastCall?.[0]).toMatchObject({ message: "direct message" });
-      expect(store!.listQueuedTurns(session.id).map((item) => item.id)).toEqual(["manual"]);
+      expect(store!.listQueuedTurns(session.id)).toEqual([]);
     }
   );
 
@@ -3178,11 +3192,6 @@ describe("RunManager recovery and queue", () => {
     );
     pending[0]?.resolve();
     await first;
-    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
-    const next = manager.handle(
-      { type: "queue.steer", sessionId: session.id, queueId: "queue-3" },
-      socket
-    );
     await vi.waitFor(() => expect(runtimeMocks.run).toHaveBeenCalledTimes(2));
     expect(runtimeMocks.run.mock.calls[1]?.[0]).toMatchObject({ message: "third" });
     pending[1]?.onEvent(
@@ -3193,8 +3202,14 @@ describe("RunManager recovery and queue", () => {
       })
     );
     pending[1]?.resolve();
-    await next;
-    expect(store!.listQueuedTurns(session.id).map((item) => item.message)).toEqual(["second"]);
+    await vi.waitFor(() => expect(pending).toHaveLength(3));
+    expect(runtimeMocks.run.mock.calls[2]?.[0]).toMatchObject({ message: "second" });
+    expect(store!.listQueuedTurns(session.id)).toEqual([]);
+    pending[2]!.onEvent(
+      bridgeEvent({ seq: 1, type: "turn.completed", payload: { status: "completed", usage: {} } })
+    );
+    pending[2]!.resolve();
+    await vi.waitFor(() => expect(store!.getLatestRun(session.id)?.status).toBe("completed"));
   });
 
   it("deduplicates a queued command that is retried after it already started", async () => {
