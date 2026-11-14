@@ -111,6 +111,7 @@ describe("provider runtime settings HTTP contract", () => {
       password: "fixture-password-123"
     });
     expect(setup.response.status).toBe(200);
+    expect(setup.response.headers.get("set-cookie")).toContain("Max-Age=1209600");
     cookie = setup.response.headers.get("set-cookie")!.split(";")[0]!;
     csrf = String(setup.body.csrfToken);
     const limits = { contextWindow: 32000, autoCompactTokenLimit: 28000 };

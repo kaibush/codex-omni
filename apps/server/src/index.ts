@@ -29,7 +29,14 @@ import {
   runCommandSchema
 } from "@codex-omni/protocol";
 import { parseCodexProviderConfig } from "@codex-omni/codex-runtime";
-import { authenticate, createInitialAdmin, hasUsers, initAuth, login } from "./auth.js";
+import {
+  authenticate,
+  createInitialAdmin,
+  hasUsers,
+  initAuth,
+  login,
+  LOGIN_SESSION_MAX_AGE
+} from "./auth.js";
 import { LoginThrottle, loginRetryMessage, loginThrottleKeys } from "./login-throttle.js";
 import {
   MAX_BRAND_ICON_BYTES,
@@ -403,6 +410,7 @@ const defaultSettings = {
   providerAuthTemplate: DEFAULT_PROVIDER_AUTH_TEMPLATE
 };
 const sessionCookie = {
+  maxAge: LOGIN_SESSION_MAX_AGE,
   httpOnly: true,
   sameSite: "lax" as const,
   secure: process.env.COOKIE_SECURE === "true",

@@ -14,6 +14,7 @@ export function initAuth(db: Database.Database) {
     `CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE COLLATE NOCASE,password_hash TEXT NOT NULL,role TEXT NOT NULL,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS login_sessions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,token_hash TEXT NOT NULL UNIQUE,csrf_token TEXT NOT NULL,expires_at INTEGER NOT NULL,created_at INTEGER NOT NULL);`
   );
 }
+export const LOGIN_SESSION_MAX_AGE = 14 * 86400;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 // Precomputed so a missing account still pays for Argon2 and does not reveal itself by timing.
 const DUMMY_PASSWORD_HASH =
@@ -68,7 +69,7 @@ export async function login(db: Database.Database, username: string, password: s
     id = randomBytes(12).toString("hex");
   db.prepare(
     "INSERT INTO login_sessions(id,user_id,token_hash,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?,?)"
-  ).run(id, user.id, digest(token), csrf, Date.now() + 14 * 86400000, Date.now());
+  ).run(id, user.id, digest(token), csrf, Date.now() + LOGIN_SESSION_MAX_AGE * 1000, Date.now());
   return { token, csrf, user: { id: user.id, username: user.username, role: user.role } };
 }
 export function authenticate(db: Database.Database) {

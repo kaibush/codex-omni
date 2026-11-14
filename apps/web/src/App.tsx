@@ -8,6 +8,13 @@ import { Login } from "@/features/auth/Login";
 import { Workspace } from "@/features/workspace/Workspace";
 import { SystemSettingsPage } from "@/features/workspace/SystemSettingsPage";
 import { SystemUpdateDialog } from "@/features/workspace/SystemUpdateDialog";
+function isAuthenticationError(error: unknown) {
+  return (
+    error instanceof Error &&
+    ["Authentication required", "Session expired", "HTTP 401"].includes(error.message)
+  );
+}
+
 export function App() {
   useBrandIcon();
   const [nonce, setNonce] = useState(0);
@@ -25,18 +32,13 @@ export function App() {
         }
         return result;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (
-          message === "Authentication required" ||
-          message === "Session expired" ||
-          message === "HTTP 401"
-        ) {
+        if (isAuthenticationError(error)) {
           syncVisoraUser(null);
         }
         throw error;
       }
     },
-    retry: false
+    retry: (failureCount, error) => !isAuthenticationError(error) && failureCount < 2
   });
   if (session.isLoading)
     return (
@@ -44,7 +46,19 @@ export function App() {
         正在加载工作台...
       </div>
     );
-  if (session.isError) return <Login onLogin={() => setNonce((x) => x + 1)} />;
+  if (session.isError && isAuthenticationError(session.error))
+    return <Login onLogin={() => setNonce((x) => x + 1)} />;
+  if (!session.data)
+    return (
+      <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">
+        <div className="space-y-3 text-center">
+          <p>暂时无法连接服务器，请检查网络后重试。</p>
+          <button className="h-8 rounded-lg border px-3" onClick={() => void session.refetch()}>
+            重新连接
+          </button>
+        </div>
+      </div>
+    );
   return (
     <>
       <Routes>
