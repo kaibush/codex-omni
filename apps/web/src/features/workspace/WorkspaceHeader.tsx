@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useRef, type Dispatch, type SetStateAction } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -131,6 +131,8 @@ export function WorkspaceHeader({
   recentOpen: boolean;
   onToggleRecent: () => void;
 }) {
+  const sessionTitleInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <header className="workspace-header flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 sm:gap-3 sm:px-5 xl:flex-nowrap xl:py-0">
       <div className="order-1 flex min-w-0 flex-1 items-center gap-2">
@@ -152,6 +154,7 @@ export function WorkspaceHeader({
                 <SessionIcon session={activeSession} labelled />
                 {renamingSessionId === activeSession.id ? (
                   <Input
+                    ref={sessionTitleInputRef}
                     autoFocus
                     value={renameDraft}
                     onChange={(event) => setRenameDraft(event.target.value)}
@@ -311,7 +314,16 @@ export function WorkspaceHeader({
                 <MoreHorizontal className="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent
+              align="end"
+              className="w-48"
+              onCloseAutoFocus={(event) => {
+                if (renamingSessionId === activeSession.id) {
+                  event.preventDefault();
+                  sessionTitleInputRef.current?.focus();
+                }
+              }}
+            >
               <DropdownMenuItem onSelect={() => beginRenameSession(activeSession)}>
                 <Pencil /> 重命名
               </DropdownMenuItem>

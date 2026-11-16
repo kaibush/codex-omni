@@ -296,6 +296,7 @@ export function WorkspaceSidebar({
   const projectListRef = useRef<HTMLDivElement>(null);
   const currentProjectRef = useRef<HTMLDivElement>(null);
   const currentSessionRef = useRef<HTMLDivElement>(null);
+  const sessionTitleInputRef = useRef<HTMLInputElement>(null);
   const expandedProjects = projectList.filter((project) => expandedProjectIds.includes(project.id));
   const sessionQueries = useQueries({
     queries: expandedProjects.map((project) => ({
@@ -1047,6 +1048,7 @@ export function WorkspaceSidebar({
                                     })()}
                                     {renamingSessionId === s.id ? (
                                       <Input
+                                        ref={sessionTitleInputRef}
                                         autoFocus
                                         value={renameDraft}
                                         onChange={(event) => setRenameDraft(event.target.value)}
@@ -1133,7 +1135,16 @@ export function WorkspaceSidebar({
                                             <MoreHorizontal className="size-3.5" />
                                           </button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-48">
+                                        <DropdownMenuContent
+                                          align="end"
+                                          className="w-48"
+                                          onCloseAutoFocus={(event) => {
+                                            if (renamingSessionId === s.id) {
+                                              event.preventDefault();
+                                              sessionTitleInputRef.current?.focus();
+                                            }
+                                          }}
+                                        >
                                           <DropdownMenuItem onSelect={() => beginRenameSession(s)}>
                                             <Pencil /> 重命名
                                           </DropdownMenuItem>

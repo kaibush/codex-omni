@@ -354,6 +354,10 @@ export function Workspace() {
   };
   const [showArchived, setShowArchived] = useState(false);
   const [renamingSessionId, setRenamingSessionId] = useState("");
+  // Mount only the initiating editor so header/sidebar autoFocus cannot trigger blur-save.
+  const [sessionRenameLocation, setSessionRenameLocation] = useState<"header" | "sidebar">(
+    "header"
+  );
   const [renameDraft, setRenameDraft] = useState("");
   const longPressTimer = useRef<number | null>(null);
   const [queuedTurns, setQueuedTurns] = useState<QueuedTurn[]>([]);
@@ -2485,7 +2489,8 @@ export function Workspace() {
     socket.current.send(JSON.stringify({ type: "queue.steer", sessionId, queueId }));
     setSendNotice("正在插入队列消息");
   };
-  const beginRenameSession = (session: Session) => {
+  const beginRenameSession = (session: Session, location: "header" | "sidebar") => {
+    setSessionRenameLocation(location);
     setRenamingSessionId(session.id);
     setRenameDraft(session.title);
   };
@@ -2498,7 +2503,7 @@ export function Workspace() {
   const startSessionLongPress = (session: Session) => {
     cancelSessionLongPress();
     longPressTimer.current = window.setTimeout(() => {
-      beginRenameSession(session);
+      beginRenameSession(session, "sidebar");
       longPressTimer.current = null;
     }, 550);
   };
@@ -2848,12 +2853,12 @@ export function Workspace() {
         workspaceView={workspaceView}
         sessionLoading={sessionLoading}
         providerNames={providerNames}
-        renamingSessionId={renamingSessionId}
+        renamingSessionId={sessionRenameLocation === "sidebar" ? renamingSessionId : ""}
         setRenamingSessionId={setRenamingSessionId}
         renameDraft={renameDraft}
         setRenameDraft={setRenameDraft}
         saveSessionTitle={saveSessionTitle}
-        beginRenameSession={beginRenameSession}
+        beginRenameSession={(session) => beginRenameSession(session, "sidebar")}
         startSessionLongPress={startSessionLongPress}
         cancelSessionLongPress={cancelSessionLongPress}
         forkSessionFrom={forkSessionFrom}
@@ -2894,12 +2899,12 @@ export function Workspace() {
                   ? (sessionDisplayTitles.get(activeSession.id) ?? activeSession.title)
                   : undefined
               }
-              renamingSessionId={renamingSessionId}
+              renamingSessionId={sessionRenameLocation === "header" ? renamingSessionId : ""}
               setRenamingSessionId={setRenamingSessionId}
               renameDraft={renameDraft}
               setRenameDraft={setRenameDraft}
               saveSessionTitle={saveSessionTitle}
-              beginRenameSession={beginRenameSession}
+              beginRenameSession={(session) => beginRenameSession(session, "header")}
               runState={runState}
               selectedProvider={selectedProvider ?? undefined}
               runtimeClientHome={
