@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
 import type { ClientType } from "@codex-omni/protocol";
 import { ClaudeRuntimeFields } from "./ClaudeRuntimeFields";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,76 +17,7 @@ import {
   SettingsSwitchField
 } from "./settings/settings-ui";
 import type { WorkspaceSettings } from "./SettingsDialog";
-import {
-  clampRetryAttempts,
-  DEFAULT_FAILURE_RETRY_DELAY_SECONDS,
-  DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS,
-  DEFAULT_FAILURE_RETRY_MAX_DELAY_SECONDS,
-  FAILURE_RETRY_HARD_MAX_DELAY_SECONDS,
-  msFromSeconds,
-  secondsFromMs
-} from "./runtime-settings";
-
-function NumberField({
-  label,
-  hint,
-  min,
-  max,
-  value,
-  onValueChange,
-  compact
-}: {
-  label: string;
-  hint?: string;
-  min: number;
-  max: number;
-  value: number;
-  onValueChange: (value: number) => void;
-  compact?: boolean;
-}) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => {
-    setText(String(value));
-  }, [value]);
-  const commit = (raw: string) => {
-    const next = Number(raw);
-    if (!Number.isFinite(next)) {
-      setText(String(value));
-      return;
-    }
-    onValueChange(Math.min(max, Math.max(min, Math.trunc(next))));
-  };
-  const input = (
-    <Input
-      type="number"
-      min={min}
-      max={max}
-      className={compact ? "mt-1.5 tabular-nums" : "tabular-nums"}
-      value={text}
-      onChange={(event) => {
-        setText(event.target.value);
-        if (!compact) commit(event.target.value);
-      }}
-      onBlur={() => commit(text)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-      }}
-    />
-  );
-  if (compact) {
-    return (
-      <label className="field-label">
-        {label}
-        {input}
-      </label>
-    );
-  }
-  return (
-    <SettingsField label={label} {...(hint ? { hint } : {})}>
-      {input}
-    </SettingsField>
-  );
-}
+import { FailureRetrySettingsFields } from "./FailureRetrySettingsFields";
 
 export function RuntimeSettingsTabs({
   settings,
@@ -102,18 +31,6 @@ export function RuntimeSettingsTabs({
   clientType?: ClientType;
 }) {
   const patch = (next: Partial<WorkspaceSettings>) => onChange({ ...settings, ...next });
-  const delaySeconds = secondsFromMs(
-    settings.failureRetryDelayMs,
-    DEFAULT_FAILURE_RETRY_DELAY_SECONDS
-  );
-  const maxDelaySeconds = secondsFromMs(
-    settings.failureRetryMaxDelayMs,
-    DEFAULT_FAILURE_RETRY_MAX_DELAY_SECONDS
-  );
-  const maxAttempts = clampRetryAttempts(
-    settings.failureRetryMaxAttempts ?? DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS
-  );
-
   const permissionFields = compact ? (
     <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
       <label className="field-label">
@@ -298,80 +215,6 @@ export function RuntimeSettingsTabs({
     </SettingsFormGrid>
   );
 
-  const retryFields = compact ? (
-    <div className="grid gap-2">
-      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-sm">
-        失败后自动重试
-        <Switch
-          checked={settings.failureRetryEnabled}
-          onCheckedChange={(checked) => patch({ failureRetryEnabled: checked })}
-        />
-      </label>
-      <div className="grid grid-cols-2 gap-2 max-sm:grid-cols-1">
-        <NumberField
-          compact
-          label="首次等待（秒）"
-          min={0}
-          max={FAILURE_RETRY_HARD_MAX_DELAY_SECONDS}
-          value={delaySeconds}
-          onValueChange={(value) => patch({ failureRetryDelayMs: msFromSeconds(value) })}
-        />
-        <NumberField
-          compact
-          label="封顶等待（秒）"
-          min={0}
-          max={FAILURE_RETRY_HARD_MAX_DELAY_SECONDS}
-          value={maxDelaySeconds}
-          onValueChange={(value) => patch({ failureRetryMaxDelayMs: msFromSeconds(value) })}
-        />
-      </div>
-      <NumberField
-        compact
-        label="最多重试次数"
-        min={1}
-        max={100}
-        value={maxAttempts}
-        onValueChange={(value) => patch({ failureRetryMaxAttempts: clampRetryAttempts(value) })}
-      />
-      <p className="text-xs leading-5 text-muted-foreground">
-        遇到限流、超时等可恢复错误时，按指数加倍等待后自动继续，直到成功、你停止，或达到次数上限。
-      </p>
-    </div>
-  ) : (
-    <SettingsFormGrid>
-      <SettingsSwitchField
-        label="失败后自动重试"
-        description="遇到限流、超时等可恢复错误时，自动发送继续执行请求，直到成功响应或你手动停止。"
-        checked={settings.failureRetryEnabled}
-        onCheckedChange={(checked) => patch({ failureRetryEnabled: checked })}
-      />
-      <NumberField
-        label="首次等待（秒）"
-        hint="第一次自动重试前等待这么久，之后按 2 倍递增。"
-        min={0}
-        max={FAILURE_RETRY_HARD_MAX_DELAY_SECONDS}
-        value={delaySeconds}
-        onValueChange={(value) => patch({ failureRetryDelayMs: msFromSeconds(value) })}
-      />
-      <NumberField
-        label="封顶等待（秒）"
-        hint="单次最多等待这么久。默认 90 秒，最大 600 秒。"
-        min={0}
-        max={FAILURE_RETRY_HARD_MAX_DELAY_SECONDS}
-        value={maxDelaySeconds}
-        onValueChange={(value) => patch({ failureRetryMaxDelayMs: msFromSeconds(value) })}
-      />
-      <NumberField
-        label="最多重试次数"
-        hint="连续失败达到次数后停止，需要手动发送「继续」。"
-        min={1}
-        max={100}
-        value={maxAttempts}
-        onValueChange={(value) => patch({ failureRetryMaxAttempts: clampRetryAttempts(value) })}
-      />
-    </SettingsFormGrid>
-  );
-
   return (
     <Tabs defaultValue="permissions" className={compact ? "mt-3" : undefined}>
       <TabsList className={compact ? "grid h-8 w-full grid-cols-3" : "h-8"}>
@@ -396,7 +239,7 @@ export function RuntimeSettingsTabs({
         {sendFields}
       </TabsContent>
       <TabsContent value="retry" className="mt-3">
-        {retryFields}
+        <FailureRetrySettingsFields settings={settings} onChange={patch} compact={compact} />
       </TabsContent>
     </Tabs>
   );

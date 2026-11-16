@@ -21,6 +21,8 @@ import websocket from "@fastify/websocket";
 import { z } from "zod/v3";
 import { Store, setProviderStreamIdleTimeout, type ProviderRow } from "@codex-omni/db";
 import {
+  defaultFailureRetrySettings,
+  failureRetrySettingsSchema,
   DEFAULT_PROVIDER_AUTH_TEMPLATE,
   DEFAULT_PROVIDER_CONFIG_TEMPLATE,
   nextNumberedTitle,
@@ -73,12 +75,6 @@ import {
 import { parsePlanTasks, summarizeRuns } from "./workspace-loop.js";
 import { readAgentsMarkdown, writeAgentsMarkdown } from "./project-knowledge.js";
 import { listProjectSkills, listProviderSkills } from "./skills-mcp.js";
-import {
-  DEFAULT_FAILURE_RETRY_DELAY_MS,
-  DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS,
-  DEFAULT_FAILURE_RETRY_MAX_DELAY_MS,
-  FAILURE_RETRY_HARD_MAX_DELAY_MS
-} from "./failure-retry.js";
 import {
   publicOperation,
   recordOperation,
@@ -394,10 +390,7 @@ const defaultSettings = {
   continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
   continuationDirective:
     "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
-  failureRetryEnabled: false,
-  failureRetryMaxAttempts: DEFAULT_FAILURE_RETRY_MAX_ATTEMPTS,
-  failureRetryDelayMs: DEFAULT_FAILURE_RETRY_DELAY_MS,
-  failureRetryMaxDelayMs: DEFAULT_FAILURE_RETRY_MAX_DELAY_MS,
+  ...defaultFailureRetrySettings,
   showReasoning: false,
   expandToolCalls: true,
   timelineView: "folded" as const,
@@ -720,7 +713,7 @@ app.get("/api/system/version", { preHandler: auth }, async () => updateCheck.sna
 app.post("/api/system/update/check", { preHandler: auth }, async () => updateCheck.check());
 app.get("/api/settings", { preHandler: auth }, async () => store.getSettings(defaultSettings));
 app.put("/api/settings", { preHandler: auth }, async (req) => {
-  const settings = z
+  const parsed = z
     .object({
       claude: claudeOptionsSchema.optional(),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]),
@@ -733,15 +726,7 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
         .transform((values) => [...new Set(values)])
         .optional(),
       continuationDirective: z.string().trim().max(4000).optional(),
-      failureRetryEnabled: z.boolean().optional(),
-      failureRetryMaxAttempts: z.number().int().min(1).max(100).optional(),
-      failureRetryDelayMs: z.number().int().min(0).max(FAILURE_RETRY_HARD_MAX_DELAY_MS).optional(),
-      failureRetryMaxDelayMs: z
-        .number()
-        .int()
-        .min(0)
-        .max(FAILURE_RETRY_HARD_MAX_DELAY_MS)
-        .optional(),
+      ...failureRetrySettingsSchema.partial().shape,
       showReasoning: z.boolean(),
       expandToolCalls: z.boolean(),
       timelineView: z.enum(["folded", "flat", "expanded"]).optional(),
@@ -755,7 +740,12 @@ app.put("/api/settings", { preHandler: auth }, async (req) => {
       providerConfigTemplate: z.string().min(1).max(20_000).optional(),
       providerAuthTemplate: z.string().min(1).max(20_000).optional()
     })
-    .parse(req.body);
+    .safeParse(req.body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw httpError(400, issue ? `${issue.path.join(".")}: ${issue.message}` : "设置无效");
+  }
+  const settings = parsed.data;
   store.updateSettings(settings);
   return settings;
 });

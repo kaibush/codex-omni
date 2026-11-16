@@ -22,6 +22,7 @@ import {
   clientName,
   clientType,
   compactStreamEvent,
+  defaultFailureRetrySettings,
   firstUsefulFailureMessage,
   isGenericCodexExecError,
   sanitizeCodexExecError,
@@ -45,8 +46,6 @@ import {
   type ContinuationRetryReason
 } from "./turn-completion.js";
 import {
-  DEFAULT_FAILURE_RETRY_DELAY_MS,
-  DEFAULT_FAILURE_RETRY_MAX_DELAY_MS,
   FAILURE_RETRY_USER_MESSAGE,
   failureRetryBaseDelayMs,
   failureRetryDelayMs,
@@ -88,10 +87,7 @@ const runtimeDefaults = {
   continuationTriggers: ["继续", "继续完成", "继续排查", "继续处理", "接着做", "接着完成"],
   continuationDirective:
     "这是一个继续执行请求。不要只回复计划、进度说明或“我先检查”。请立即调用必要的工具读取当前文件/截图并实际完成未完成的工作；只有完成修改和验证后才结束本轮。",
-  failureRetryEnabled: false,
-  failureRetryMaxAttempts: 30,
-  failureRetryDelayMs: DEFAULT_FAILURE_RETRY_DELAY_MS,
-  failureRetryMaxDelayMs: DEFAULT_FAILURE_RETRY_MAX_DELAY_MS
+  ...defaultFailureRetrySettings
 };
 
 function isContinuationRequest(message: string, triggers: unknown) {
@@ -133,6 +129,7 @@ type TurnStartCommand = Extract<RunCommand, { type: "turn.start" | "run.retry" }
   displayMessage?: string;
   failureRetry?: boolean;
   failureRetryAttempt?: number;
+  failureRetryReason?: string;
 };
 type EnqueueCommand = Extract<RunCommand, { type: "turn.enqueue" }>;
 type SteerCommand = Extract<RunCommand, { type: "turn.steer" }>;
@@ -704,7 +701,11 @@ export class RunManager {
     });
   }
 
-  private failureRetryCommand(command: TurnStartCommand, attempt: number): TurnStartCommand {
+  private failureRetryCommand(
+    command: TurnStartCommand,
+    attempt: number,
+    reason: string
+  ): TurnStartCommand {
     return {
       type: "turn.start",
       projectId: command.projectId,
@@ -729,7 +730,8 @@ export class RunManager {
           }
         : {}),
       failureRetry: true,
-      failureRetryAttempt: attempt
+      failureRetryAttempt: attempt,
+      failureRetryReason: reason
     };
   }
 
@@ -748,7 +750,7 @@ export class RunManager {
       run.reason ||
       this.store.getMessageByItemId(input.sessionId, `${input.requestId}:run.failed`)?.content ||
       "";
-    if (!isRetryableTurnFailure(reason)) return;
+    if (!isRetryableTurnFailure(reason, settings)) return;
     const attempt = (input.command.failureRetryAttempt ?? 0) + 1;
     const maxAttempts = failureRetryLimit(settings.failureRetryMaxAttempts);
     if (attempt > maxAttempts) {
@@ -765,7 +767,8 @@ export class RunManager {
     const delayMs = failureRetryDelayMs(
       attempt,
       failureRetryBaseDelayMs(settings.failureRetryDelayMs),
-      failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs)
+      failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs),
+      settings.failureRetryBackoff
     );
     this.broadcastContinuationNotice(
       input.sessionId,
@@ -774,7 +777,7 @@ export class RunManager {
       failureRetryingNotice({ reason, attempt, maxAttempts, delayMs }),
       "retrying"
     );
-    await this.startTurn(this.failureRetryCommand(input.command, attempt));
+    await this.startTurn(this.failureRetryCommand(input.command, attempt, reason));
   }
 
   private persistThreadGoalNotice(
@@ -1521,7 +1524,8 @@ export class RunManager {
         const delayMs = failureRetryDelayMs(
           failureRetryAttempt,
           failureRetryBaseDelayMs(settings.failureRetryDelayMs),
-          failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs)
+          failureRetryMaxDelayMs(settings.failureRetryMaxDelayMs),
+          settings.failureRetryBackoff
         );
         if (delayMs > 0) {
           const proceeded = await this.waitForFailureRetry(session.id, delayMs);
@@ -1536,8 +1540,16 @@ export class RunManager {
             return;
           }
         }
-        if (this.store.getSettings(runtimeDefaults).failureRetryEnabled !== true) {
+        const latestRetrySettings = this.store.getSettings(runtimeDefaults);
+        if (latestRetrySettings.failureRetryEnabled !== true) {
           this.finishRun(session.id, "cancelled", { reason: "failure-retry-disabled" });
+          return;
+        }
+        if (
+          failureRetryAttempt > failureRetryLimit(latestRetrySettings.failureRetryMaxAttempts) ||
+          !isRetryableTurnFailure(command.failureRetryReason, latestRetrySettings)
+        ) {
+          this.finishRun(session.id, "cancelled", { reason: "failure-retry-settings-changed" });
           return;
         }
       }

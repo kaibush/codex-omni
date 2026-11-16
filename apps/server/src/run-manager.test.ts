@@ -1303,6 +1303,11 @@ describe("RunManager reconnect state", () => {
 
   it("does not auto-retry a continuation when the Codex thread goal is budget limited", async () => {
     const { project, provider, session, socket, sent } = fixture();
+    store!.updateSettings({
+      failureRetryEnabled: true,
+      failureRetryMode: "all",
+      failureRetryDelayMs: 0
+    });
     const home = mkdtempSync(path.join(os.tmpdir(), "omni-goal-home-"));
     tempDirs.push(home);
     const db = new Database(path.join(home, "goals_1.sqlite"));
@@ -2198,6 +2203,199 @@ describe("RunManager failure retry", () => {
     });
   }
 
+  const resourceMismatch = JSON.stringify({
+    error: {
+      message:
+        "OpenAI Responses bad request: The requested item was created under a different *** OpenAI resource. Use the same resource that created the item to access it.",
+      type: "invalid_request_error",
+      code: null
+    }
+  });
+
+  it.each([
+    {
+      name: "resource mismatch with legacy rules",
+      reason: resourceMismatch,
+      settings: {},
+      calls: 1
+    },
+    {
+      name: "resource mismatch with an explicit keyword",
+      reason: resourceMismatch,
+      settings: { failureRetryIncludeKeywords: "The requested item was created under a different" },
+      calls: 2
+    },
+    {
+      name: "unknown failures with all mode",
+      reason: "upstream failure",
+      settings: { failureRetryMode: "all" },
+      calls: 2
+    },
+    {
+      name: "custom mode without a matching keyword",
+      reason: rateLimit,
+      settings: { failureRetryMode: "custom", failureRetryIncludeKeywords: "upstream busy" },
+      calls: 1
+    },
+    {
+      name: "custom mode with a matching keyword",
+      reason: resourceMismatch,
+      settings: {
+        failureRetryMode: "custom",
+        failureRetryIncludeKeywords: "different *** OpenAI resource"
+      },
+      calls: 2
+    },
+    {
+      name: "exclusions overriding inclusions and all mode",
+      reason: resourceMismatch,
+      settings: {
+        failureRetryMode: "all",
+        failureRetryIncludeKeywords: "OpenAI",
+        failureRetryExcludeKeywords: "bad request"
+      },
+      calls: 1
+    }
+  ])("applies saved settings to $name", async ({ reason, settings, calls }) => {
+    const { project, session, socket } = fixture();
+    enableFailureRetry(settings);
+    let attempts = 0;
+    runtimeMocks.run.mockImplementation(async (request, onEvent: (event: BridgeEvent) => void) => {
+      attempts += 1;
+      if (attempts === 1) {
+        onEvent(
+          bridgeEvent({
+            seq: 1,
+            type: "run.failed",
+            payload: { status: "failed", message: reason }
+          })
+        );
+        return;
+      }
+      expect(request.message).toContain("保留原始请求");
+      expect(request.sandbox).toBe("read-only");
+      expect(request.approvalPolicy).toBe("never");
+      expect(request.networkAccessEnabled).toBe(false);
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "tool.started",
+          payload: { itemId: "tool-retry", tool: "command" }
+        })
+      );
+      onEvent(
+        bridgeEvent({
+          seq: 2,
+          type: "turn.completed",
+          payload: { status: "completed", endedAt: Date.now(), usage: {} }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    await manager.handle(
+      {
+        type: "turn.start",
+        projectId: project.id,
+        sessionId: session.id,
+        message: "保留原始请求",
+        sandbox: "read-only",
+        approvalPolicy: "never",
+        networkAccessEnabled: false
+      },
+      socket
+    );
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(calls);
+    expect(store!.getLatestRun(session.id)?.status).toBe(calls === 2 ? "completed" : "failed");
+  });
+
+  it.each([
+    { backoff: "fixed", waits: [20, 20] },
+    { backoff: "linear", waits: [20, 40] },
+    { backoff: "exponential", waits: [20, 40] }
+  ])(
+    "uses the configured $backoff waits before calling the runtime",
+    async ({ backoff, waits }) => {
+      const { project, session, socket } = fixture();
+      enableFailureRetry({ failureRetryBackoff: backoff, failureRetryDelayMs: 20 });
+      const timer = vi.spyOn(globalThis, "setTimeout");
+      let attempts = 0;
+      runtimeMocks.run.mockImplementation(
+        async (_request, onEvent: (event: BridgeEvent) => void) => {
+          attempts += 1;
+          if (attempts <= 2) {
+            onEvent(
+              bridgeEvent({
+                seq: 1,
+                type: "run.failed",
+                payload: { status: "failed", message: rateLimit }
+              })
+            );
+            return;
+          }
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "tool.started",
+              payload: { itemId: "tool-retry", tool: "command" }
+            })
+          );
+          onEvent(
+            bridgeEvent({
+              seq: 2,
+              type: "turn.completed",
+              payload: { status: "completed", endedAt: Date.now(), usage: {} }
+            })
+          );
+        }
+      );
+      try {
+        manager = new RunManager(store!, "/tmp/runtime");
+        await manager.handle(
+          {
+            type: "turn.start",
+            projectId: project.id,
+            sessionId: session.id,
+            message: "实现自动重试"
+          },
+          socket
+        );
+        expect(runtimeMocks.run).toHaveBeenCalledTimes(3);
+        expect(
+          timer.mock.calls.map((call) => call[1]).filter((delay) => delay === 20 || delay === 40)
+        ).toEqual(waits);
+      } finally {
+        timer.mockRestore();
+      }
+    }
+  );
+
+  it.each([
+    { failureRetryExcludeKeywords: "rate limit" },
+    { failureRetryMode: "custom", failureRetryIncludeKeywords: "unrelated" }
+  ])("rechecks changed rules before dispatching a pending retry: %j", async (patch) => {
+    const { project, session, socket } = fixture();
+    enableFailureRetry({ failureRetryDelayMs: 200 });
+    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
+      onEvent(
+        bridgeEvent({
+          seq: 1,
+          type: "run.failed",
+          payload: { status: "failed", message: rateLimit }
+        })
+      );
+    });
+    manager = new RunManager(store!, "/tmp/runtime");
+    const pending = manager.handle(
+      { type: "turn.start", projectId: project.id, sessionId: session.id, message: "实现自动重试" },
+      socket
+    );
+    await vi.waitFor(() => expect(store!.listRuns({ sessionId: session.id }).length).toBe(2));
+    store!.updateSettings(patch);
+    await pending;
+    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+    expect(store!.getLatestRun(session.id)?.reason).toBe("failure-retry-settings-changed");
+  });
+
   it("automatically continues after a rate limit until Codex succeeds", async () => {
     const { project, provider, session, socket, sent } = fixture();
     enableFailureRetry();
@@ -2343,34 +2541,39 @@ describe("RunManager failure retry", () => {
     ).toBe(true);
   });
 
-  it("cancels a delayed automatic retry", async () => {
-    const { project, session, socket } = fixture();
-    enableFailureRetry({ failureRetryDelayMs: 80 });
-    runtimeMocks.run.mockImplementation(async (_request, onEvent: (event: BridgeEvent) => void) => {
-      onEvent(
-        bridgeEvent({
-          seq: 1,
-          type: "run.failed",
-          payload: { status: "failed", message: rateLimit }
-        })
+  it.each(["builtin", "all"])(
+    "cancels a delayed automatic retry in %s mode",
+    async (failureRetryMode) => {
+      const { project, session, socket } = fixture();
+      enableFailureRetry({ failureRetryDelayMs: 80, failureRetryMode });
+      runtimeMocks.run.mockImplementation(
+        async (_request, onEvent: (event: BridgeEvent) => void) => {
+          onEvent(
+            bridgeEvent({
+              seq: 1,
+              type: "run.failed",
+              payload: { status: "failed", message: rateLimit }
+            })
+          );
+        }
       );
-    });
-    manager = new RunManager(store!, "/tmp/runtime");
-    const pending = manager.handle(
-      {
-        type: "turn.start",
-        projectId: project.id,
-        sessionId: session.id,
-        message: "实现自动重试"
-      },
-      socket
-    );
-    await vi.waitFor(() => expect(store!.listRuns({ sessionId: session.id }).length).toBe(2));
-    expect(manager.cancel(session.id)).toBe(true);
-    await pending;
-    expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
-    expect(store!.getLatestRun(session.id)?.status).toBe("cancelled");
-  });
+      manager = new RunManager(store!, "/tmp/runtime");
+      const pending = manager.handle(
+        {
+          type: "turn.start",
+          projectId: project.id,
+          sessionId: session.id,
+          message: "实现自动重试"
+        },
+        socket
+      );
+      await vi.waitFor(() => expect(store!.listRuns({ sessionId: session.id }).length).toBe(2));
+      expect(manager.cancel(session.id)).toBe(true);
+      await pending;
+      expect(runtimeMocks.run).toHaveBeenCalledTimes(1);
+      expect(store!.getLatestRun(session.id)?.status).toBe("cancelled");
+    }
+  );
 
   it("stops a delayed retry if the setting is turned off during the wait", async () => {
     const { project, session, socket } = fixture();

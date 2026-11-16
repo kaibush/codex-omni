@@ -1,6 +1,7 @@
 import { z } from "zod/v3";
 import { approvalResponseFields, claudeOptionsSchema, clientTypeSchema } from "./clients.js";
 export * from "./clients.js";
+export * from "./failure-retry.js";
 
 export const sandboxSchema = z.enum(["read-only", "workspace-write", "danger-full-access"]);
 export const approvalPolicySchema = z.enum(["untrusted", "on-request", "never"]);
