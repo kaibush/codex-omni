@@ -201,7 +201,11 @@ describe("EventCard copy controls", () => {
   it("opens bare file paths and markdown file links from chat", () => {
     const bare = renderToStaticMarkup(
       <EventCard
-        item={{ id: "user-path", kind: "assistant", text: "see src/app.ts and `apps/web/src/foo.ts`" }}
+        item={{
+          id: "user-path",
+          kind: "assistant",
+          text: "see src/app.ts and `apps/web/src/foo.ts`"
+        }}
         onOpenFile={() => undefined}
       />
     );
@@ -332,7 +336,7 @@ describe("EventCard copy controls", () => {
             ]
           }
         }}
-        defaultOpen={false}
+        defaultOpen
       />
     );
     expect(html).toContain("计划");
@@ -538,6 +542,25 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("79822");
   });
 
+  it.each([
+    { tool: "exec_command", command: "echo folded-output", output: "folded-output" },
+    { tool: "write_stdin", session_id: 123, chars: "folded-output" },
+    { tool: "update_plan", plan: [{ step: "folded-output", status: "pending" }] },
+    { tool: "spawn_agent", prompt: "folded-output" },
+    { tool: "view_image", path: "/tmp/folded-output.png" },
+    {
+      tool: "request_user_input",
+      questions: [{ id: "choice", header: "Choice", question: "folded-output", options: [] }]
+    }
+  ])("respects defaultOpen for $tool", (data) => {
+    const item = { id: "folded-tool", kind: "tool" as const, data };
+    const closed = renderToStaticMarkup(<EventCard item={item} defaultOpen={false} />);
+    expect(closed).toContain("collapse-icon");
+    expect(closed).not.toContain("rotate-90");
+    const opened = renderToStaticMarkup(<EventCard item={item} defaultOpen />);
+    expect(opened).toContain("rotate-90");
+  });
+
   it("keeps thinking collapsed unless defaultOpen", () => {
     const closed = renderToStaticMarkup(
       <EventCard
@@ -696,5 +719,4 @@ describe("EventCard copy controls", () => {
     expect(html).toContain("notice-card");
     expect(html).not.toContain("运行失败");
   });
-
 });

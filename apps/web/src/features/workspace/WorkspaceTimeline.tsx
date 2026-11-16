@@ -615,7 +615,8 @@ export function WorkspaceTimeline({
                       }
                       defaultOpen={
                         timelineView === "expanded" ||
-                        (item.kind !== "reasoning" &&
+                        (timelineView === "flat" &&
+                          item.kind !== "reasoning" &&
                           workspaceSettings.expandToolCalls &&
                           item.streaming !== false)
                       }

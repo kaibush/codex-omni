@@ -796,6 +796,7 @@ function EventCardComponent({
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [open, setOpen] = useState(() => {
+    if (!defaultOpen) return false;
     if (item.kind === "reasoning") return defaultOpen;
     if (isRuntimePlaceholder(item.data, item.text)) return false;
     if (notice && notice.level !== "error") return false;

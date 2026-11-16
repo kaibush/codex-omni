@@ -614,7 +614,7 @@ export function SystemSettingsPage() {
                     />
                     <SettingsSwitchField
                       label="默认展开工具调用"
-                      description="新的工具卡片默认展开详细输出。"
+                      description="平铺模式下，新的工具卡片默认展开详细输出；折叠模式始终默认收起。"
                       checked={draft.expandToolCalls}
                       onCheckedChange={(checked) =>
                         setDraft({ ...draft, expandToolCalls: checked })
