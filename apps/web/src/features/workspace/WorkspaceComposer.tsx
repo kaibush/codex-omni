@@ -62,6 +62,7 @@ import type { ConnectionState, RunState } from "./workspace-model";
 import type { WorkspaceSettings } from "./SettingsDialog";
 import { PromptEnhanceDialog } from "./PromptEnhanceDialog";
 import { PromptTemplatePicker } from "./PromptTemplatePicker";
+import { RefreshModelsButton } from "./RefreshModelsButton";
 import { joinInsertedTemplate } from "./prompt-templates";
 import {
   COMPOSER_DOCK_CLASS,
@@ -510,6 +511,10 @@ export function WorkspaceComposer({
                     ))}
                   </SelectContent>
                 </Select>
+                <RefreshModelsButton
+                  providerId={selectedProvider?.id}
+                  providerName={selectedProvider?.name}
+                />
                 {connection !== "connected" ? (
                   <StatusChip
                     icon={
