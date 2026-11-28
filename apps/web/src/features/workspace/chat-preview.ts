@@ -1,5 +1,11 @@
 import type { Project } from "@/types";
-import type { ComposerAttachment } from "./composer-attachments";
+import {
+  ATTACHMENT_UPLOAD_DIR,
+  safeAttachmentName,
+  type ComposerAttachment,
+  type QueuedAttachmentMeta
+} from "./composer-attachments";
+import type { HtmlCompanions } from "./preview-html-assets";
 import {
   fileDownloadUrl,
   fileName,
@@ -21,6 +27,7 @@ export type ChatResource = {
   line?: number | null;
   download?: string;
   blob?: Blob;
+  files?: HtmlCompanions;
 };
 
 function localResource(projectId: string, path: string, line: number | null): ChatResource {
@@ -35,10 +42,32 @@ function localResource(projectId: string, path: string, line: number | null): Ch
   };
 }
 
-export function chatFileResource(path: string, line: number | null, project?: PreviewProject) {
+export function chatFileResource(
+  path: string,
+  line: number | null,
+  project?: PreviewProject,
+  attachments?: QueuedAttachmentMeta[]
+) {
   const resolved = resolveOpenableFilePath(path, project?.realPath, project?.displayPath);
   if (!resolved || (!resolved.external && !project?.id)) return null;
-  return localResource(project?.id ?? "", resolved.path, line ?? resolved.line);
+  const resource = localResource(project?.id ?? "", resolved.path, line ?? resolved.line);
+  const dir = `${ATTACHMENT_UPLOAD_DIR}/`;
+  if (resource.kind === "html" && attachments && resolved.path.startsWith(dir)) {
+    const files = new Map<string, string>();
+    for (const item of attachments) {
+      const saved = resolveOpenableFilePath(
+        item.path,
+        project?.realPath,
+        project?.displayPath
+      )?.path;
+      if (!saved || item.path === path || /[/\\]/.test(item.name)) continue;
+      const name = fileName(saved);
+      if (saved === dir + name && name.replace(/^\d+-/, "") === safeAttachmentName(item.name))
+        files.set(dir + item.name, name);
+    }
+    if (files.size) resource.files = files;
+  }
+  return resource;
 }
 
 export function chatLinkResource(href: string, project?: PreviewProject): ChatResource | null {
@@ -81,7 +110,8 @@ export function chatImageSource(href: string, project?: PreviewProject) {
 
 export function draftResource(
   item: ComposerAttachment,
-  project?: PreviewProject
+  project?: PreviewProject,
+  siblings: ComposerAttachment[] = []
 ): ChatResource | null {
   if (item.existingPath) return chatFileResource(item.existingPath, null, project);
   if (item.previewUrl && item.kind === "image") {
@@ -89,7 +119,19 @@ export function draftResource(
   }
   if (item.text !== undefined) {
     const html = /\.html?$/i.test(item.name) || item.mime.split(";")[0] === "text/html";
-    return { kind: html ? "html" : "text", title: item.name, content: item.text };
+    const files = html
+      ? new Map(
+          siblings
+            .filter((file) => file.id !== item.id && !file.existingPath)
+            .map((file) => [file.name, file.bytes])
+        )
+      : null;
+    return {
+      kind: html ? "html" : "text",
+      title: item.name,
+      content: item.text,
+      ...(files?.size ? { files } : {})
+    };
   }
   const kind = previewKindFor(item.name);
   return {

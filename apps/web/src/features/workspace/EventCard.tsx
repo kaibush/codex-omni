@@ -477,7 +477,7 @@ function UserAttachmentList({
           preview.open(
             src
               ? { kind: "image", title: item.name, src }
-              : chatFileResource(item.path, null, preview.project)
+              : chatFileResource(item.path, null, preview.project, attachments)
           );
         return (
           <figure key={`${item.kind}:${item.path}`} className="user-attachment">

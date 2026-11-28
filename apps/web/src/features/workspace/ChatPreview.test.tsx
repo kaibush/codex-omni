@@ -174,11 +174,7 @@ describe("chat previews", () => {
   });
 
   it("only fetches supported project HTML assets in the document directory, once per path", async () => {
-    const fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: new Headers(),
-      blob: async () => new Blob(["gif"], { type: "image/gif" })
-    });
+    const fetch = vi.fn().mockResolvedValue(new Response("gif"));
     vi.stubGlobal("fetch", fetch);
     const html = await previewHtml(
       '<img src="clip.gif"><img src="clip.gif"><img src="../other.gif"><img src="https://example.com/clip.gif"><script src="file.txt"></script>',
@@ -187,6 +183,6 @@ describe("chat previews", () => {
     );
     expect(fetch).toHaveBeenCalledTimes(1);
     expect((fetch.mock.calls[0]![0] as URL).searchParams.get("path")).toBe("demo/clip.gif");
-    expect(html.match(/data:image\/gif;base64,/g)).toHaveLength(2);
+    expect(html.render(false).match(/data:image\/gif;base64,/g)).toHaveLength(2);
   });
 });

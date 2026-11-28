@@ -365,7 +365,9 @@ export function WorkspaceComposer({
                       type="button"
                       className="flex min-w-0 items-center gap-1.5"
                       aria-label={`预览 ${item.name}`}
-                      onClick={() => preview.open(draftResource(item, preview.project))}
+                      onClick={() =>
+                        preview.open(draftResource(item, preview.project, attachments))
+                      }
                     >
                       {item.kind === "image" && item.previewUrl ? (
                         <img src={item.previewUrl} alt="" />

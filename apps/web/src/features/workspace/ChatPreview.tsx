@@ -31,7 +31,7 @@ import {
 } from "./chat-preview";
 import { fileName, type FilePreview } from "./file-workspace";
 import { parseProjectFileHref } from "./markdown-refs";
-import { previewHtml } from "./preview-html";
+import type { HtmlPreview } from "./preview-html";
 
 const PreviewContext = createContext<{
   project: PreviewProject | undefined;
@@ -161,21 +161,26 @@ export function ChatPreviewImage({
 
 function DocumentBody({ resource, source }: { resource: ChatResource; source: boolean }) {
   const [content, setContent] = useState(resource.content);
-  const [html, setHtml] = useState<string | null>(null);
+  const [html, setHtml] = useState<HtmlPreview | null>(null);
+  const [approved, setApproved] = useState<HtmlPreview | null>(null);
+  const [run, setRun] = useState(0);
+  const srcDoc = useMemo(() => html?.render(approved === html), [html, approved]);
   const [error, setError] = useState("");
   const marker = useRef<HTMLElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
     async function load() {
-      const text = resource.textUrl
-        ? (await api<FilePreview>(resource.textUrl, { signal })).content
-        : (resource.content ?? "");
+      const file = resource.textUrl ? await api<FilePreview>(resource.textUrl, { signal }) : null;
+      const text = file?.content ?? resource.content ?? "";
       if (signal.aborted) return;
       setContent(text);
       if (resource.kind === "html") {
-        const document = await previewHtml(text, resource.src, signal);
-        if (!signal.aborted) setHtml(document);
+        const { previewHtml } = await import("./preview-html");
+        const media = resource.src ? new URL(resource.src, location.origin) : null;
+        if (file?.path) media?.searchParams.set("path", file.path);
+        const prepared = await previewHtml(text, media?.href, signal, resource.files);
+        if (!signal.aborted) setHtml(prepared);
       }
     }
     void load().catch((reason: Error) => {
@@ -200,13 +205,45 @@ function DocumentBody({ resource, source }: { resource: ChatResource; source: bo
     );
   if (!source && html !== null) {
     return (
-      <iframe
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        title={resource.title}
-        className="size-full border-0 bg-white"
-        srcDoc={html}
-      />
+      <div className="flex size-full min-h-0 flex-col">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-b bg-background px-2 py-1.5">
+          {html.origins.length > 0 && (
+            <>
+              <span className="mr-auto min-w-0 break-all text-xs text-muted-foreground">
+                外部资源：{html.origins.map((origin) => new URL(origin).host).join("、")}
+              </span>
+              <Button
+                variant="outline"
+                aria-pressed={approved === html}
+                onClick={() => setApproved(approved === html ? null : html)}
+              >
+                {approved === html ? "停用外部资源" : "允许加载外部资源"}
+              </Button>
+            </>
+          )}
+          <Button variant="outline" onClick={() => setRun((previous) => previous + 1)}>
+            重新运行
+          </Button>
+        </div>
+        {html.missing.length > 0 && (
+          <p
+            role="status"
+            className="max-h-16 overflow-auto break-all px-3 py-1 text-xs text-muted-foreground"
+          >
+            未载入 {html.missing.length} 项资源：{html.missing.slice(0, 3).join("、")}
+            {html.missing.length > 3 ? "…" : ""}
+            。请确认本地依赖位于 HTML 所在目录或其子目录；浏览器里的文件需作为附件一起选择。
+          </p>
+        )}
+        <iframe
+          key={run}
+          sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
+          title={resource.title}
+          className="min-h-0 w-full flex-1 border-0 bg-white"
+          srcDoc={srcDoc}
+        />
+      </div>
     );
   }
   const lines = resource.line ? content.split("\n") : [];
