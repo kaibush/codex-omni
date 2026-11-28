@@ -57,6 +57,8 @@ import {
 import type { FileSearchMatch } from "@/features/workspace/file-workspace";
 import type { Project, Provider, QueuedTurn } from "@/types";
 import { QueuedTurnsPanel } from "./QueuedTurnsPanel";
+import { useChatPreview } from "./ChatPreview";
+import { draftResource } from "./chat-preview";
 import { RunSummary, RuntimeOptionsPanel, sandboxMeta, StatusChip } from "./WorkspaceStatus";
 import type { ConnectionState, RunState } from "./workspace-model";
 import type { WorkspaceSettings } from "./SettingsDialog";
@@ -198,6 +200,7 @@ export function WorkspaceComposer({
   const pendingApprovals = { length: pendingApprovalsCount };
   const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [enhanceBusy, setEnhanceBusy] = useState(false);
+  const preview = useChatPreview();
   const [enhanceOriginal, setEnhanceOriginal] = useState("");
   const [enhanceText, setEnhanceText] = useState("");
   const [enhanceError, setEnhanceError] = useState("");
@@ -358,16 +361,23 @@ export function WorkspaceComposer({
               <div className="composer-attachments">
                 {attachments.map((item) => (
                   <div key={item.id} className="composer-attachment">
-                    {item.kind === "image" && item.previewUrl ? (
-                      <img src={item.previewUrl} alt="" />
-                    ) : item.kind === "image" ? (
-                      <Image className="size-4" />
-                    ) : (
-                      <FileText className="size-4" />
-                    )}
-                    <span className="min-w-0 truncate" title={item.name}>
-                      {item.name}
-                    </span>
+                    <button
+                      type="button"
+                      className="flex min-w-0 items-center gap-1.5"
+                      aria-label={`预览 ${item.name}`}
+                      onClick={() => preview.open(draftResource(item, preview.project))}
+                    >
+                      {item.kind === "image" && item.previewUrl ? (
+                        <img src={item.previewUrl} alt="" />
+                      ) : item.kind === "image" ? (
+                        <Image className="size-4" />
+                      ) : (
+                        <FileText className="size-4" />
+                      )}
+                      <span className="min-w-0 truncate" title={item.name}>
+                        {item.name}
+                      </span>
+                    </button>
                     <span className="text-[10px] text-muted-foreground">
                       {item.existingPath ? "已保存" : formatBytes(item.size)}
                     </span>

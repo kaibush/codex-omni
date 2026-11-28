@@ -165,6 +165,7 @@ import { WorkspaceHome } from "@/features/workspace/WorkspaceHome";
 import { WorkspaceSidebar } from "@/features/workspace/WorkspaceSidebar";
 import { projectSessionsQuery } from "@/features/workspace/project-sessions";
 import { WorkspaceTimeline } from "@/features/workspace/WorkspaceTimeline";
+import { ChatPreviewProvider } from "@/features/workspace/ChatPreview";
 import { terminalKeepaliveClassName } from "@/features/workspace/terminal-chrome";
 import { messageRetryPayload } from "@/features/workspace/message-retry";
 import {
@@ -2941,152 +2942,152 @@ export function Workspace() {
             />
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               {workspaceView !== "terminal-chat" && (
-                <WorkspaceTimeline
-                  key={`${projectId}:${sessionId}`}
-                  workspaceView={workspaceView}
-                  messageHits={messageHits}
-                  highlightMessageId={highlightMessageId}
-                  jumpMessageHit={jumpMessageHit}
-                  setMessageHits={setMessageHits}
-                  events={events}
-                  setHighlightMessageId={setHighlightMessageId}
-                  chatScroll={chatScroll}
-                  stickToBottom={stickToBottom}
-                  followingLive={followingLive}
-                  hasDeferredLiveEvents={hasDeferredLiveEvents}
-                  pauseLiveTimeline={pauseLiveTimeline}
-                  resumeLiveTimeline={resumeLiveTimeline}
-                  loadOlderMessages={loadOlderMessages}
-                  hasOlderMessages={hasOlderMessages}
-                  historyLoading={historyLoading}
-                  historyExpanded={historyExpanded.current}
-                  timelineLockId={timelineLockId}
-                  onTimelineLockHandled={handleTimelineLockHandled}
-                  activeSession={activeSession ?? undefined}
-                  projectPath={activeProject?.realPath}
-                  projectDisplayPath={activeProject?.displayPath}
-                  sessionLoading={sessionLoading}
-                  detailError={detail.isError}
-                  refetchDetail={() => void detail.refetch()}
-                  workspaceSettings={workspaceSettings}
-                  providerNames={providerNames}
-                  forkSessionFrom={forkSessionFrom}
-                  setWorkspaceView={setWorkspaceView}
-                  setOpenFileRequest={requestOpenFile}
-                  setInput={setInput}
-                  setAttachments={setAttachments}
-                  inputRef={inputRef}
-                  submitMessage={submitMessage}
-                  retryMessage={retryMessage}
-                  onRewind={(item) => setRewindMessageId(item.messageId ?? item.id)}
-                  quoteToInput={quoteToInput}
-                  copyMessageLink={copyMessageLink}
-                  setCreateFile={setCreateFile}
-                  setCreateFilePath={setCreateFilePath}
-                  socket={socket}
-                  sessionId={sessionId}
-                  setSendNotice={setSendNotice}
-                  setEvents={setEvents}
-                  beginNewSession={beginNewSession}
-                  startSessionPending={startSession.isPending}
-                  recentSessions={projectSessions
-                    .filter((session) => !session.archivedAt)
-                    .slice(0, 12)}
-                  sessionsPending={sessions.isPending}
-                  onOpenSession={(id) =>
-                    openWorkspace(
-                      projectId,
-                      id,
-                      false,
-                      projectSessions.find((session) => session.id === id)?.kind === "terminal-chat"
-                        ? "terminal-chat"
-                        : "chat"
-                    )
-                  }
-                  recentOpen={recentOpen}
-                  onCloseRecent={() => setRecentOpen(false)}
-                  onShowRecent={() => {
-                    setRecentOpen(true);
-                    if (isMobile) setSidebar(false);
-                  }}
-                  runState={runState}
-                  connection={connection}
-                  sendNotice={sendNotice}
-                  saveWorkspaceSettings={saveWorkspaceSettings}
-                  loadFullMessage={loadFullMessage}
-                  threadGoal={detail.data?.threadGoal ?? null}
-                  clearingGoal={clearingGoal}
-                  onClearThreadGoal={() => void clearThreadGoal()}
-                  outlineItems={mergeSessionOutline(outlineQuery.data?.items ?? [], events)}
-                  onJumpOutline={(id) => void jumpToOutlineMessage(id)}
-                />
-              )}
-              {workspaceView !== "terminal-chat" && (
-                <WorkspaceComposer
-                  workspaceView={workspaceView}
-                  activeSession={activeSession ?? undefined}
-                  dragActive={dragActive}
-                  setDragActive={setDragActive}
-                  addAttachments={addAttachments}
-                  queuedTurns={queuedTurns}
-                  runState={runState}
-                  editingQueueId={editingQueueId}
-                  queueDraft={queueDraft}
-                  setQueueDraft={setQueueDraft}
-                  setEditingQueueId={setEditingQueueId}
-                  updateQueuedTurn={updateQueuedTurn}
-                  removeQueuedTurn={removeQueuedTurn}
-                  moveQueuedTurn={moveQueuedTurn}
-                  insertQueuedTurn={insertQueuedTurn}
-                  insertingQueueId={insertingQueueId}
-                  selectedProvider={selectedProvider ?? undefined}
-                  mentionRange={mentionRange}
-                  slashOpen={slashOpen}
-                  extraSlashCommands={extraSlashCommands}
-                  input={input}
-                  setInput={setInput}
-                  inputRef={inputRef}
-                  mentionItems={mentionItems}
-                  setMentionRange={setMentionRange}
-                  setMentionItems={setMentionItems}
-                  setSlashOpen={setSlashOpen}
-                  attachments={attachments}
-                  setAttachments={setAttachments}
-                  attachError={attachError}
-                  preparingAttachments={preparingAttachments}
-                  attachInputRef={attachInputRef}
-                  projectId={projectId}
-                  providerId={providerId}
-                  setProviderId={chooseProvider}
-                  clientType={composerClient}
-                  onClientChange={chooseClient}
-                  providers={providers.data?.filter(
-                    (entry) => clientType(entry.kind) === composerClient
-                  )}
-                  connection={connection}
-                  reconnectAttempt={reconnectAttempts.current}
-                  runtimeClientHome={
-                    activeSession?.clientType === "claude-code"
-                      ? runtime.data?.defaultClaudeHome
-                      : runtime.data?.defaultCodexHome
-                  }
-                  workspaceSettings={workspaceSettings}
-                  approvalNotice={approvalNotice}
-                  pendingApprovalsCount={pendingApprovals.length}
-                  contextEstimate={contextEstimate}
-                  runtimeOptionsOpen={runtimeOptionsOpen}
-                  setRuntimeOptionsOpen={setRuntimeOptionsOpen}
-                  saveWorkspaceSettings={saveWorkspaceSettings}
-                  model={model}
-                  setModel={chooseModel}
-                  availableModels={availableModels}
-                  cancelTurn={cancelTurn}
-                  blockReason={blockReason}
-                  send={send}
-                  sendNotice={sendNotice}
-                  activeProject={activeProject}
-                  enhanceNonce={enhanceNonce}
-                />
+                <ChatPreviewProvider key={`${projectId}:${sessionId}`} project={activeProject}>
+                  <WorkspaceTimeline
+                    workspaceView={workspaceView}
+                    messageHits={messageHits}
+                    highlightMessageId={highlightMessageId}
+                    jumpMessageHit={jumpMessageHit}
+                    setMessageHits={setMessageHits}
+                    events={events}
+                    setHighlightMessageId={setHighlightMessageId}
+                    chatScroll={chatScroll}
+                    stickToBottom={stickToBottom}
+                    followingLive={followingLive}
+                    hasDeferredLiveEvents={hasDeferredLiveEvents}
+                    pauseLiveTimeline={pauseLiveTimeline}
+                    resumeLiveTimeline={resumeLiveTimeline}
+                    loadOlderMessages={loadOlderMessages}
+                    hasOlderMessages={hasOlderMessages}
+                    historyLoading={historyLoading}
+                    historyExpanded={historyExpanded.current}
+                    timelineLockId={timelineLockId}
+                    onTimelineLockHandled={handleTimelineLockHandled}
+                    activeSession={activeSession ?? undefined}
+                    projectPath={activeProject?.realPath}
+                    projectDisplayPath={activeProject?.displayPath}
+                    sessionLoading={sessionLoading}
+                    detailError={detail.isError}
+                    refetchDetail={() => void detail.refetch()}
+                    workspaceSettings={workspaceSettings}
+                    providerNames={providerNames}
+                    forkSessionFrom={forkSessionFrom}
+                    setWorkspaceView={setWorkspaceView}
+                    setOpenFileRequest={requestOpenFile}
+                    setInput={setInput}
+                    setAttachments={setAttachments}
+                    inputRef={inputRef}
+                    submitMessage={submitMessage}
+                    retryMessage={retryMessage}
+                    onRewind={(item) => setRewindMessageId(item.messageId ?? item.id)}
+                    quoteToInput={quoteToInput}
+                    copyMessageLink={copyMessageLink}
+                    setCreateFile={setCreateFile}
+                    setCreateFilePath={setCreateFilePath}
+                    socket={socket}
+                    sessionId={sessionId}
+                    setSendNotice={setSendNotice}
+                    setEvents={setEvents}
+                    beginNewSession={beginNewSession}
+                    startSessionPending={startSession.isPending}
+                    recentSessions={projectSessions
+                      .filter((session) => !session.archivedAt)
+                      .slice(0, 12)}
+                    sessionsPending={sessions.isPending}
+                    onOpenSession={(id) =>
+                      openWorkspace(
+                        projectId,
+                        id,
+                        false,
+                        projectSessions.find((session) => session.id === id)?.kind ===
+                          "terminal-chat"
+                          ? "terminal-chat"
+                          : "chat"
+                      )
+                    }
+                    recentOpen={recentOpen}
+                    onCloseRecent={() => setRecentOpen(false)}
+                    onShowRecent={() => {
+                      setRecentOpen(true);
+                      if (isMobile) setSidebar(false);
+                    }}
+                    runState={runState}
+                    connection={connection}
+                    sendNotice={sendNotice}
+                    saveWorkspaceSettings={saveWorkspaceSettings}
+                    loadFullMessage={loadFullMessage}
+                    threadGoal={detail.data?.threadGoal ?? null}
+                    clearingGoal={clearingGoal}
+                    onClearThreadGoal={() => void clearThreadGoal()}
+                    outlineItems={mergeSessionOutline(outlineQuery.data?.items ?? [], events)}
+                    onJumpOutline={(id) => void jumpToOutlineMessage(id)}
+                  />
+                  <WorkspaceComposer
+                    workspaceView={workspaceView}
+                    activeSession={activeSession ?? undefined}
+                    dragActive={dragActive}
+                    setDragActive={setDragActive}
+                    addAttachments={addAttachments}
+                    queuedTurns={queuedTurns}
+                    runState={runState}
+                    editingQueueId={editingQueueId}
+                    queueDraft={queueDraft}
+                    setQueueDraft={setQueueDraft}
+                    setEditingQueueId={setEditingQueueId}
+                    updateQueuedTurn={updateQueuedTurn}
+                    removeQueuedTurn={removeQueuedTurn}
+                    moveQueuedTurn={moveQueuedTurn}
+                    insertQueuedTurn={insertQueuedTurn}
+                    insertingQueueId={insertingQueueId}
+                    selectedProvider={selectedProvider ?? undefined}
+                    mentionRange={mentionRange}
+                    slashOpen={slashOpen}
+                    extraSlashCommands={extraSlashCommands}
+                    input={input}
+                    setInput={setInput}
+                    inputRef={inputRef}
+                    mentionItems={mentionItems}
+                    setMentionRange={setMentionRange}
+                    setMentionItems={setMentionItems}
+                    setSlashOpen={setSlashOpen}
+                    attachments={attachments}
+                    setAttachments={setAttachments}
+                    attachError={attachError}
+                    preparingAttachments={preparingAttachments}
+                    attachInputRef={attachInputRef}
+                    projectId={projectId}
+                    providerId={providerId}
+                    setProviderId={chooseProvider}
+                    clientType={composerClient}
+                    onClientChange={chooseClient}
+                    providers={providers.data?.filter(
+                      (entry) => clientType(entry.kind) === composerClient
+                    )}
+                    connection={connection}
+                    reconnectAttempt={reconnectAttempts.current}
+                    runtimeClientHome={
+                      activeSession?.clientType === "claude-code"
+                        ? runtime.data?.defaultClaudeHome
+                        : runtime.data?.defaultCodexHome
+                    }
+                    workspaceSettings={workspaceSettings}
+                    approvalNotice={approvalNotice}
+                    pendingApprovalsCount={pendingApprovals.length}
+                    contextEstimate={contextEstimate}
+                    runtimeOptionsOpen={runtimeOptionsOpen}
+                    setRuntimeOptionsOpen={setRuntimeOptionsOpen}
+                    saveWorkspaceSettings={saveWorkspaceSettings}
+                    model={model}
+                    setModel={chooseModel}
+                    availableModels={availableModels}
+                    cancelTurn={cancelTurn}
+                    blockReason={blockReason}
+                    send={send}
+                    sendNotice={sendNotice}
+                    activeProject={activeProject}
+                    enhanceNonce={enhanceNonce}
+                  />
+                </ChatPreviewProvider>
               )}
               {activeProject && filesVisited ? (
                 <div

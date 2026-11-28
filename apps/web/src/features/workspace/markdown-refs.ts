@@ -1,7 +1,6 @@
 import { parseFileLocation } from "./file-workspace";
 
-export const FILE_PATH_PATTERN =
-  String.raw`(?:\./)?(?:/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,9}|[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|scss|html|vue|py|go|rs|java|kt|rb|php|yml|yaml|toml|xml|svg|png|jpg|jpeg|gif|webp|pdf|sh|bash|zsh|sql|txt|lock|map))`;
+export const FILE_PATH_PATTERN = String.raw`(?:\./)?(?:/?(?:[\w.-]+/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,9}|[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|scss|html|vue|py|go|rs|java|kt|rb|php|yml|yaml|toml|xml|svg|png|jpg|jpeg|gif|webp|pdf|sh|bash|zsh|sql|txt|lock|map))`;
 
 export const FILE_REF_PATTERN = new RegExp(
   String.raw`(^|[^A-Za-z0-9_./%~-])@?(${FILE_PATH_PATTERN})(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?)?\b`,
@@ -9,10 +8,13 @@ export const FILE_REF_PATTERN = new RegExp(
 );
 
 const FENCE_PATTERN = /```[\s\S]*?```/g;
-const MARKDOWN_LINK_PATTERN = /\[[^\]]*]\([^)]*\)/g;
+const MARKDOWN_LINK_PATTERN =
+  /(?:\[\s*!\[[^\]]*]\([^)]*\)\s*]|\[[^\]]*])\((?:[^()]|\([^()]*\))*\)/g;
 const INLINE_CODE_PATTERN = /(`+)([^`]*?)\1/g;
-const SKIP_HREF_PATTERN = /^(?:https?:|mailto:|javascript:|#)/i;
-const INLINE_CODE_FILE_PATTERN = new RegExp("`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+)(?::\\d+)?|#L(\\d+)(?:C\\d+)?)?`", "g");
+const INLINE_CODE_FILE_PATTERN = new RegExp(
+  "`@?(" + FILE_PATH_PATTERN + ")(?::(\\d+)(?::\\d+)?|#L(\\d+)(?:C\\d+)?)?`",
+  "g"
+);
 
 const LANGUAGE_EXT: Record<string, string> = {
   typescript: "ts",
@@ -127,9 +129,17 @@ export function linkFileRefs(text: string) {
     return token;
   });
   working = protectSegments(working, MARKDOWN_LINK_PATTERN, protectedBlocks);
+  working = protectSegments(working, /\b(?:https?:\/\/|www\.)[^\s<>`]+/gi, protectedBlocks);
   working = working.replace(
     FILE_REF_PATTERN,
-    (match, prefix: string, path: string, colonLine: string | undefined, hashLine: string | undefined, offset: number) => {
+    (
+      match,
+      prefix: string,
+      path: string,
+      colonLine: string | undefined,
+      hashLine: string | undefined,
+      offset: number
+    ) => {
       const start = offset + prefix.length;
       const before = working.slice(Math.max(0, start - 12), start);
       if (/[a-z]+:\/\/$/i.test(before)) return match;
@@ -145,7 +155,12 @@ export function parseCodexFileHref(href: string | undefined) {
   const body = href.slice("codex-file:".length);
   const [rawPath, query = ""] = body.split("?");
   if (!rawPath) return null;
-  const path = sanitizeFileRef(decodeURIComponent(rawPath));
+  let path: string;
+  try {
+    path = sanitizeFileRef(decodeURIComponent(rawPath));
+  } catch {
+    return null;
+  }
   if (!path) return null;
   const line = Number(new URLSearchParams(query).get("line"));
   return {
@@ -158,24 +173,25 @@ export function parseProjectFileHref(href: string | undefined) {
   if (!href) return null;
   const trimmed = href.trim();
   if (!trimmed) return null;
-  const fromCodex = parseCodexFileHref(trimmed);
-  if (fromCodex) return fromCodex;
-  if (SKIP_HREF_PATTERN.test(trimmed)) return null;
-
-  const located = parseFileLocation(trimmed);
-  const raw = located.path.replace(/\\/g, "/");
-  if (!raw) return null;
-  if (!looksLikeProjectFilePath(raw) && !looksLikeRelativeOpenPath(raw) && !raw.startsWith("/")) return null;
-  return {
-    path: raw,
-    line: located.line
-  };
-}
-
-function looksLikeRelativeOpenPath(path: string) {
-  if (!path || path.includes("://") || path.startsWith("#") || /\s/.test(path)) return false;
-  if (looksLikeHostedPath(path)) return false;
-  return /^(?:\.\/)?\/?(?:[\w.-]+\/)+[\w.-]+$/.test(path);
+  if (trimmed.startsWith("codex-file:")) return parseCodexFileHref(trimmed);
+  if (/^(?:#|\/\/)/.test(trimmed)) return null;
+  const local = trimmed.replace(/^sandbox:(?=\/)/i, "");
+  if (
+    /^[a-z][\w+.-]*:/i.test(local) &&
+    !/^(?:file:\/\/|[a-z]:[\\/])/i.test(local) &&
+    !/^[\w.-]+\.[\w]+:\d+(?::\d+)?$/.test(local)
+  )
+    return null;
+  const [pathname = ""] = local.split(/[?#]/, 1);
+  const lineRef = local.match(/#L\d+(?:C\d+)?$/i)?.[0] ?? "";
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname) + lineRef;
+  } catch {
+    return null;
+  }
+  const located = parseFileLocation(decoded);
+  return located.path ? { path: located.path, line: located.line } : null;
 }
 
 export function snippetFileName(language: string) {

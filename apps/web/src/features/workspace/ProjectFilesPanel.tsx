@@ -86,6 +86,10 @@ import {
 import {
   ancestorPaths,
   compactSelectedPaths,
+  fileDownloadUrl,
+  fileMetaUrl,
+  fileTextUrl,
+  mediaUrl,
   fileEntryDetailLine,
   fileEntryRowMeta,
   fileEntryTooltip,
@@ -290,34 +294,6 @@ function SymbolTree({
 
 function isExternalEditorPath(path: string) {
   return isFilesystemAbsolutePath(path);
-}
-
-function fileMetaUrl(projectId: string, path: string) {
-  if (isExternalEditorPath(path)) {
-    return `/api/filesystem/file/meta?path=${encodeURIComponent(path)}`;
-  }
-  return `/api/projects/${projectId}/file/meta?path=${encodeURIComponent(path)}`;
-}
-
-function fileTextUrl(projectId: string, path: string) {
-  if (isExternalEditorPath(path)) {
-    return `/api/filesystem/file?path=${encodeURIComponent(path)}`;
-  }
-  return `/api/projects/${projectId}/file?path=${encodeURIComponent(path)}`;
-}
-
-function mediaUrl(projectId: string, path: string) {
-  if (isExternalEditorPath(path)) {
-    return `/api/filesystem/file/download?path=${encodeURIComponent(path)}&inline=1`;
-  }
-  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}&inline=1`;
-}
-
-function fileDownloadUrl(projectId: string, path: string) {
-  if (isExternalEditorPath(path)) {
-    return `/api/filesystem/file/download?path=${encodeURIComponent(path)}`;
-  }
-  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}`;
 }
 
 function FilePreviewPane({

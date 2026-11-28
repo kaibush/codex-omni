@@ -52,7 +52,7 @@ export function BoundedImage({
   maxHeight?: number | undefined;
   onError?: (() => void) | undefined;
 }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLSpanElement | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const cacheKey = previewFrameCacheKey(src, maxWidth, maxHeight);
@@ -118,7 +118,7 @@ export function BoundedImage({
   }, [cacheKey, maxHeight, maxWidth, src, visible]);
 
   return (
-    <div ref={hostRef} className="bounded-image-host" data-image-src={src}>
+    <span ref={hostRef} className="bounded-image-host inline-block max-w-full" data-image-src={src}>
       {frame ? (
         <img
           src={frame.src}
@@ -129,8 +129,8 @@ export function BoundedImage({
           decoding="async"
         />
       ) : (
-        <div className={className} aria-hidden />
+        <span className={className} style={{ minWidth: "2rem", minHeight: "2rem" }} aria-hidden />
       )}
-    </div>
+    </span>
   );
 }

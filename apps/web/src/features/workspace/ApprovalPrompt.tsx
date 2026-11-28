@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ShieldQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ChatPreviewImage, ChatPreviewLink } from "./ChatPreview";
 import type { ApprovalResponse } from "@codex-omni/protocol";
 import type { TimelineItem } from "@/types";
 
@@ -184,7 +185,10 @@ export function ApprovalPrompt({
         </div>
       ) : isPlan ? (
         <div className="prose prose-sm max-h-96 max-w-none overflow-auto dark:prose-invert">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{ a: ChatPreviewLink, img: ChatPreviewImage }}
+          >
             {String(data.plan ?? input.plan ?? "请检查上方计划。批准后，Claude Code 将继续执行。")}
           </ReactMarkdown>
         </div>
@@ -192,14 +196,9 @@ export function ApprovalPrompt({
         <div className="space-y-3">
           <p className="text-sm">{String(input.message ?? data.command ?? "")}</p>
           {url ? (
-            <a
-              className="text-sm text-primary underline"
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              打开认证页面
-            </a>
+            <ChatPreviewLink className="text-sm text-primary underline" href={url}>
+              预览认证页面
+            </ChatPreviewLink>
           ) : null}
           {Object.entries(properties).map(([key, field]) => (
             <label key={key} className="field-label">

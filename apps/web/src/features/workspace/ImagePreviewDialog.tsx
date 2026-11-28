@@ -37,11 +37,13 @@ const FIT_TRANSFORM: ImagePreviewTransform = { scale: 1, x: 0, y: 0 };
 export function ImagePreviewDialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   src,
   alt
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   src: string;
   alt: string;
 }) {
@@ -52,8 +54,7 @@ export function ImagePreviewDialog({
         <DialogPrimitive.Content
           className="fixed inset-0 z-50 outline-none"
           style={{ touchAction: "none" }}
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={onCloseAutoFocus}
         >
           <DialogTitle className="sr-only">{alt || "图片预览"}</DialogTitle>
           <DialogDescription className="sr-only">
@@ -269,6 +270,7 @@ function ImagePreviewStage({
         {status === "error" ? <p className="text-sm text-white/75">图片无法显示</p> : null}
         <img
           src={src}
+          referrerPolicy="no-referrer"
           alt={alt}
           draggable={false}
           decoding="async"

@@ -71,18 +71,14 @@ import {
 } from "@/lib/tool-event";
 import type { TimelineItem } from "@/types";
 import { BoundedImage } from "./BoundedImage";
-import { ImagePreviewDialog } from "./ImagePreviewDialog";
+import { ChatPreviewImage, ChatPreviewLink, useChatPreview } from "./ChatPreview";
+import { chatFileResource } from "./chat-preview";
 import { GitDiffView } from "./GitDiffView";
 import { MermaidBlock } from "./MermaidBlock";
 import { VirtualLog } from "./VirtualLog";
 import { fileChangeEntries } from "./file-change";
-import { resolveOpenableFilePath } from "./file-workspace";
-import {
-  downloadTextFile,
-  linkFileRefs,
-  parseProjectFileHref,
-  snippetFileName
-} from "./markdown-refs";
+import { mediaUrl, resolveOpenableFilePath } from "./file-workspace";
+import { downloadTextFile, linkFileRefs, snippetFileName } from "./markdown-refs";
 import {
   timelineAttachments,
   visibleUserMessageText,
@@ -210,6 +206,7 @@ function MarkdownCodeBlock({
 }: ComponentProps<"pre"> &
   ExtraProps & { onCreateFile?: ((content: string, language: string) => void) | undefined }) {
   const { resolvedTheme } = useTheme();
+  const preview = useChatPreview();
   const [expanded, setExpanded] = useState(false);
   const code = (hastNodeText(node) || reactNodeText(children)).replace(/\n$/, "");
   const language = codeLanguage(children);
@@ -228,7 +225,8 @@ function MarkdownCodeBlock({
       </div>
     );
   }
-  if (compactSingleLine) {
+  const html = /^html?$/i.test(language);
+  if (compactSingleLine && !html) {
     return (
       <div className="markdown-code-inline-block">
         <code>{code}</code>
@@ -242,6 +240,15 @@ function MarkdownCodeBlock({
         <span className="markdown-code-language">{language}</span>
         <span className="flex items-center gap-1">
           <span className="text-[10px] text-muted-foreground">{lines.length} 行</span>
+          {html && (
+            <button
+              type="button"
+              className="copy-button copy-button-code"
+              onClick={() => preview.open({ kind: "html", title: "snippet.html", content: code })}
+            >
+              预览 HTML
+            </button>
+          )}
           {lines.length > 24 ? (
             <button
               type="button"
@@ -303,39 +310,19 @@ function hasMarkdownMath(text: string) {
 const MarkdownContent = memo(function MarkdownContent({
   text,
   streaming = false,
-  onOpenFile,
   onCreateFile
 }: {
   text: string;
   streaming?: boolean | undefined;
-  onOpenFile?: ((path: string, line: number | null) => void) | undefined;
   onCreateFile?: ((content: string, language: string) => void) | undefined;
 }) {
   const components = useMemo<Components>(
     () => ({
       pre: (props) => <MarkdownCodeBlock {...props} onCreateFile={onCreateFile} />,
-      img: ({ src, alt }) =>
-        src ? <BoundedImage src={src} alt={alt ?? ""} className="notice-image" /> : null,
-      a: ({ href, children }) => {
-        const file = parseProjectFileHref(href);
-        if (file) {
-          if (!onOpenFile) {
-            return <span className="file-ref-link">{children}</span>;
-          }
-          return (
-            <button
-              type="button"
-              className="file-ref-link"
-              onClick={() => onOpenFile(file.path, file.line)}
-            >
-              {children}
-            </button>
-          );
-        }
-        return <a href={href}>{children}</a>;
-      }
+      img: ChatPreviewImage,
+      a: ChatPreviewLink
     }),
-    [onCreateFile, onOpenFile]
+    [onCreateFile]
   );
   if (streaming) {
     const source = text.length > 16_000 ? text.slice(text.length - 16_000) : text;
@@ -454,13 +441,7 @@ function projectImageSrc(
   if (!path) return "";
   const opened = resolveOpenableFilePath(path, projectPath, projectDisplayPath);
   if (!opened) return "";
-  if (!opened.external && projectId) {
-    return `/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(opened.path)}&inline=1`;
-  }
-  if (opened.external) {
-    return `/api/filesystem/file/download?path=${encodeURIComponent(opened.path)}&inline=1`;
-  }
-  return "";
+  return opened.external || projectId ? mediaUrl(projectId ?? "", opened.path) : "";
 }
 
 function openableFilePath(
@@ -475,15 +456,14 @@ function UserAttachmentList({
   attachments,
   projectId,
   projectPath,
-  projectDisplayPath,
-  onOpenFile
+  projectDisplayPath
 }: {
   attachments: QueuedAttachmentMeta[];
   projectId?: string | undefined;
   projectPath?: string | undefined;
   projectDisplayPath?: string | undefined;
-  onOpenFile?: ((path: string, line: number | null) => void) | undefined;
 }) {
+  const preview = useChatPreview();
   if (!attachments.length) return null;
   return (
     <div className="user-attachments">
@@ -493,23 +473,28 @@ function UserAttachmentList({
           item.kind === "image"
             ? projectImageSrc(projectId, item.path, projectPath, projectDisplayPath)
             : "";
+        const open = () =>
+          preview.open(
+            src
+              ? { kind: "image", title: item.name, src }
+              : chatFileResource(item.path, null, preview.project)
+          );
         return (
           <figure key={`${item.kind}:${item.path}`} className="user-attachment">
-            {src ? <BoundedImage src={src} alt={item.name} className="notice-image" /> : null}
+            {src ? (
+              <button
+                type="button"
+                className="max-w-full cursor-zoom-in"
+                aria-label={`预览 ${item.name}`}
+                onClick={open}
+              >
+                <BoundedImage src={src} alt={item.name} className="notice-image" />
+              </button>
+            ) : null}
             <figcaption>
-              {onOpenFile ? (
-                <button
-                  type="button"
-                  className="user-attachment-path"
-                  onClick={() => {
-                    if (item.path.trim()) onOpenFile(item.path, null);
-                  }}
-                >
-                  {relative}
-                </button>
-              ) : (
-                <span className="user-attachment-path">{relative}</span>
-              )}
+              <button type="button" className="user-attachment-path" onClick={open}>
+                {relative}
+              </button>
             </figcaption>
           </figure>
         );
@@ -794,7 +779,7 @@ function EventCardComponent({
 }: EventCardProps) {
   const client = item.data?.clientType ?? clientType;
   const notice = classifyRuntimeNotice(item.data, item.text, item.kind);
-  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+  const preview = useChatPreview();
   const [open, setOpen] = useState(() => {
     if (!defaultOpen) return false;
     if (item.kind === "reasoning") return defaultOpen;
@@ -922,7 +907,6 @@ function EventCardComponent({
             <MarkdownContent
               text={userVisibleText}
               streaming={item.streaming}
-              onOpenFile={onOpenFile}
               onCreateFile={onCreateFile}
             />
           ) : null}
@@ -931,7 +915,6 @@ function EventCardComponent({
             projectId={projectId}
             projectPath={projectPath}
             projectDisplayPath={projectDisplayPath}
-            onOpenFile={onOpenFile}
           />
         </div>
         <TruncatedNotice item={item} onLoadFull={onLoadFull} />
@@ -998,7 +981,6 @@ function EventCardComponent({
           <MarkdownContent
             text={item.text ?? ""}
             streaming={item.streaming}
-            onOpenFile={onOpenFile}
             onCreateFile={onCreateFile}
           />
         </div>
@@ -1126,12 +1108,9 @@ function EventCardComponent({
             projectDisplayPath={projectDisplayPath}
             onOpenFile={onOpenFile}
             onPreview={() => {
-              if (src) setImagePreviewOpen(true);
+              if (src) preview.open({ kind: "image", title: name, src });
             }}
           />
-        ) : null}
-        {imagePreviewOpen && src ? (
-          <ImagePreviewDialog open src={src} alt={name} onOpenChange={setImagePreviewOpen} />
         ) : null}
       </article>
     );
@@ -1373,11 +1352,22 @@ function EventCardComponent({
                     key={entry.path}
                     diff={entry.diff}
                     path={entry.path}
-                    onOpenFile={onOpenFile}
+                    onOpenFile={(path, line) =>
+                      preview.open(chatFileResource(path, line, preview.project))
+                    }
                   />
                 ) : (
                   <p key={entry.path} className="font-mono text-xs text-muted-foreground">
-                    {entry.kind} {entry.path}
+                    {entry.kind}{" "}
+                    <button
+                      type="button"
+                      className="file-ref-link"
+                      onClick={() =>
+                        preview.open(chatFileResource(entry.path, null, preview.project))
+                      }
+                    >
+                      {entry.path}
+                    </button>
                   </p>
                 )
               )

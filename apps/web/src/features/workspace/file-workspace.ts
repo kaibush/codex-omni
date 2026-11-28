@@ -231,6 +231,22 @@ export function isFilesystemAbsolutePath(path: string) {
   return raw.startsWith("/") || /^[A-Za-z]:\//.test(raw);
 }
 
+function fileEndpoint(projectId: string, path: string, action: "text" | "meta" | "download") {
+  const external = isFilesystemAbsolutePath(path);
+  const base = external ? "/api/filesystem" : `/api/projects/${encodeURIComponent(projectId)}`;
+  const route = action === "download" && !external ? "files" : "file";
+  return `${base}/${route}${action === "text" ? "" : `/${action}`}?path=${encodeURIComponent(path)}`;
+}
+
+export const fileTextUrl = (projectId: string, path: string) =>
+  fileEndpoint(projectId, path, "text");
+export const fileMetaUrl = (projectId: string, path: string) =>
+  fileEndpoint(projectId, path, "meta");
+export const fileDownloadUrl = (projectId: string, path: string) =>
+  fileEndpoint(projectId, path, "download");
+export const mediaUrl = (projectId: string, path: string) =>
+  `${fileDownloadUrl(projectId, path)}&inline=1`;
+
 function stripGitDiffPrefix(raw: string) {
   return raw.replace(/^(?:a|b)\//, "");
 }
@@ -694,7 +710,9 @@ export function unifiedDiff(before: string, after: string, filePath: string) {
 
 export function previewKindFor(path: string, text = false): PreviewKind {
   const extension = path.split(".").pop()?.toLowerCase() ?? "";
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "ico"].includes(extension)) {
+  if (
+    ["png", "apng", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "ico"].includes(extension)
+  ) {
     return "image";
   }
   if (extension === "pdf") return "pdf";
